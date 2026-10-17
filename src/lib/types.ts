@@ -32,6 +32,7 @@ export type Settings = {
   fontSize: number;
   theme: 'paper' | 'night';
   scope: 'chapter' | 'read' | 'book';
+  readingMode: 'original' | 'bilingual' | 'translation';
 };
 export const languages = [
   ['zh-CN', '简体中文'],
@@ -53,5 +54,6 @@ export const defaults: Settings = {
   fontSize: 19,
   theme: 'paper',
   scope: 'chapter',
+  readingMode: 'bilingual',
 };
 export const languageName = (code: string) => languages.find(([id]) => id === code)?.[1] ?? code;

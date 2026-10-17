@@ -8,12 +8,22 @@ type Request = {
   question?: string;
   target?: string;
   selection?: string;
+  readingPassage?: string;
   glossary?: string;
   scope?: string;
   sources?: Source[];
   history?: Message[];
   bookLanguage?: string;
 };
+export class AIRequestError extends Error {
+  constructor(
+    message: string,
+    public retryable = false,
+  ) {
+    super(message);
+    this.name = 'AIRequestError';
+  }
+}
 async function request(settings: Settings, body: Request, signal: AbortSignal) {
   const response = await fetch('/api/ai', {
     method: 'POST',
@@ -29,7 +39,10 @@ async function request(settings: Settings, body: Request, signal: AbortSignal) {
   });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
-    throw new Error(data.error || `请求失败（${response.status}）`);
+    throw new AIRequestError(
+      data.error || `请求失败（${response.status}）`,
+      response.status === 408 || response.status === 429 || response.status >= 500,
+    );
   }
   return response;
 }
@@ -64,11 +77,18 @@ export async function streamAI(
     } catch {
       throw new Error('模型返回了无效的流式数据。');
     }
-    if (chunk.error) throw new Error(chunk.error.message || '模型返回错误。');
+    if (chunk.error) {
+      const code = Number(chunk.error.code);
+      throw new AIRequestError(
+        chunk.error.message || '模型返回错误。',
+        chunk.error.retryable ?? (code === 408 || code === 429 || code >= 500),
+      );
+    }
     const choice = chunk.choices?.[0];
     if (choice?.finish_reason === 'length')
-      throw new Error('模型输出达到长度上限，内容未完整生成。');
-    if (choice?.finish_reason === 'content_filter') throw new Error('模型服务过滤了本次输出。');
+      throw new AIRequestError('模型输出达到长度上限，内容未完整生成。');
+    if (choice?.finish_reason === 'content_filter')
+      throw new AIRequestError('模型服务过滤了本次输出。');
     const content = choice?.delta?.content;
     if (typeof content === 'string') {
       output += content;

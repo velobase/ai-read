@@ -35,6 +35,7 @@ import { buildContext, expandQuestion, streamAI, translationKey } from './lib/ai
 import { importBook } from './lib/import';
 import { sampleBook, sampleTranslations } from './lib/sample';
 import { loadSettings, saveSettings, storage } from './lib/storage';
+import { useAutomaticTranslation } from './lib/useAutomaticTranslation';
 import {
   languageName,
   type Book,
@@ -67,19 +68,14 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [companionOpen, setCompanionOpen] = useState(() => window.innerWidth > 720);
   const [panel, setPanel] = useState<'chat' | 'notes'>('chat');
-  const [view, setView] = useState<'original' | 'bilingual' | 'translation'>('bilingual');
   const [selected, setSelected] = useState<{ paragraph: Paragraph; text: string } | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
   const [question, setQuestion] = useState('');
   const [search, setSearch] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [importing, setImporting] = useState(false);
-  const [busy, setBusy] = useState<'chat' | 'translation' | null>(null);
+  const [busy, setBusy] = useState<'chat' | null>(null);
   const [busyText, setBusyText] = useState('');
-  const [streamingTranslation, setStreamingTranslation] = useState<{
-    id: string;
-    text: string;
-  } | null>(null);
   const [notice, setNotice] = useState('');
   const [jump, setJump] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -91,7 +87,26 @@ export default function App() {
   const restoring = useRef(false);
   const settingsEdited = useRef(false);
   const chapter = book.chapters[position.chapter] || book.chapters[0];
+  const view = settings.readingMode;
+  const readingIndex = Math.max(
+    0,
+    chapter.paragraphs.findIndex((p) => p.id === position.paragraph),
+  );
+  const readingParagraph =
+    chapter.paragraphs.slice(readingIndex).find((p) => p.kind !== 'heading') ||
+    chapter.paragraphs[readingIndex];
   const aiReady = Boolean(settings.baseUrl && settings.model);
+  const automaticTranslation = useAutomaticTranslation({
+    book,
+    chapter,
+    settings,
+    glossary,
+    readerRef,
+    enabled: ready && !switching && !jump && aiReady && view !== 'original',
+    getTranslation,
+    onComplete: (key, value) => setTranslations((previous) => ({ ...previous, [key]: value })),
+  });
+  const chapterTranslationsReady = chapter.paragraphs.every((p) => Boolean(getTranslation(p)));
   const allParagraphs = book.chapters.flatMap((c) => c.paragraphs);
   const progress = Math.round(
     ((Math.max(
@@ -112,7 +127,6 @@ export default function App() {
     operation.current = null;
     setBusy(null);
     setBusyText('');
-    setStreamingTranslation(null);
     setSwitching(true);
     if (scrollTimer.current) clearTimeout(scrollTimer.current);
     try {
@@ -145,7 +159,6 @@ export default function App() {
       setSearch('');
       setQuestion('');
       setBusy(null);
-      setStreamingTranslation(null);
       setJump(safePosition.paragraph);
       try {
         localStorage.setItem('ai-read-active', next.id);
@@ -339,59 +352,13 @@ export default function App() {
     }
   }
   function getTranslation(p: Paragraph) {
+    if (book.language.toLowerCase() === settings.language.toLowerCase()) return p.text;
     return (
       translations[translationKey(settings, p.id, glossary)] ||
       (book.sample && settings.language === 'zh-CN'
         ? sampleTranslations[`zh-CN:${p.id}:sample`]
         : '')
     );
-  }
-  async function translate(paragraphs: Paragraph[]) {
-    if (busy) return;
-    if (!aiReady) {
-      setSettingsOpen(true);
-      return;
-    }
-    const controller = new AbortController();
-    operation.current = controller;
-    setBusy('translation');
-    const pending = paragraphs.filter((p) => !getTranslation(p));
-    try {
-      for (let i = 0; i < pending.length; i++) {
-        if (controller.signal.aborted) break;
-        const p = pending[i];
-        setBusyText(`翻译中 ${i + 1} / ${pending.length}`);
-        const index = chapter.paragraphs.findIndex((x) => x.id === p.id);
-        const context = chapter.paragraphs
-          .slice(Math.max(0, index - 2), index + 2)
-          .map((s) => ({ id: s.id, chapter: chapter.title, text: s.text }));
-        const value = await streamAI(
-          settings,
-          { action: 'translate', title: book.title, target: p.text, glossary, sources: context },
-          controller.signal,
-          (text) => {
-            if (operation.current === controller) setStreamingTranslation({ id: p.id, text });
-          },
-        );
-        if (operation.current !== controller) return;
-        setTranslations((previous) => ({
-          ...previous,
-          [translationKey(settings, p.id, glossary)]: value,
-        }));
-        setStreamingTranslation(null);
-      }
-      if (!controller.signal.aborted && operation.current === controller)
-        setNotice(pending.length ? '翻译已保存到本地' : '本章译文已就绪');
-    } catch (error) {
-      if (!controller.signal.aborted) report(error);
-    } finally {
-      if (operation.current === controller) {
-        setBusy(null);
-        setStreamingTranslation(null);
-        setBusyText('');
-        operation.current = null;
-      }
-    }
   }
   async function ask(prompt: string, passage = selected) {
     if (busy || !prompt.trim()) return;
@@ -406,6 +373,7 @@ export default function App() {
     operation.current = controller;
     setBusy('chat');
     setQuestion('');
+    const focus = passage || { paragraph: readingParagraph, text: readingParagraph.text };
     const allowedIds = new Set(
       book.chapters.flatMap((c, i) =>
         (
@@ -431,7 +399,9 @@ export default function App() {
       )
         history.push(user, assistant);
     }
-    const userContent = passage ? `${prompt}\n\n「${passage.text.slice(0, 500)}」` : prompt;
+    const userContent = passage
+      ? `${prompt}\n\n「${passage.text.slice(0, 500)}」`
+      : `${prompt}\n\n（阅读位置：段落 ${focus.paragraph.id}）`;
     const next: Message[] = [
       ...messages,
       { role: 'user', content: userContent },
@@ -448,7 +418,7 @@ export default function App() {
         position.farthest,
         settings.scope,
         prompt,
-        passage?.paragraph,
+        focus.paragraph,
       );
       if (context.partial) {
         setBusyText('正在跨语言查找相关原文…');
@@ -458,7 +428,7 @@ export default function App() {
             settings,
             book,
             prompt,
-            passage?.text || '',
+            focus.text,
             history.slice(-8),
             controller.signal,
           );
@@ -472,7 +442,7 @@ export default function App() {
           position.farthest,
           settings.scope,
           `${prompt} ${terms}`,
-          passage?.paragraph,
+          focus.paragraph,
         );
       }
       sourceIds = context.sources.map((s) => s.id);
@@ -486,6 +456,7 @@ export default function App() {
           title: book.title,
           question: prompt,
           selection: passage?.text,
+          readingPassage: `[${focus.paragraph.id}] ${focus.paragraph.text}`,
           glossary,
           history: history.slice(-8),
           scope: `${scopeNames[settings.scope]}; passages ${context.sources.length}/${context.total}; partial=${context.partial}`,
@@ -751,7 +722,12 @@ export default function App() {
                 ['translation', '译文'],
               ] as const
             ).map(([id, label]) => (
-              <button key={id} className={view === id ? 'chosen' : ''} onClick={() => setView(id)}>
+              <button
+                key={id}
+                className={view === id ? 'chosen' : ''}
+                aria-pressed={view === id}
+                onClick={() => setSettings((s) => ({ ...s, readingMode: id }))}
+              >
                 {id === 'bilingual' && <Languages size={14} />}
                 {label}
               </button>
@@ -842,28 +818,44 @@ export default function App() {
                 <span>
                   <Globe2 size={13} />
                   {languageName(settings.language)}
-                  {book.sample && settings.language === 'zh-CN' ? ' · 预置译文' : ' · AI 翻译'}
+                  {book.sample && settings.language === 'zh-CN' ? ' · 预置译文' : ' · 自动翻译'}
                 </span>
-                {busy === 'translation' ? (
-                  <button onClick={() => operation.current?.abort()}>
-                    <LoaderCircle size={13} className="spin" />
-                    {busyText}
-                    <Square size={11} />
+                {chapterTranslationsReady ? (
+                  <span>译文已就绪</span>
+                ) : !aiReady ? (
+                  <button onClick={() => setSettingsOpen(true)}>连接模型，自动准备译文</button>
+                ) : automaticTranslation.status === 'error' ? (
+                  <button onClick={automaticTranslation.retry} title={automaticTranslation.error}>
+                    译文暂不可用 · 重试
                   </button>
                 ) : (
-                  <button
-                    disabled={Boolean(busy)}
-                    onClick={() => void translate(chapter.paragraphs)}
-                  >
-                    <Languages size={13} />
-                    翻译本章
-                  </button>
+                  <span role="status">
+                    {automaticTranslation.status === 'translating' && (
+                      <LoaderCircle size={12} className="spin" />
+                    )}
+                    {automaticTranslation.status === 'translating'
+                      ? '正在准备译文'
+                      : automaticTranslation.status === 'retrying'
+                        ? '连接恢复中…'
+                        : automaticTranslation.status === 'offline'
+                          ? '离线 · 已有译文仍可阅读'
+                          : '随阅读自动准备'}
+                  </span>
                 )}
+              </div>
+            )}
+            {view !== 'original' && automaticTranslation.status === 'error' && (
+              <div className="translation-problem" role="status">
+                <span>{automaticTranslation.error}</span>
+                <button onClick={() => setSettingsOpen(true)}>AI 设置</button>
               </div>
             )}
             {chapter.paragraphs.map((p) => {
               const translated = getTranslation(p);
-              const pending = streamingTranslation?.id === p.id ? streamingTranslation.text : '';
+              const pending =
+                automaticTranslation.streaming?.id === p.id
+                  ? automaticTranslation.streaming.text
+                  : '';
               return (
                 <section
                   key={p.id}
@@ -909,19 +901,37 @@ export default function App() {
                   </div>
                   {view !== 'original' && (
                     <div
-                      className={`translated-text ${pending ? 'streaming' : ''}`}
+                      className={`translated-text ${pending ? 'streaming' : ''} ${!translated && !pending ? 'translation-waiting' : ''}`}
+                      style={
+                        !translated && automaticTranslation.streaming?.id === p.id
+                          ? { minHeight: automaticTranslation.streaming.minHeight }
+                          : undefined
+                      }
                       lang={settings.language}
                       dir="auto"
                     >
                       {translated || pending || (
-                        <button
-                          className="translate-placeholder"
-                          disabled={Boolean(busy)}
-                          onClick={() => void translate([p])}
-                        >
-                          <Languages size={13} />
-                          {busy === 'translation' ? '等待翻译' : '翻译这一段'}
-                        </button>
+                        <div className="translation-placeholder">
+                          <span className="translation-hint">
+                            {!aiReady
+                              ? '连接模型后，译文会自动出现'
+                              : automaticTranslation.status === 'error'
+                                ? '译文暂不可用，可以继续阅读原文'
+                                : automaticTranslation.status === 'offline'
+                                  ? '联网后自动继续'
+                                  : '译文正在自动准备'}
+                          </span>
+                          {view === 'translation' ? (
+                            <div className="translation-fallback" lang={book.language} dir="auto">
+                              {p.text}
+                            </div>
+                          ) : (
+                            <span className="translation-skeleton" aria-hidden="true">
+                              <i />
+                              <i />
+                            </span>
+                          )}
+                        </div>
                       )}
                     </div>
                   )}
@@ -1041,9 +1051,9 @@ export default function App() {
                       也读懂行间。
                     </h2>
                     <p>
-                      选中一段文字，或从一个问题开始。
+                      已跟随你当前读到的位置。
                       <br />
-                      用你熟悉的语言，一起读深一点。
+                      直接问“这里是什么意思”，一起读深一点。
                     </p>
                     <div className="prompt-cards">
                       <button
@@ -1139,6 +1149,11 @@ export default function App() {
                 <div ref={chatEnd} />
               </div>
               <div className="chat-bottom">
+                {!selected && (
+                  <div className="reading-context" title={readingParagraph.text}>
+                    <BookOpen size={12} /> 跟随阅读 · 段落 {readingParagraph.id}
+                  </div>
+                )}
                 {selected && (
                   <div className="selected-context">
                     <span>
@@ -1164,7 +1179,7 @@ export default function App() {
                 >
                   <textarea
                     aria-label="向 AI 提问"
-                    placeholder="关于这本书，你想知道什么？"
+                    placeholder="这里是什么意思？也可以问整章…"
                     value={question}
                     maxLength={4000}
                     onChange={(e) => setQuestion(e.target.value)}
@@ -1349,7 +1364,8 @@ export default function App() {
             </p>
             <p>
               从左下角导入 EPUB 或
-              TXT。切换双语后，可逐段翻译，也可以翻译本章。配置模型后，选择文字或直接向 AI 提问。
+              TXT。双语和译文模式会自动翻译眼前内容，并提前准备后面几段；切回原文即暂停。阅读模式和已完成译文会自动保存。AI
+              会跟随阅读位置，直接提问即可；选中文字可指定更精确的范围。
             </p>
             <p>
               “截至最远章节”包括你曾打开的章节，不代表逐段读过。长书采用关键词检索，回答可能只参考部分原文。引用可点击核对。

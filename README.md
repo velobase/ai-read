@@ -11,7 +11,8 @@ A local-first, self-hostable ebook reader with bilingual reading and source-grou
 ## What it does
 
 - Import DRM-free EPUB or UTF-8 TXT into a browser-local library.
-- Switch between original, bilingual, and translation-only reading.
+- Switch between original, bilingual, and translation-only reading; the selected mode is remembered.
+- Translate visible passages automatically, prepare the next three, and reuse completed local translations without a click. Background translation does not block questions.
 - Translate a passage or a chapter using your own OpenAI-compatible model service.
 - Keep names and terminology consistent using a per-book glossary.
 - Ask questions in your preferred language, with streamed answers and clickable paragraph references.
@@ -78,7 +79,9 @@ AI_MODEL=your-installed-model
 AI_API_KEY=
 ```
 
-No API key, credits, hosted AI subscription, or model weights are bundled. Requests may incur costs with your provider. A chapter translation issues one request per uncached paragraph; a long-context question may issue an additional query-expansion request. Both operations can be stopped.
+No API key, credits, hosted AI subscription, or model weights are bundled. Requests may incur costs with your provider. Bilingual and translation-only modes automatically issue sequential requests for uncached visible passages and the next three paragraphs. Switching to original mode, leaving the chapter, hiding the page, or going offline cancels translation. Returning to the page or reconnecting resumes it. Temporary failures retry at most twice; configuration errors pause with an explanation. Originals remain readable while translations are prepared.
+
+Questions follow the current reading position unless an explicit selection takes priority. Background translation and chat run independently. A long-context question may issue an additional query-expansion request. Answer generation can be stopped at any time.
 
 ## Data and privacy
 

@@ -24,15 +24,16 @@ Question -> scope selection -> optional multilingual query expansion
 
 ## Source layout
 
-| File                 | Responsibility                                                       |
-| -------------------- | -------------------------------------------------------------------- |
-| `src/App.tsx`        | Reader, library, notes, progress, and AI orchestration               |
-| `src/components.tsx` | Dialogs, settings, library cards, safe answer rendering              |
-| `src/lib/import.ts`  | ZIP/EPUB metadata and spine extraction, XHTML-to-text, TXT import    |
-| `src/lib/storage.ts` | IndexedDB transactions and non-secret preferences                    |
-| `src/lib/ai.ts`      | API requests, SSE parsing, context selection, translation cache keys |
-| `src/lib/sample.ts`  | Original example text and clearly labeled preset translation         |
-| `server/index.mjs`   | Same-origin HTTP server, provider proxy, server-side prompting       |
+| File                                 | Responsibility                                                            |
+| ------------------------------------ | ------------------------------------------------------------------------- |
+| `src/App.tsx`                        | Reader, library, notes, progress, and AI orchestration                    |
+| `src/components.tsx`                 | Dialogs, settings, library cards, safe answer rendering                   |
+| `src/lib/import.ts`                  | ZIP/EPUB metadata and spine extraction, XHTML-to-text, TXT import         |
+| `src/lib/storage.ts`                 | IndexedDB transactions and non-secret preferences                         |
+| `src/lib/ai.ts`                      | API requests, SSE parsing, context selection, translation cache keys      |
+| `src/lib/useAutomaticTranslation.ts` | Viewport queue, cancellation, limited retries, and background translation |
+| `src/lib/sample.ts`                  | Original example text and clearly labeled preset translation              |
+| `server/index.mjs`                   | Same-origin HTTP server, provider proxy, server-side prompting            |
 
 ## EPUB processing
 
@@ -55,13 +56,17 @@ UI preferences contain no API keys. Browser-entered keys are React state only. D
 
 ## Translation
 
-Translation uses the target paragraph, nearby paragraphs, and the per-book glossary. A chapter operation runs sequentially and skips already cached paragraphs. Only a completed SSE response is cached; interrupted translations can be requested again. The cache includes provider/model and glossary identity to avoid silently reusing translations generated under different settings.
+Translation uses the target paragraph, nearby paragraphs, and the per-book glossary. In bilingual and translation-only modes, a viewport queue prioritizes visible passages, then at most three following paragraphs in the current chapter. At the chapter heading, the first passage is prepared. Scroll and resize events update the queue after a brief debounce. One translation request runs at a time, independently of the chat controller. Requests that leave the queue are cancelled. Background work stops in original mode, when the page is hidden or offline, and on book/chapter/provider/model/key/language/glossary changes. Returning to the page or reconnecting resumes work.
+
+Only a completed SSE response is cached; partial or interrupted translations never enter storage. Network, timeout, rate-limit, and server errors get at most two retries per paragraph per session (after two and six seconds). Other failures, or exhausted retries, pause the queue until an explicit retry or a new session. The proxy preserves upstream HTTP error statuses so authentication errors do not retry. The cache includes provider/model and glossary identity to avoid silently reusing translations generated under different settings. A completed in-memory set prevents duplicate requests while React commits a cache update. Existing sample translations and exact source/target language matches bypass model requests.
+
+Reading mode is a non-secret persisted preference. Uncached translation-only passages show the original while waiting. Neither background progress nor completion emits a toast or blocks reading and questions.
 
 There is no post-translation quality scoring, automatic glossary extraction, or promise of perfect name consistency. These are candidate improvements.
 
 ## Context and citations
 
-Requests are restricted to the declared chapter scope. At most 46,000 source characters (including approximate overhead) and 400 passages are selected. If the available text exceeds this budget, a short model request expands the question into search terms in the book language, then a deterministic lexical scorer ranks passages. Selection and nearby paragraphs have priority. The UI displays supplied/available passage counts during the request.
+Requests are restricted to the declared chapter scope. At most 46,000 source characters (including approximate overhead) and 400 passages are selected. If the available text exceeds this budget, a short model request expands the question into search terms in the book language, then a deterministic lexical scorer ranks passages. Selection and nearby paragraphs have priority; without a selection, the current reading paragraph and its neighbors get that priority. The request includes the reading passage to resolve references such as “here”, and the conversation records its paragraph ID. This context does not restrict explicitly broader questions. The UI displays supplied/available passage counts during the request.
 
 This is deliberately transparent, simple retrieval; it is not a vector database. Long multilingual queries, implicit references, and multi-hop arguments can be missed. The assistant is instructed to distinguish evidence, interpretation, and background knowledge and to acknowledge omitted context.
 

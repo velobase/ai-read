@@ -68,6 +68,9 @@ export function loadSettings(): Settings {
       fontSize: Math.min(26, Math.max(15, Number(raw.fontSize) || 19)),
       theme: raw.theme === 'night' ? 'night' : 'paper',
       scope: ['chapter', 'read', 'book'].includes(raw.scope) ? raw.scope : 'chapter',
+      readingMode: ['original', 'bilingual', 'translation'].includes(raw.readingMode)
+        ? raw.readingMode
+        : defaults.readingMode,
     };
   } catch {
     return defaults;

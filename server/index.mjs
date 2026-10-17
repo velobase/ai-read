@@ -77,13 +77,11 @@ async function ai(req, res) {
     const language = str(body.language, 60) || 'Simplified Chinese';
     const action = ['ask', 'translate', 'terms'].includes(body.action) ? body.action : 'ask';
     const sources = Array.isArray(body.sources)
-      ? body.sources
-          .slice(0, 500)
-          .map((s) => ({
-            id: str(s.id, 30),
-            chapter: str(s.chapter, 200),
-            text: str(s.text, 4000),
-          }))
+      ? body.sources.slice(0, 500).map((s) => ({
+          id: str(s.id, 30),
+          chapter: str(s.chapter, 200),
+          text: str(s.text, 4000),
+        }))
       : [];
     if (JSON.stringify(sources).length > 90_000) throw new Error('参考内容过长，请缩小范围。');
     const common =
@@ -94,7 +92,7 @@ async function ai(req, res) {
     } else if (action === 'terms') {
       instruction = `Produce up to 12 short search terms related to the question, in the book language (${str(body.bookLanguage, 80)}), plus the original question language. Return comma-separated terms only. Use the selected passage and recent discussion to resolve follow-up questions. Do not answer the question.`;
     } else {
-      instruction = `Answer in ${language}, keeping important original-language terms where useful. Ground book-specific claims in the supplied passages and cite them as [chapter.paragraph], exactly matching each passage id. Distinguish the author's explicit statements from your interpretation and outside background knowledge. If evidence is missing, say so. The supplied passages may be only an excerpt; do not imply you have read omitted text. Respect the declared scope; do not reveal later plot using prior knowledge when scope is restricted. Focus on clear explanations, arguments, context, and connections. Be concise but useful.`;
+      instruction = `Answer in ${language}, keeping important original-language terms where useful. Ground book-specific claims in the supplied passages and cite them as [chapter.paragraph], exactly matching each passage id. Resolve references like "here" or "this" using selectedPassage when present, otherwise the reader's current readingPassage. The reading position is context, not a restriction on explicit questions about the whole chapter or other supplied sources. Distinguish the author's explicit statements from your interpretation and outside background knowledge. If evidence is missing, say so. The supplied passages may be only an excerpt; do not imply you have read omitted text. Respect the declared scope; do not reveal later plot using prior knowledge when scope is restricted. Focus on clear explanations, arguments, context, and connections. Be concise but useful.`;
     }
     const history = Array.isArray(body.history)
       ? body.history
@@ -106,6 +104,7 @@ async function ai(req, res) {
       title: str(body.title, 300),
       question: str(body.question, 5000),
       selectedPassage: str(body.selection, 8000),
+      readingPassage: str(body.readingPassage, 8000),
       targetPassage: str(body.target, 8000),
       glossary: str(body.glossary, 3000),
       scope: str(body.scope, 200),
@@ -133,12 +132,16 @@ async function ai(req, res) {
       await upstream.body?.cancel();
       const reasons = {
         401: 'API Key 无效或缺失',
+        402: '服务余额不足',
         403: '服务拒绝访问',
         404: '请检查服务地址和模型名称',
         429: '请求限流或额度不足',
       };
-      throw new Error(
-        `模型服务返回 ${upstream.status}：${reasons[upstream.status] || '请求失败，请检查服务端配置'}。`,
+      throw Object.assign(
+        new Error(
+          `模型服务返回 ${upstream.status}：${reasons[upstream.status] || '请求失败，请检查服务端配置'}。`,
+        ),
+        { status: upstream.status },
       );
     }
     if (action === 'terms') {
@@ -168,8 +171,16 @@ async function ai(req, res) {
       : error instanceof TypeError
         ? '无法连接模型服务，请检查服务地址和网络。'
         : error.message || 'AI 请求失败。';
-    if (!res.headersSent) json(res, 400, { error: message });
-    else res.end(`\n\ndata: ${JSON.stringify({ error: { message } })}\n\n`);
+    const status = controller.signal.aborted
+      ? 504
+      : error instanceof TypeError
+        ? 502
+        : error.status || 400;
+    if (!res.headersSent) json(res, status, { error: message });
+    else
+      res.end(
+        `\n\ndata: ${JSON.stringify({ error: { message, retryable: status === 408 || status === 429 || status >= 500 } })}\n\n`,
+      );
   } finally {
     clearTimeout(timer);
     active--;
