@@ -17,7 +17,7 @@ import {
   LoaderCircle,
 } from 'lucide-react';
 import { useEffect, type CSSProperties, type ReactNode } from 'react';
-import type { Book } from '@/lib/types';
+import type { BookDisplay } from '@/lib/types';
 import { catalog } from '@/lib/catalog';
 import { cn } from '@/lib/utils';
 import { useLibrary } from './library-provider';
@@ -239,7 +239,7 @@ export function PageHeading({
   );
 }
 
-export function BookCover({ book, className }: { book: Book; className?: string }) {
+export function BookCover({ book, className }: { book: BookDisplay; className?: string }) {
   const { t, locale } = useI18n();
   const known = catalog.findIndex((b) => b.id === book.id);
   const variant =
@@ -251,7 +251,9 @@ export function BookCover({ book, className }: { book: Book; className?: string 
         ? '葉讀原創'
         : '叶读原创'
       : 'LEAFREAD ORIGINALS'
-    : book.language.toUpperCase();
+    : book.listingOnly
+      ? t('英文原版')
+      : book.language.toUpperCase();
   const authorLabel = book.sample
     ? book.id === 'ai-read-original-demo-v1'
       ? isChineseUi
@@ -292,7 +294,7 @@ export function BookCover({ book, className }: { book: Book; className?: string 
             {book.subtitle && <span className="cover-subtitle">{book.subtitle}</span>}
             <span className="cover-author">{authorLabel}</span>
           </div>
-          <span className="cover-imprint">{t('ByPage · 逐页')}</span>
+          <span className="cover-imprint">{book.publisher || t('ByPage · 逐页')}</span>
         </>
       )}
     </div>
@@ -305,7 +307,7 @@ export function BookCard({
   onClick,
   children,
 }: {
-  book: Book;
+  book: BookDisplay;
   showAuthor?: boolean;
   onClick?: () => void;
   children?: ReactNode;
@@ -335,6 +337,11 @@ export function BookCard({
       </span>
       {showAuthor && (
         <span className="mt-1.5 block truncate text-xs text-muted-foreground">{displayAuthor}</span>
+      )}
+      {book.listingOnly && (
+        <span className="mt-2 block text-[11px] leading-5 text-muted-foreground">
+          {t('英文原版 · 书目推荐')}
+        </span>
       )}
     </>
   );

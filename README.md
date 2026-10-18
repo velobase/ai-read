@@ -20,6 +20,7 @@ A local-first, self-hostable ebook reader with bilingual reading and source-grou
 - Save reading position, translations, conversations, highlights, and notes in IndexedDB first. Signed-in readers synchronize parsed books, shelf state, positions, notes, completed conversations, automatic translations, and reading preferences across devices.
 - Export notes as Markdown and search the original text. Read on a centered page with overlay tools; tap the mobile page to hide controls. Adjust type size, font, line spacing, page width or mobile margins, and day/night theme.
 - Start without an API key using an original bilingual sample book. Its Chinese translations are prewritten examples, not live model output.
+- Browse five user-selected English economics and management recommendations, with edition, ISBN, and official source links. These are bibliographic listings; their full text and translations are not hosted. See [recommended books](docs/recommended-books.md).
 
 The interface is available in 10 languages: English, Simplified Chinese, Traditional Chinese, Japanese, Korean, Spanish, French, German, Portuguese, and Arabic. Choose **Settings → Interface language**, or use the language menu on the login screen and desktop header. Browser language detection, persistent preferences, localized dates/counts and right-to-left interface direction are included.
 

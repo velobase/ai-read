@@ -29,7 +29,8 @@ Question -> scope selection -> optional multilingual query expansion
 | `src/app/layout.tsx`, `src/app/page.tsx`          | App Router shell, metadata, and page entry                                             |
 | `src/app/globals.css`                             | Tailwind v4 theme tokens, paper/night themes, and base accessibility styles            |
 | `src/app/library.css`, `src/components/library/`  | Responsive non-reading surfaces, route navigation, library and local profile workflows |
-| `src/lib/catalog.ts`                              | Original readable discovery catalog and metadata; not a remote bookstore               |
+| `src/lib/catalog.ts`                              | Original readable sample catalog and discovery categories                             |
+| `src/lib/recommended-books.ts`                    | Public bibliographic recommendations with verified editions; no full text or jobs      |
 | `src/lib/library-state.ts`                        | Local shelf status, pinning, grouping, reversible hiding, and reader profile           |
 | `src/lib/reading-backup.ts`                       | Versioned book/note/position backup validation                                         |
 | `src/components/reader/reader-client.tsx`         | Browser-only loading boundary for local data and viewport state                        |

@@ -5,20 +5,26 @@ import { SUPPORT_EMAIL, SUPPORT_MAILTO } from '@/lib/contact';
 import { useI18n } from '@/lib/i18n/provider';
 
 import Link from 'next/link';
-import { useState } from 'react';
-import { ArrowRight, BookOpen, ChevronRight, RefreshCw, NotebookPen } from 'lucide-react';
+import { ArrowRight, BookOpen, ChevronRight, NotebookPen } from 'lucide-react';
 import { catalog, categories } from '@/lib/catalog';
+import { recommendedBooks, recommendationCopy } from '@/lib/recommended-books';
 import { useLibrary } from './library-provider';
 import { BookCard, BookCover, LibraryShell, SearchBar } from './library-ui';
 
 export function HomePage({ discover = false }: { discover?: boolean }) {
   const { t, text: localize, locale } = useI18n();
   const { books, notes, state, readBook, openImport } = useLibrary();
-  const [offset, setOffset] = useState(0);
   const recent = [...books].sort(
     (a, b) => (state.books[b.id]?.lastOpenedAt || 0) - (state.books[a.id]?.lastOpenedAt || 0),
   );
-  const display = [...catalog.slice(offset), ...catalog.slice(0, offset)];
+  const topicCopy: Record<string, string> = {
+    经济学: t('理解市场与经济协作'),
+    商业管理: t('竞争、组织与经营'),
+    阅读与思考: t('把问题留在页边'),
+    语言与表达: t('越过语言的边界'),
+    写作与记录: t('记录每一次发现'),
+    生活与观察: t('在日常里慢下来'),
+  };
   return (
     <LibraryShell>
       <section className="library-home-hero">
@@ -34,7 +40,7 @@ export function HomePage({ discover = false }: { discover?: boolean }) {
             { label: t('分类'), href: '/categories' },
             { label: t('书单'), href: '/collections' },
             { label: t('笔记'), href: '/notes' },
-            { label: t('原创'), href: '/discover' },
+            { label: t('书城'), href: '/discover' },
           ].map((item) => (
             <Link key={item.href} href={item.href}>
               {item.label}
@@ -79,41 +85,38 @@ export function HomePage({ discover = false }: { discover?: boolean }) {
             ))}
           </section>
         )}
-        <section className="home-recommendations">
+        <section className="home-recommendations catalog-recommendations">
           <div className="mb-6 flex items-center justify-between">
             <div className="flex items-baseline gap-3">
               <h2 className="text-xl font-semibold sm:text-[22px]">
-                {discover ? t('原创书城') : t('为你推荐')}
+                {discover ? t('精选书城') : t('为你推荐')}
               </h2>
               <span className="hidden text-xs text-muted-foreground sm:inline">
-                {t('从一篇好文章开始')}
+                {t('经济学与商业管理 · 英文原版')}
               </span>
             </div>
-            <button
-              className="hidden items-center gap-1.5 text-xs text-muted-foreground hover:text-primary sm:flex"
-              onClick={() => setOffset((offset + 1) % catalog.length)}
-            >
-              <RefreshCw size={13} />
-              {t('换一批')}
-            </button>
           </div>
           <div className="home-recommendation-grid">
-            {display.map((book) => (
+            {recommendedBooks.map((book) => (
               <div key={book.id} className="home-recommendation-card">
                 <BookCard book={book} showAuthor />
-                <p className="mt-3 hidden text-center text-xs text-muted-foreground sm:block">
-                  {t('{value0} · 原创短文', { value0: localize(book.category || '') })}
+                <p className="mt-3 line-clamp-3 text-xs leading-6 text-muted-foreground">
+                  {recommendationCopy(book, locale).reason}
                 </p>
               </div>
             ))}
           </div>
-          <button onClick={() => setOffset((offset + 1) % catalog.length)} className="home-refresh">
-            <RefreshCw size={14} />
-            {t('换一批')}
-          </button>
           <p className="mt-4 text-xs text-muted-foreground">
-            {t('精选 ByPage · 逐页 原创内容，可直接阅读或加入书架。')}
+            {t('精选英文原版书目，附版本信息与官方来源；站内全文暂未开放。')}
           </p>
+        </section>
+        <section className="mt-12">
+          <h2 className="mb-5 text-xl font-semibold">{t('可直接阅读的原创')}</h2>
+          <div className="home-recommendation-grid">
+            {catalog.map((book) => (
+              <BookCard key={book.id} book={book} showAuthor />
+            ))}
+          </div>
         </section>
         <section className="home-topic-grid">
           {categories.slice(1).map((category, i) => (
@@ -126,16 +129,7 @@ export function HomePage({ discover = false }: { discover?: boolean }) {
                 {t('书单')} · {(i + 1).toLocaleString(locale, { minimumIntegerDigits: 2 })}
               </span>
               <h3>{localize(category)}</h3>
-              <p>
-                {
-                  [
-                    t('把问题留在页边'),
-                    t('越过语言的边界'),
-                    t('记录每一次发现'),
-                    t('在日常里慢下来'),
-                  ][i]
-                }
-              </p>
+              <p>{topicCopy[category]}</p>
               <span className="mt-5 flex items-center gap-1 text-xs text-primary">
                 {t('去看看')}
                 <ArrowRight size={14} />

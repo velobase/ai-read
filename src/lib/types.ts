@@ -16,6 +16,11 @@ export type Book = {
   cover?: string;
   pageDirection?: 'ltr' | 'rtl';
 };
+// Display metadata is also used for recommendations that do not contain a book file.
+export type BookDisplay = Pick<
+  Book,
+  'id' | 'title' | 'author' | 'language' | 'sample' | 'subtitle' | 'cover'
+> & { publisher?: string; listingOnly?: true };
 export type Position = {
   chapter: number;
   paragraph: string;

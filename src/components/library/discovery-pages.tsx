@@ -7,6 +7,13 @@ import { useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { FolderPlus, ChevronRight, Plus } from 'lucide-react';
 import { catalog, categories, bookDescription } from '@/lib/catalog';
+import {
+  recommendedBooks,
+  recommendationCopy,
+  isRecommendedBook,
+  type RecommendedBook,
+} from '@/lib/recommended-books';
+import type { Book } from '@/lib/types';
 import { useLibrary } from './library-provider';
 import { BookCard, BookCover, Empty, LibraryShell, PageHeading, SearchBar } from './library-ui';
 import { Modal } from '@/components/reader/reader-dialogs';
@@ -18,7 +25,11 @@ export function CategoriesPage() {
   const params = useSearchParams();
   const [chosen, setChosen] = useState(params.get('category') || '全部');
   const { books } = useLibrary();
-  const all = Array.from(new Map([...catalog, ...books].map((b) => [b.id, b])).values());
+  const all = Array.from(
+    new Map<string, Book | RecommendedBook>(
+      [...recommendedBooks, ...catalog, ...books].map((b) => [b.id, b]),
+    ).values(),
+  );
   const choices = [...new Set([...categories, ...all.map((b) => b.category || '其他')])];
   const filtered = all.filter((b) => chosen === '全部' || (b.category || '其他') === chosen);
   return (
@@ -119,7 +130,7 @@ export function CollectionsPage() {
               className="collection-card"
             >
               <div className="collection-covers">
-                {catalog
+                {[...recommendedBooks, ...catalog]
                   .filter((b) => b.category === category)
                   .slice(0, 3)
                   .map((book) => (
@@ -128,7 +139,7 @@ export function CollectionsPage() {
               </div>
               <h2>{localize(category)}</h2>
               <p>
-                {t('原创精选')}
+                {t('书目精选')}
                 <ChevronRight size={15} />
               </p>
             </Link>
@@ -166,15 +177,21 @@ export function CollectionsPage() {
 }
 
 export function SearchPage() {
-  const { t, text: localize } = useI18n();
+  const { t, locale, text: localize } = useI18n();
   const params = useSearchParams();
   const query = (params.get('q') || '').trim();
   const { allBooks, notes, readBook } = useLibrary();
-  const all = Array.from(new Map([...catalog, ...allBooks].map((b) => [b.id, b])).values());
+  const all = Array.from(
+    new Map<string, Book | RecommendedBook>(
+      [...recommendedBooks, ...catalog, ...allBooks].map((b) => [b.id, b]),
+    ).values(),
+  );
   const needle = query.toLocaleLowerCase();
   const found = query
     ? all.filter((b) =>
-        `${b.title} ${b.author} ${b.category || ''}`.toLocaleLowerCase().includes(needle),
+        `${b.title} ${b.subtitle || ''} ${b.author} ${b.category || ''} ${isRecommendedBook(b) ? b.aliases.join(' ') + ' ' + b.isbn : ''}`
+          .toLocaleLowerCase()
+          .includes(needle),
       )
     : [];
   const foundNotes = query
@@ -223,8 +240,15 @@ export function SearchPage() {
                       <h3>{book.title}</h3>
                       <p className="mt-2 text-xs text-muted-foreground">{book.author}</p>
                       <p className="mt-3 line-clamp-2 text-xs leading-6 text-muted-foreground">
-                        {bookDescription(book)}
+                        {isRecommendedBook(book)
+                          ? recommendationCopy(book, locale).description
+                          : bookDescription(book)}
                       </p>
+                      {isRecommendedBook(book) && (
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          {t('英文原版 · 书目推荐')}
+                        </p>
+                      )}
                     </div>
                     <ChevronRight size={18} className="hidden text-muted-foreground sm:block" />
                   </Link>

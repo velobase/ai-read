@@ -137,7 +137,15 @@ export const catalog: Book[] = [
   })),
 ];
 
-export const categories = ['全部', '阅读与思考', '语言与表达', '写作与记录', '生活与观察'];
+export const categories = [
+  '全部',
+  '经济学',
+  '商业管理',
+  '阅读与思考',
+  '语言与表达',
+  '写作与记录',
+  '生活与观察',
+];
 
 export function bookDescription(book: Book) {
   return (
