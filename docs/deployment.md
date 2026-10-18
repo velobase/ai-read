@@ -6,7 +6,7 @@ Production origin: https://leafread.ai. Application source: `velobase/ai-read` (
 
 Cloudflare proxies the apex and wildcard A records to the existing GCP shared TCP ingress. Full (strict) TLS validates the origin certificate. The existing GKE Nginx controller routes `leafread.ai` to a ClusterIP service and redirects `www` to the canonical apex. cert-manager renews the certificate for both names. No new public LoadBalancer or external node IP is needed. Private nodes continue using the existing Cloud NAT egress.
 
-The application accepts only its configured `APP_ORIGIN`. Ingress probes send that Host header. API responses are not cached; model responses stream without Nginx buffering. Book sync requests retain the application's 64 MiB limit. The pod NetworkPolicy permits DNS, Workload Identity, the private Cloud SQL endpoint and public HTTPS; it blocks other private destinations. Hosted AI endpoints cannot point to loopback. Browser-entered model keys remain memory-only and no shared paid model key is installed by this deployment.
+The application accepts only its configured `APP_ORIGIN`. Set `AUTH_URL` to the same canonical HTTPS origin: Auth.js route handlers otherwise derive OAuth callbacks from the standalone server’s internal host rather than the forwarded host headers. Ingress probes send that Host header. API responses are not cached; model responses stream without Nginx buffering. Book sync requests retain the application's 64 MiB limit. The pod NetworkPolicy permits DNS, Workload Identity, the private Cloud SQL endpoint and public HTTPS; it blocks other private destinations. Hosted AI endpoints cannot point to loopback. Browser-entered model keys remain memory-only. An account-scoped managed key is stored separately in `leafread-private-ai`; only authenticated user IDs in `AI_ALLOWED_USER_IDS` can use it, and it is never returned to the browser.
 
 ## Database and credentials
 
@@ -26,3 +26,7 @@ The shared Cloud SQL instance's existing backup policy is not changed by this ap
 To roll back, promote a previous compatible application commit through the same GitOps workflow. Preserve Secrets, the Cloud SQL database and browser libraries. Schema compatibility must be reviewed before promoting an older image.
 
 For the initial bootstrap only, register `argocd/leafread-prod-application.json` with Argo CD after provisioning namespace, credentials and Workload Identity. Subsequent app releases change GitOps state, not live Deployment image fields.
+
+## Managed AI access
+
+`leafread-private-ai` is provisioned outside Git with `AI_BASE_URL`, `AI_MODEL`, `AI_PRIVATE_API_KEY` and `AI_ALLOWED_USER_IDS`. Hosted AI access checks the session user ID before using the private key or exposing the configured service/model defaults. Other accounts retain BYOK support. The key uses a separate environment variable from legacy shared-key deployments so an image rollback fails closed. Keep personal account IDs and keys out of source control; a provider key change requires the web pods to restart. No paid model request is part of deployment validation.
