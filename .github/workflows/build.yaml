@@ -40,9 +40,5 @@ jobs:
               --label "org.opencontainers.image.revision=$VERSION" \
               --tag "$REGISTRY/$target:sha-$VERSION" --push .
           done
-          # Publish the release pointer only after both images exist.
-          for target in migrate runtime; do
-            gcloud artifacts docker tags add \
-              "$REGISTRY/$target:sha-$VERSION" "$REGISTRY/$target:prod-latest" --quiet
-          done
+          # GitOps selects this exact commit's two image digests; no mutable alias is needed.
           printf 'Built release `%s`. Promote it with the LeafRead GitOps release workflow.\n' "$VERSION" >> "$GITHUB_STEP_SUMMARY"
