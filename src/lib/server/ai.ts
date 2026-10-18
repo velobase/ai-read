@@ -1,4 +1,5 @@
 import 'server-only';
+import type { ServerAIConfig } from './ai-config';
 
 let active = 0;
 const str = (value: unknown, max = 5000) => (typeof value === 'string' ? value.slice(0, max) : '');
@@ -82,7 +83,7 @@ function describeError(error: unknown, aborted: boolean) {
   };
 }
 
-export async function handleAI(request: Request): Promise<Response> {
+export async function handleAI(request: Request, server: ServerAIConfig): Promise<Response> {
   if (!request.headers.get('content-type')?.startsWith('application/json'))
     return json(415, { error: '需要 JSON 请求。' });
   if (active >= 4) return json(429, { error: '当前请求较多，请稍后重试。' });
@@ -105,13 +106,13 @@ export async function handleAI(request: Request): Promise<Response> {
   };
   try {
     const body = await readBody(request);
-    const configuredUrl = process.env.AI_BASE_URL || '';
+    const configuredUrl = server.baseUrl;
     const baseUrl = normalizeUrl(str(body.baseUrl, 2000) || configuredUrl);
-    const model = str(body.model, 200) || process.env.AI_MODEL || '';
+    const model = str(body.model, 200) || server.model;
     if (!model) throw new Error('请先在 AI 设置中填写模型名称。');
     // A server key must never follow a caller-selected endpoint.
     const serverKey =
-      configuredUrl && baseUrl === normalizeUrl(configuredUrl) ? process.env.AI_API_KEY : '';
+      configuredUrl && baseUrl === normalizeUrl(configuredUrl) ? server.apiKey : '';
     const apiKey = str(body.apiKey, 2000) || serverKey || '';
     const language = str(body.language, 60) || 'Simplified Chinese';
     const action = ['ask', 'translate', 'terms'].includes(str(body.action)) ? body.action : 'ask';
