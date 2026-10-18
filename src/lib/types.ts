@@ -1,3 +1,4 @@
+import { DEFAULT_TRANSLATION_PROMPT } from './translation-prompt';
 import { readingLanguages } from './i18n/config';
 export type Paragraph = { id: string; text: string; kind: 'text' | 'heading' | 'quote' | 'code' };
 export type Chapter = { id: string; title: string; paragraphs: Paragraph[] };
@@ -48,6 +49,7 @@ export type Settings = {
   baseUrl: string;
   model: string;
   apiKey: string;
+  translationPrompt: string;
   language: string;
   fontSize: number;
   fontFamily: 'system' | 'serif';
@@ -64,6 +66,7 @@ export const defaults: Settings = {
   baseUrl: '',
   model: '',
   apiKey: '',
+  translationPrompt: DEFAULT_TRANSLATION_PROMPT,
   language: 'zh-CN',
   fontSize: 19,
   fontFamily: 'system',

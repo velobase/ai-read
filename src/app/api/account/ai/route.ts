@@ -4,6 +4,10 @@ import { database } from '@/lib/server/database';
 import { publicAIConfig } from '@/lib/server/ai-config';
 import { encryptAIKey } from '@/lib/server/ai-credentials';
 import { normalizeAIUrl } from '@/lib/server/ai-endpoint';
+import {
+  MAX_TRANSLATION_PROMPT_LENGTH,
+  effectiveTranslationPrompt,
+} from '@/lib/translation-prompt';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -23,9 +27,13 @@ export async function GET() {
 export async function PUT(request: Request) {
   const userId = (await auth())?.user?.id;
   if (!userId || request.headers.get('x-reader-user') !== userId) return unauthorized();
-  let baseUrl: string, model: string, apiKey: string, clearKey: boolean;
+  let baseUrl: string,
+    model: string,
+    apiKey: string,
+    clearKey: boolean,
+    translationPrompt: string | undefined;
   try {
-    const body = await accountBody(request);
+    const body = await accountBody(request, 64 * 1024);
     if (
       typeof body.baseUrl !== 'string' ||
       body.baseUrl.length > 2000 ||
@@ -37,6 +45,14 @@ export async function PUT(request: Request) {
       (body.clearKey !== undefined && typeof body.clearKey !== 'boolean')
     )
       throw new Error('请填写有效的服务地址、模型名称和 API Key。');
+    if (
+      body.translationPrompt !== undefined &&
+      (typeof body.translationPrompt !== 'string' ||
+        body.translationPrompt.length > MAX_TRANSLATION_PROMPT_LENGTH)
+    )
+      throw new Error('翻译 Prompt 不能超过 6000 个字符。');
+    translationPrompt =
+      typeof body.translationPrompt === 'string' ? body.translationPrompt.trim() : undefined;
     baseUrl = normalizeAIUrl(body.baseUrl.trim());
     model = body.model.trim();
     apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : '';
@@ -71,13 +87,25 @@ export async function PUT(request: Request) {
           : current?.encryptedKey || null;
       return tx.aIConnection.upsert({
         where: { userId },
-        create: { userId, baseUrl, model, encryptedKey },
-        update: { baseUrl, model, encryptedKey },
+        create: {
+          userId,
+          baseUrl,
+          model,
+          encryptedKey,
+          translationPrompt: translationPrompt ?? '',
+        },
+        update: {
+          baseUrl,
+          model,
+          encryptedKey,
+          ...(translationPrompt !== undefined ? { translationPrompt } : {}),
+        },
       });
     });
     return Response.json({
       baseUrl: saved.baseUrl,
       model: saved.model,
+      translationPrompt: effectiveTranslationPrompt(saved.translationPrompt),
       hasKey: Boolean(saved.encryptedKey),
       accountManaged: true,
       updatedAt: saved.updatedAt.toISOString(),

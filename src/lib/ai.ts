@@ -1,4 +1,5 @@
 import { storageUserId } from './storage-scope';
+import { translationFingerprint } from './translation-prompt';
 import type { Book, Message, Paragraph, Settings } from './types';
 import { languageName } from './types';
 
@@ -34,11 +35,21 @@ async function request(settings: Settings, body: Request, signal: AbortSignal) {
       baseUrl: settings.baseUrl,
       model: settings.model,
       apiKey: settings.apiKey,
+      ...(body.action === 'translate'
+        ? {
+            translationPrompt: settings.translationPrompt,
+            translationFingerprint: translationFingerprint(settings),
+          }
+        : {}),
       language: languageName(settings.language),
     }),
   });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
+    if (response.status === 409 && data.code === 'ai-config-changed' && data.config)
+      window.dispatchEvent(
+        new CustomEvent('ai-read-ai-configuration-change', { detail: data.config }),
+      );
     throw new AIRequestError(
       data.error || `请求失败（${response.status}）`,
       response.status === 408 || response.status === 429 || response.status >= 500,
@@ -222,8 +233,5 @@ export function buildContext(
 }
 
 export function translationKey(settings: Settings, paragraphId: string) {
-  const input = [settings.baseUrl, settings.model, ''].join('|');
-  let hash = 2166136261;
-  for (let i = 0; i < input.length; i++) hash = Math.imul(hash ^ input.charCodeAt(i), 16777619);
-  return `${settings.language}:${paragraphId}:${hash >>> 0}`;
+  return `${settings.language}:${paragraphId}:${translationFingerprint(settings)}`;
 }

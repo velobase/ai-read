@@ -10,7 +10,7 @@ export async function GET() {
     // Verify both the identity and account AI migrations before accepting traffic.
     assertAIEncryptionConfigured();
     await database.user.findFirst({ select: { id: true } });
-    await database.aIConnection.findFirst({ select: { userId: true } });
+    await database.aIConnection.findFirst({ select: { userId: true, translationPrompt: true } });
     return Response.json({ status: 'ready' }, { headers: { 'Cache-Control': 'no-store' } });
   } catch {
     return Response.json(

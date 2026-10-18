@@ -52,6 +52,7 @@ export function useAutomaticTranslation(options: Options) {
         current.chapter === chapter &&
         current.settings.baseUrl === settings.baseUrl &&
         current.settings.model === settings.model &&
+        current.settings.translationPrompt === settings.translationPrompt &&
         current.settings.apiKey === settings.apiKey &&
         current.settings.language === settings.language &&
         current.settings.readingMode === settings.readingMode
@@ -89,7 +90,13 @@ export function useAutomaticTranslation(options: Options) {
           .map((item) => ({ id: item.id, chapter: chapter.title, text: item.text }));
         const value = await streamAI(
           settings,
-          { action: 'translate', title: book.title, target: p.text, sources },
+          {
+            action: 'translate',
+            title: book.title,
+            bookLanguage: book.language,
+            target: p.text,
+            sources,
+          },
           controller.signal,
           (text) => {
             if (currentSession() && !controller.signal.aborted)
@@ -185,6 +192,7 @@ export function useAutomaticTranslation(options: Options) {
     enabled,
     settings.baseUrl,
     settings.model,
+    settings.translationPrompt,
     settings.apiKey,
     settings.language,
     settings.readingMode,

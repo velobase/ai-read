@@ -76,6 +76,8 @@ PORT=4173
 
 Restart the server after changing `.env`. The server key is never returned to the browser and is only used with its configured endpoint. Choosing a different endpoint in the UI requires a separate key if that endpoint needs one.
 
+Both AI settings screens also offer editable translation prompts with Natural, Academic and Close-to-source starting points. Use `{{to}}` and `{{from}}` for language variables; source text and adjacent context are supplied automatically. Account prompts apply immediately and use separate translation cache identities. See [prompt behavior](docs/translation-prompts.md).
+
 For a locally running Ollama service with an installed model:
 
 ```dotenv

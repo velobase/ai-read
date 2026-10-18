@@ -1,6 +1,9 @@
 import 'server-only';
 
-export async function accountBody(request: Request): Promise<Record<string, unknown>> {
+export async function accountBody(
+  request: Request,
+  maxBytes = 8192,
+): Promise<Record<string, unknown>> {
   if (!request.headers.get('content-type')?.startsWith('application/json'))
     throw new Error('请求格式不正确。');
   const reader = request.body?.getReader();
@@ -12,7 +15,7 @@ export async function accountBody(request: Request): Promise<Record<string, unkn
       const { value, done } = await reader.read();
       if (done) break;
       size += value.byteLength;
-      if (size > 8192) {
+      if (size > maxBytes) {
         await reader.cancel();
         throw new Error('请求内容过长。');
       }

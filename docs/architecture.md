@@ -103,6 +103,7 @@ erDiagram
         string baseUrl
         string model
         string encryptedKey
+        string translationPrompt
         datetime updatedAt
     }
     Book {
@@ -193,9 +194,9 @@ Catalog keys and placeholders were checked statically. UI interaction, cross-tab
 
 ## Translation
 
-Translation uses the target paragraph and nearby original text. In bilingual and translation-only modes, a viewport queue prioritizes visible passages, then at most three following paragraphs in the current chapter. At the chapter heading, the first passage is prepared. Scroll and resize events update the queue after a brief debounce. One translation request runs at a time, independently of the chat controller. Requests that leave the queue are cancelled. Background work stops in original mode, when the page is hidden or offline, and on book/chapter/provider/model/key/language changes. Returning to the page or reconnecting resumes work.
+Translation uses the target paragraph and nearby original text. In bilingual and translation-only modes, a viewport queue prioritizes visible passages, then at most three following paragraphs in the current chapter. At the chapter heading, the first passage is prepared. Scroll and resize events update the queue after a brief debounce. One translation request runs at a time, independently of the chat controller. Requests that leave the queue are cancelled. Background work stops in original mode, when the page is hidden or offline, and on book/chapter/provider/model/key/language/prompt changes. Returning to the page or reconnecting resumes work.
 
-Only a completed SSE response is cached; partial or interrupted translations never enter storage. Network, timeout, rate-limit, and server errors get at most two retries per paragraph per session (after two and six seconds). Other failures, or exhausted retries, pause the queue until an explicit retry or a new session. The proxy preserves upstream HTTP error statuses so authentication errors do not retry. The cache includes the target language, paragraph ID and provider/model fingerprint. The fingerprint retains the legacy empty-glossary component so existing ordinary translations remain reusable. A completed in-memory set prevents duplicate requests while React commits a cache update. Existing sample translations and exact source/target language matches bypass model requests.
+Only a completed SSE response is cached; partial or interrupted translations never enter storage. Network, timeout, rate-limit, and server errors get at most two retries per paragraph per session (after two and six seconds). Other failures, or exhausted retries, pause the queue until an explicit retry or a new session. The proxy preserves upstream HTTP error statuses so authentication errors do not retry. The cache includes the target language, paragraph ID and provider/model fingerprint. The fingerprint includes the effective translation prompt as well as the provider/model. Prompt changes use a new cache identity without deleting old translations or note anchors. See [editable translation prompts](translation-prompts.md). A completed in-memory set prevents duplicate requests while React commits a cache update. Packaged sample translations are used when AI is not configured; exact source/target language matches always bypass model requests.
 
 Reading mode is a non-secret persisted preference. Uncached translation-only passages show the original while waiting. Neither background progress nor completion emits a toast or blocks reading and questions.
 

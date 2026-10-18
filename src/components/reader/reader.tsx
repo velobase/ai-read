@@ -1,7 +1,12 @@
 'use client';
 
 import { useI18n } from '@/lib/i18n/provider';
-import { readAIConnection, saveAIConnection, applyAIConnection } from '@/lib/ai-connection';
+import {
+  readAIConnection,
+  saveAIConnection,
+  applyAIConnection,
+  type AIConnection,
+} from '@/lib/ai-connection';
 import { localeStorageKey, directionFor } from '@/lib/i18n/config';
 
 import { sameData } from '@/lib/sync-types';
@@ -422,11 +427,19 @@ export default function Reader({
           if (alive) setNotice(t('AI 服务暂时不可用，仍可继续本地阅读。'));
         });
     };
+    const configurationChanged = (event: Event) => {
+      const config = (event as CustomEvent<AIConnection>).detail;
+      if (!alive || !config) return;
+      setHasServerKey(config.hasKey);
+      setSettings((s) => applyAIConnection(s, config));
+    };
     refresh();
+    window.addEventListener('ai-read-ai-configuration-change', configurationChanged);
     window.addEventListener('focus', refresh);
     return () => {
       alive = false;
       window.removeEventListener('focus', refresh);
+      window.removeEventListener('ai-read-ai-configuration-change', configurationChanged);
     };
   }, [user?.id]);
   useEffect(() => {
@@ -748,7 +761,7 @@ export default function Reader({
     if (book.language.toLowerCase() === settings.language.toLowerCase()) return p.text;
     return (
       translations[translationKey(settings, p.id)] ||
-      (book.id === sampleBook.id && settings.language === 'zh-CN'
+      (book.id === sampleBook.id && settings.language === 'zh-CN' && !aiReady
         ? sampleTranslations[`zh-CN:${p.id}:sample`]
         : '')
     );

@@ -1,6 +1,7 @@
 'use client';
 
 import { useI18n } from '@/lib/i18n/provider';
+import { TranslationPromptEditor } from './translation-prompt-editor';
 import { ContentLanguageLabel } from '@/components/library/language-menu';
 
 import { Button } from '@/components/ui/button';
@@ -235,6 +236,11 @@ export function SettingsModal({
                 </SelectContent>
               </Select>
             </label>
+            <TranslationPromptEditor
+              value={draft.translationPrompt}
+              onChange={(translationPrompt) => setDraft((s) => ({ ...s, translationPrompt }))}
+              disabled={saving}
+            />
             <div className="my-6 border-s-2 border-border bg-muted px-[13px] py-[10px] text-[10px] leading-[1.85] text-muted-foreground">
               {isZh
                 ? '相关原文与问题会发送到你所选择的模型服务商。'

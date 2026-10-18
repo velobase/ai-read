@@ -1,6 +1,7 @@
 'use client';
 
 import { useI18n } from '@/lib/i18n/provider';
+import { TranslationPromptEditor } from '@/components/reader/translation-prompt-editor';
 import { ContentLanguageLabel } from '@/components/library/language-menu';
 
 import Link from 'next/link';
@@ -521,6 +522,13 @@ export function PreferencesPage({ models = false }: { models?: boolean }) {
                     {isZh ? '移除已保存的密钥' : 'Remove saved key'}
                   </label>
                 )}
+              </div>
+              <div className="settings-form-card mt-4">
+                <TranslationPromptEditor
+                  value={settings.translationPrompt}
+                  onChange={(translationPrompt) => patch({ translationPrompt })}
+                  disabled={readOnly}
+                />
               </div>
               <p className="my-5 text-xs leading-6 text-muted-foreground">
                 {isZh

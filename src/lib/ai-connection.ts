@@ -1,9 +1,11 @@
 import { storageUserId } from './storage-scope';
 import type { Settings } from './types';
+import { effectiveTranslationPrompt } from './translation-prompt';
 
 export type AIConnection = {
   baseUrl: string;
   model: string;
+  translationPrompt: string;
   hasKey: boolean;
   accountManaged: boolean;
   updatedAt: string | null;
@@ -29,6 +31,7 @@ export async function saveAIConnection(
       baseUrl: settings.baseUrl,
       model: settings.model,
       apiKey: settings.apiKey,
+      translationPrompt: settings.translationPrompt,
       clearKey,
     }),
     signal: AbortSignal.timeout(15_000),
@@ -44,5 +47,8 @@ export function applyAIConnection(settings: Settings, config: AIConnection): Set
     baseUrl: config.accountManaged ? config.baseUrl : settings.baseUrl || config.baseUrl,
     model: config.accountManaged ? config.model : settings.model || config.model,
     apiKey: config.accountManaged ? '' : settings.apiKey,
+    translationPrompt: config.accountManaged
+      ? effectiveTranslationPrompt(config.translationPrompt)
+      : effectiveTranslationPrompt(settings.translationPrompt),
   };
 }

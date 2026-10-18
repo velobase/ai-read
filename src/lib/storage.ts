@@ -1,3 +1,4 @@
+import { effectiveTranslationPrompt, MAX_TRANSLATION_PROMPT_LENGTH } from './translation-prompt';
 import { catalog } from './catalog';
 import type { Book, Message, Note, Position, Settings } from './types';
 import { defaults } from './types';
@@ -278,6 +279,11 @@ export function loadSettings(): Settings {
     apiKey: sessionApiKey,
     baseUrl: typeof raw.baseUrl === 'string' ? raw.baseUrl : '',
     model: typeof raw.model === 'string' ? raw.model : '',
+    translationPrompt: effectiveTranslationPrompt(
+      typeof raw.translationPrompt === 'string'
+        ? raw.translationPrompt.slice(0, MAX_TRANSLATION_PROMPT_LENGTH)
+        : '',
+    ),
     language: typeof raw.language === 'string' ? raw.language : defaults.language,
     fontSize: Math.min(26, Math.max(15, Number(raw.fontSize) || 19)),
     fontFamily: raw.fontFamily === 'serif' ? 'serif' : 'system',
