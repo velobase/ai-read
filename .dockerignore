@@ -5,6 +5,7 @@ node_modules
 src/generated
 .env
 .env.*
+gha-creds-*.json
 !.env.example
 work
 docs/testing
