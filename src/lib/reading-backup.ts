@@ -93,6 +93,9 @@ export function validateBackup(raw: unknown): ReadingBackup {
       language: b.language as string,
       importedAt: b.importedAt as number,
       chapters,
+      ...(b.pageDirection === 'rtl' || b.pageDirection === 'ltr'
+        ? { pageDirection: b.pageDirection }
+        : {}),
       sample: b.sample === true,
       description: str(b.description, 20000) ? (b.description as string) : undefined,
       subtitle: str(b.subtitle, 1000) ? (b.subtitle as string) : undefined,
@@ -153,6 +156,13 @@ export function validateBackup(raw: unknown): ReadingBackup {
       ...(typeof p.offset === 'number' && Number.isFinite(p.offset)
         ? { offset: Math.max(0, Math.min(1, p.offset)) }
         : {}),
+      ...(Number.isSafeInteger(p.textOffset) && (p.textOffset as number) >= 0
+        ? { textOffset: p.textOffset as number }
+        : {}),
+      ...(p.textSource === 'original' || p.textSource === 'translation'
+        ? { textSource: p.textSource }
+        : {}),
+      ...(typeof p.textQuote === 'string' ? { textQuote: p.textQuote.slice(0, 64) } : {}),
     };
   }
   return {

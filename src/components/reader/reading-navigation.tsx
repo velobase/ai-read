@@ -64,8 +64,8 @@ export function ReadingModePicker({
       </div>
       <p>
         {mode === 'paged'
-          ? t('左右轻扫或用方向键翻页；长按仍可选文。每屏保留两行衔接。')
-          : t('自然滚动，阅读位置自动保存。也可用方向键或空格向下翻一屏。')}
+          ? t('左右轻扫翻页，可以拖回取消；长按仍可选文。')
+          : t('上下滚动，阅读位置自动保存；空格向下滚动一屏。')}
       </p>
     </fieldset>
   );
@@ -84,6 +84,8 @@ export function ReadingNavigation({
   onContents,
   onMode,
   progress,
+  chapterTitle,
+  rtl,
 }: {
   mode: Settings['navigationMode'];
   page: number;
@@ -94,20 +96,23 @@ export function ReadingNavigation({
   chapterCount: number;
   turning: boolean;
   progress: number;
+  chapterTitle: string;
+  rtl: boolean;
   onTurn: (direction: -1 | 1) => void;
   onContents: () => void;
   onMode: () => void;
 }) {
   const { t } = useI18n();
-  const previous = atStart ? t('上一章末尾') : t('上一页');
-  const next = atEnd
-    ? chapterIndex === chapterCount - 1
-      ? t('已到全书末尾')
-      : t('下一章')
-    : t('下一页');
+  const previous = mode === 'scroll' || atStart ? t('上一章末尾') : t('上一页');
+  const next =
+    mode === 'scroll' || atEnd
+      ? chapterIndex === chapterCount - 1
+        ? t('已到全书末尾')
+        : t('下一章')
+      : t('下一页');
   return (
     <nav
-      dir="ltr"
+      dir={rtl ? 'rtl' : 'ltr'}
       className="reading-navigation"
       data-navigation={mode}
       aria-label={t('翻页导航')}
@@ -118,12 +123,12 @@ export function ReadingNavigation({
         size="plain"
         className="reading-nav-arrow"
         aria-label={previous}
-        title={`${previous} · ←`}
-        disabled={turning || (atStart && chapterIndex === 0)}
+        title={`${previous} · ${rtl ? '→' : '←'}`}
+        disabled={(mode === 'scroll' || atStart) && chapterIndex === 0}
         onClick={() => onTurn(-1)}
       >
-        <ArrowLeft size={17} />
-        <span>{atStart ? t('上一章') : t('上一页')}</span>
+        {rtl ? <ArrowRight size={17} /> : <ArrowLeft size={17} />}
+        <span>{mode === 'scroll' || atStart ? t('上一章') : t('上一页')}</span>
       </Button>
       <button
         className="reading-nav-location"
@@ -134,10 +139,10 @@ export function ReadingNavigation({
           value2: progress,
         })}
       >
-        <span>{t('第 {number} 章', { number: chapterIndex + 1 })}</span>
+        <span>{chapterTitle}</span>
         <span className="reading-nav-page" aria-live="polite" aria-atomic="true">
           {mode === 'paged'
-            ? t('{value0} / {value1} 屏', { value0: page, value1: pages })
+            ? t('{value0} / {value1} 页', { value0: page, value1: pages })
             : `${progress}%`}
         </span>
       </button>
@@ -146,14 +151,18 @@ export function ReadingNavigation({
         size="plain"
         className="reading-nav-arrow"
         aria-label={next}
-        title={`${next} · →`}
-        disabled={turning || (atEnd && chapterIndex === chapterCount - 1)}
+        title={`${next} · ${rtl ? '←' : '→'}`}
+        disabled={(mode === 'scroll' || atEnd) && chapterIndex === chapterCount - 1}
         onClick={() => onTurn(1)}
       >
         <span>
-          {atEnd ? (chapterIndex === chapterCount - 1 ? t('读完了') : t('下一章')) : t('下一页')}
+          {mode === 'scroll' || atEnd
+            ? chapterIndex === chapterCount - 1
+              ? t('已到全书末尾')
+              : t('下一章')
+            : t('下一页')}
         </span>
-        <ArrowRight size={17} />
+        {rtl ? <ArrowLeft size={17} /> : <ArrowRight size={17} />}
       </Button>
       <button
         className="reading-nav-mode"
@@ -182,20 +191,13 @@ export function ChapterEnding({
   previous?: Chapter;
   index: number;
   turning: boolean;
-  onChapter: (index: number) => void;
+  onChapter: (index: number, edge?: 'start' | 'end') => void;
   onContents: () => void;
   onFinish: () => void;
 }) {
   const { t } = useI18n();
   return (
     <section className="chapter-ending" aria-label={next ? t('本章结束') : t('全书结束')}>
-      <div className="chapter-ending-divider">
-        <span />
-        {next ? <ArrowDown size={14} /> : <Check size={16} />}
-        <span />
-      </div>
-      <p className="chapter-ending-eyebrow">{next ? t('本章结束') : t('全书结束')}</p>
-      <p className="chapter-ending-title">{next ? t('故事继续') : t('合上书，也留一点回味。')}</p>
       {next ? (
         <button className="chapter-next" disabled={turning} onClick={() => onChapter(index + 1)}>
           <span>
@@ -208,7 +210,7 @@ export function ChapterEnding({
         </button>
       ) : (
         <div className="chapter-finished">
-          <p>{chapter.title}</p>
+          <p>{t('已到全书末尾')}</p>
           <Button className="rounded-full px-7" onClick={onFinish}>
             {t('回到书架')}
             <ArrowRight size={16} />
@@ -216,7 +218,7 @@ export function ChapterEnding({
         </div>
       )}
       <div className="chapter-ending-links">
-        <button disabled={!previous || turning} onClick={() => onChapter(index - 1)}>
+        <button disabled={!previous || turning} onClick={() => onChapter(index - 1, 'end')}>
           <ArrowLeft size={14} />
           {t('上一章')}
         </button>

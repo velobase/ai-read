@@ -80,6 +80,8 @@ export const preferenceKeys = [
   'scope',
   'readingMode',
   'navigationMode',
+  'pageEffect',
+  'scrollFlow',
 ] as const;
 export function cleanPreferences(value: unknown): Preferences {
   const input = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
@@ -94,6 +96,8 @@ export function cleanPreferences(value: unknown): Preferences {
     scope: ['chapter', 'read', 'book'],
     readingMode: ['original', 'bilingual', 'translation'],
     navigationMode: ['scroll', 'paged'],
+    pageEffect: ['curl', 'slide', 'none'],
+    scrollFlow: ['continuous', 'chapter'],
   };
   const ranges: Record<string, number[]> = {
     fontSize: [15, 26],

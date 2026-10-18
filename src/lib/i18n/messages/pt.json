@@ -620,5 +620,18 @@
   "本机数据已保存。登录后可跨设备同步。": "Os dados estão guardados neste dispositivo. Inicie sessão para sincronizar entre dispositivos.",
   "{count} 条数据暂未同步，已保留在本机；其他数据继续同步。": "Não foi possível sincronizar {count} itens, que foram mantidos neste dispositivo. Os outros dados continuam a ser sincronizados.",
   "这条笔记已更新，未删除。请查看最新内容后重试。": "Esta nota foi alterada e não foi eliminada. Reveja o conteúdo mais recente e tente novamente.",
-  "书籍正文过长，请选择较小的文件。": "O livro contém demasiado texto. Escolha um ficheiro mais pequeno."
+  "书籍正文过长，请选择较小的文件。": "O livro contém demasiado texto. Escolha um ficheiro mais pequeno.",
+  "左右轻扫翻页，可以拖回取消；长按仍可选文。": "Deslize para virar a página; volte para cancelar. Pressione para selecionar texto.",
+  "上下滚动，阅读位置自动保存；空格向下滚动一屏。": "Role verticalmente; sua posição é salva. Espaço avança uma tela.",
+  "{value0} / {value1} 页": "{value0} / {value1} páginas",
+  "{value0}/{value1} 页": "{value0}/{value1} páginas",
+  "译文已就绪 · 显示译文": "Tradução pronta · Mostrar",
+  "翻页效果": "Efeito de página",
+  "滚动跨章": "Rolagem entre capítulos",
+  "卷页": "Curvar",
+  "平移": "Deslizar",
+  "无动画": "Sem animação",
+  "连续跨章": "Contínua",
+  "章末停下": "Parar no fim do capítulo",
+  "返回刚才位置": "Voltar à posição anterior"
 }

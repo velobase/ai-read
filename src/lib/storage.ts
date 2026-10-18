@@ -295,7 +295,11 @@ export function loadSettings(): Settings {
     readingMode: ['original', 'bilingual', 'translation'].includes(raw.readingMode)
       ? raw.readingMode
       : defaults.readingMode,
-    navigationMode: raw.navigationMode === 'paged' ? 'paged' : 'scroll',
+    navigationMode: ['paged', 'scroll'].includes(raw.navigationMode)
+      ? raw.navigationMode
+      : defaults.navigationMode,
+    pageEffect: ['curl', 'slide', 'none'].includes(raw.pageEffect) ? raw.pageEffect : 'curl',
+    scrollFlow: raw.scrollFlow === 'chapter' ? 'chapter' : 'continuous',
   };
 }
 export function saveSettings(settings: Settings) {

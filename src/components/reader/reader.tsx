@@ -25,7 +25,10 @@ import {
   readReadingAnchor,
   restoreReadingAnchor,
   useReadingNavigation,
+  type ReadingAnchor,
 } from './use-reading-navigation';
+import { activeFrame, pageCount, setPage } from './reading-layout';
+import { useReaderTranslations } from './use-reader-translations';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -46,6 +49,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -190,7 +194,7 @@ export default function Reader({
   const appearanceOpen = tool === 'appearance';
   const [chromeVisible, setChromeVisible] = useState(true);
   const [selectionMenu, setSelectionMenu] = useState<{ top: number; left: number } | null>(null);
-  const layoutAnchor = useRef<Pick<Position, 'paragraph' | 'offset'> | null>(null);
+  const layoutAnchor = useRef<ReadingAnchor | null>(null);
   const pointerStart = useRef<{ x: number; y: number; scroll: number; time: number } | null>(null);
   const selectionTime = useRef(0);
   const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -202,13 +206,12 @@ export default function Reader({
   const savingNoteRef = useRef(false);
   const [deleteNote, setDeleteNote] = useState<Note | null>(null);
   const [referenceReturn, setReferenceReturn] = useState<{
-    id: string;
-    offset: number;
-    panel: 'chat' | 'notes';
+    anchor: ReadingAnchor;
+    mode: Settings['navigationMode'];
+    panel: 'chat' | 'notes' | null;
     selection: PassageSelection | null;
   } | null>(null);
-  const jumpOffset = useRef<number | null>(null);
-  const jumpParagraphOffset = useRef(0);
+  const jumpAnchor = useRef<ReadingAnchor | null>(null);
   const jumpEdge = useRef<'start' | 'end'>('start');
   const pendingPosition = useRef<{ bookId: string; position: Position } | null>(null);
   const [question, setQuestion] = useState('');
@@ -218,6 +221,8 @@ export default function Reader({
   const [busyText, setBusyText] = useState('');
   const [notice, setNotice] = useState('');
   const [jump, setJump] = useState<string | null>(null);
+  const [jumpHighlight, setJumpHighlight] = useState<string | null>(null);
+  const [scrollRange, setScrollRange] = useState({ bookId: '', start: 0, end: 1 });
   const readerRef = useRef<HTMLElement>(null);
   const chatEnd = useRef<HTMLDivElement>(null);
   const chatScrollPosition = useRef<number | null>(null);
@@ -260,15 +265,54 @@ export default function Reader({
     onComplete: (key, value) => setTranslations((previous) => ({ ...previous, [key]: value })),
   });
   const normalizeHeading = (text: string) => text.replace(/[\s\p{P}]/gu, '').toLowerCase();
-  const hasChapterHeading =
-    normalizeHeading(chapter.paragraphs[0]?.text ?? '') === normalizeHeading(chapter.title);
-  const allParagraphs = book.chapters.flatMap((c) => c.paragraphs);
+  const allParagraphs = useMemo(() => book.chapters.flatMap((c) => c.paragraphs), [book]);
+  const continuous = settings.navigationMode === 'scroll' && settings.scrollFlow === 'continuous';
+  const range =
+    scrollRange.bookId === book.id
+      ? scrollRange
+      : {
+          start: Math.max(0, position.chapter - 1),
+          end: Math.min(book.chapters.length - 1, position.chapter + 1),
+        };
+  const renderedChapters = book.chapters
+    .map((chapter, index) => ({ chapter, index }))
+    .filter(({ index }) =>
+      settings.navigationMode === 'scroll' && settings.scrollFlow === 'chapter'
+        ? index === position.chapter
+        : continuous
+          ? index >= range.start && index <= range.end
+          : Math.abs(index - position.chapter) <= 1,
+    );
+  const stableTranslations = useReaderTranslations({
+    book,
+    settings,
+    chapterIndex: position.chapter,
+    translations,
+    getTranslation,
+    root: readerRef,
+  });
   const navigation = useReadingNavigation({
     root: readerRef,
     chapterId: chapter.id,
     chapterIndex: position.chapter,
     chapterCount: book.chapters.length,
     mode: settings.navigationMode,
+    effect: settings.pageEffect,
+    rtl: book.pageDirection === 'rtl',
+    layoutKey: [
+      settings.fontSize,
+      settings.fontFamily,
+      settings.lineHeight,
+      settings.pageWidth,
+      settings.pageMargin,
+      settings.readingMode,
+      settings.scrollFlow,
+      settings.language,
+      settings.model,
+      settings.baseUrl,
+      settings.translationPrompt,
+      stableTranslations.revision,
+    ].join(':'),
     enabled: ready && !missing && !switching && !jump,
     blocked: Boolean(tool || selectionMenu),
     onChapter: toChapter,
@@ -344,9 +388,36 @@ export default function Reader({
         safePosition.paragraph = targetParagraph;
         safePosition.farthest = Math.max(safePosition.farthest, targetChapter);
         safePosition.offset = 0;
+        safePosition.textOffset = 0;
+        safePosition.textQuote = undefined;
+        safePosition.textSource = 'original';
       }
-      jumpParagraphOffset.current = safePosition.offset ?? 0;
+      jumpAnchor.current = safePosition;
+      try {
+        const preferences = JSON.parse(
+          localStorage.getItem(storageKey('ai-read-book-navigation')) || '{}',
+        );
+        const saved = preferences[next.id];
+        if (saved)
+          setSettings((previous) => ({
+            ...previous,
+            navigationMode: ['paged', 'scroll'].includes(saved.navigationMode)
+              ? saved.navigationMode
+              : previous.navigationMode,
+            pageEffect: ['curl', 'slide', 'none'].includes(saved.pageEffect)
+              ? saved.pageEffect
+              : previous.pageEffect,
+            scrollFlow: saved.scrollFlow === 'chapter' ? 'chapter' : 'continuous',
+          }));
+      } catch {
+        /* Optional, device-local book preferences. */
+      }
       setBook(next);
+      setScrollRange({
+        bookId: next.id,
+        start: Math.max(0, safePosition.chapter - 1),
+        end: Math.min(next.chapters.length - 1, safePosition.chapter + 1),
+      });
       setPosition(safePosition);
       setNotes(savedNotes);
       setMessages(savedMessages);
@@ -572,22 +643,26 @@ export default function Reader({
     restoring.current = true;
     const frame = requestAnimationFrame(() => {
       if (readerRef.current) {
-        if (jumpEdge.current === 'end')
-          readerRef.current.scrollTo({ top: readerRef.current.scrollHeight, behavior: 'instant' });
-        else
-          restoreReadingAnchor(readerRef.current, {
-            paragraph: jump,
-            offset: jumpParagraphOffset.current,
-          });
+        const root = readerRef.current;
+        if (jumpEdge.current === 'end' && settings.navigationMode === 'paged') {
+          const frame = activeFrame(root);
+          if (frame) setPage(frame, pageCount(frame) - 1);
+        } else if (jumpEdge.current === 'end') {
+          const frame = activeFrame(root);
+          if (frame)
+            root.scrollTo({
+              top:
+                root.scrollTop +
+                frame.getBoundingClientRect().bottom -
+                root.getBoundingClientRect().bottom +
+                64,
+              behavior: 'instant',
+            });
+        } else restoreReadingAnchor(root, jumpAnchor.current || { paragraph: jump, offset: 0 });
+        navigation.refresh();
       }
-      jumpParagraphOffset.current = 0;
+      jumpAnchor.current = null;
       jumpEdge.current = 'start';
-      if (jumpOffset.current !== null && readerRef.current) {
-        const element = document.getElementById(`passage-${jump}`);
-        if (element)
-          readerRef.current.scrollTop += element.getBoundingClientRect().top - jumpOffset.current;
-        jumpOffset.current = null;
-      }
       setJump(null);
       requestAnimationFrame(() => {
         restoring.current = false;
@@ -644,13 +719,48 @@ export default function Reader({
     settings.pageMargin,
     settings.readingMode,
     settings.navigationMode,
+    settings.scrollFlow,
+    settings.language,
     settings.theme,
+    position.chapter,
+    scrollRange.start,
+    scrollRange.end,
   ]);
+
+  useEffect(() => {
+    if (!jumpHighlight) return;
+    const timer = setTimeout(() => setJumpHighlight(null), 1800);
+    return () => clearTimeout(timer);
+  }, [jumpHighlight]);
+
+  useEffect(() => {
+    const root = readerRef.current;
+    if (!root) return;
+    const update = () => saveScroll();
+    root.addEventListener('reader-location', update);
+    return () => root.removeEventListener('reader-location', update);
+  });
 
   function updateAppearance(patch: Partial<Settings>) {
     const root = readerRef.current;
     layoutAnchor.current = root ? readReadingAnchor(root) : null;
     setSettings((previous) => ({ ...previous, ...patch }));
+    if (patch.navigationMode || patch.pageEffect || patch.scrollFlow) {
+      try {
+        const preferences = JSON.parse(
+          localStorage.getItem(storageKey('ai-read-book-navigation')) || '{}',
+        );
+        const next = { ...settings, ...patch };
+        preferences[book.id] = {
+          navigationMode: next.navigationMode,
+          pageEffect: next.pageEffect,
+          scrollFlow: next.scrollFlow,
+        };
+        localStorage.setItem(storageKey('ai-read-book-navigation'), JSON.stringify(preferences));
+      } catch {
+        /* Reading still works without optional preferences. */
+      }
+    }
   }
 
   function openCompanion(nextPanel: 'chat' | 'notes') {
@@ -673,35 +783,52 @@ export default function Reader({
   }
 
   function followReference(id: string, source: 'chat' | 'notes') {
-    const current = document.getElementById(`passage-${position.paragraph}`);
     setReferenceReturn({
-      id: position.paragraph,
-      offset: current?.getBoundingClientRect().top ?? 100,
+      anchor: (readerRef.current && readReadingAnchor(readerRef.current)) || position,
+      mode: settings.navigationMode,
       panel: source,
       selection: selected,
     });
-    navigate(id);
+    navigate(id, false);
     openTool(null);
   }
 
   function returnFromReference() {
     if (!referenceReturn) return;
-    jumpOffset.current = referenceReturn.offset;
-    navigate(referenceReturn.id);
+    navigate(referenceReturn.anchor.paragraph, false);
+    jumpAnchor.current = referenceReturn.anchor;
+    setSettings((current) => ({ ...current, navigationMode: referenceReturn.mode }));
     setSelected(referenceReturn.selection);
-    openCompanion(referenceReturn.panel);
+    if (referenceReturn.panel) openCompanion(referenceReturn.panel);
+    else openTool(null);
     setReferenceReturn(null);
   }
 
-  function navigate(id: string) {
+  function navigate(id: string, remember = true) {
     const index = book.chapters.findIndex((c) => c.paragraphs.some((p) => p.id === id));
     if (index < 0) return;
+    if (remember && readerRef.current) {
+      const anchor = readReadingAnchor(readerRef.current);
+      if (anchor)
+        setReferenceReturn({
+          anchor,
+          mode: settings.navigationMode,
+          panel: null,
+          selection: selected,
+        });
+      setJumpHighlight(id);
+    }
+    setScrollRange({
+      bookId: book.id,
+      start: Math.max(0, index - 1),
+      end: Math.min(book.chapters.length - 1, index + 1),
+    });
     setSelected(null);
     setSelectionMenu(null);
     if (scrollTimer.current) clearTimeout(scrollTimer.current);
     pendingPosition.current = null;
     restoring.current = true;
-    jumpParagraphOffset.current = 0;
+    jumpAnchor.current = null;
     window.getSelection()?.removeAllRanges();
     setPosition((p) => ({ chapter: index, paragraph: id, farthest: Math.max(p.farthest, index) }));
     setJump(id);
@@ -712,19 +839,72 @@ export default function Reader({
     if (c?.paragraphs.length) {
       setSelected(null);
       jumpEdge.current = edge;
-      navigate(edge === 'end' ? c.paragraphs[c.paragraphs.length - 1].id : c.paragraphs[0].id);
+      navigate(
+        edge === 'end' ? c.paragraphs[c.paragraphs.length - 1].id : c.paragraphs[0].id,
+        false,
+      );
     }
   }
   function saveScroll() {
-    if (restoring.current || switching || !ready) return;
+    if (restoring.current || switching || !ready || readerRef.current?.dataset.turning === 'true')
+      return;
     const root = readerRef.current;
     const anchor = root && readReadingAnchor(root);
     if (!anchor) return;
-    const next = { ...position, ...anchor };
+    if (continuous && root) {
+      const nearBottom =
+        root.scrollHeight - root.scrollTop - root.clientHeight < root.clientHeight &&
+        range.end < book.chapters.length - 1;
+      if (nearBottom) {
+        // Appending below changes no existing geometry and must not interrupt inertia.
+        setScrollRange({
+          bookId: book.id,
+          start: range.start,
+          end: range.end + 1,
+        });
+      }
+    }
+    const { visualOffset: _visualOffset, chapter: anchoredChapter, ...contentAnchor } = anchor;
+    const index = anchoredChapter ?? position.chapter;
+    const next = {
+      ...position,
+      ...contentAnchor,
+      chapter: index,
+      farthest: Math.max(position.farthest, index),
+    };
     pendingPosition.current = { bookId: book.id, position: next };
     if (scrollTimer.current) clearTimeout(scrollTimer.current);
     scrollTimer.current = setTimeout(() => {
-      if (!restoring.current) setPosition(next);
+      if (!restoring.current) {
+        if (continuous && root) {
+          const bounds = root.getBoundingClientRect();
+          const nearby = Array.from(
+            root.querySelectorAll<HTMLElement>('.reader-chapters > [data-chapter-index]'),
+          )
+            .filter((frame) => {
+              const rect = frame.getBoundingClientRect();
+              return (
+                rect.bottom > bounds.top - root.clientHeight &&
+                rect.top < bounds.bottom + root.clientHeight
+              );
+            })
+            .map((frame) => Number(frame.dataset.chapterIndex));
+          if (nearby.length) {
+            const preloadPrevious = root.scrollTop < root.clientHeight && range.start > 0;
+            const start = Math.max(
+              0,
+              Math.min(index - 1, ...nearby, preloadPrevious ? range.start - 1 : index),
+            );
+            if (start !== range.start) layoutAnchor.current = anchor;
+            setScrollRange({
+              bookId: book.id,
+              start,
+              end: Math.min(book.chapters.length - 1, Math.max(index + 1, ...nearby)),
+            });
+          }
+        }
+        setPosition(next);
+      }
     }, 180);
   }
   function readSelection() {
@@ -743,7 +923,7 @@ export default function Reader({
     const start = selection.getRangeAt(0).startContainer;
     const anchor = start instanceof Element ? start : start.parentElement;
     const id = anchor?.closest('[data-paragraph]')?.getAttribute('data-paragraph');
-    const paragraph = chapter.paragraphs.find((p) => p.id === id);
+    const paragraph = allParagraphs.find((p) => p.id === id);
     if (paragraph) {
       selectionTime.current = Date.now();
       setSelected({ paragraph, ...captureNoteSelection(selection.getRangeAt(0)) });
@@ -761,7 +941,7 @@ export default function Reader({
     if (book.language.toLowerCase() === settings.language.toLowerCase()) return p.text;
     return (
       translations[translationKey(settings, p.id)] ||
-      (book.id === sampleBook.id && settings.language === 'zh-CN' && !aiReady
+      (book.id === sampleBook.id && settings.language === 'zh-CN'
         ? sampleTranslations[`zh-CN:${p.id}:sample`]
         : '')
     );
@@ -1044,6 +1224,15 @@ export default function Reader({
         <span className="min-w-0 truncate text-sm text-muted-foreground">{book.title}</span>
         <Button
           variant="ghost"
+          size="icon"
+          className="shrink-0 rounded-full text-muted-foreground md:hidden"
+          onClick={() => openCompanion('chat')}
+          aria-label={t('打开 AI 伴读')}
+        >
+          <Sparkles size={20} strokeWidth={1.5} />
+        </Button>
+        <Button
+          variant="ghost"
           size="icon-lg"
           className="shrink-0 rounded-full text-muted-foreground"
           onClick={() => openTool('more')}
@@ -1055,6 +1244,7 @@ export default function Reader({
 
       <main
         id="reading-surface"
+        aria-busy={!ready || switching || Boolean(jump)}
         tabIndex={0}
         aria-label={
           settings.navigationMode === 'paged'
@@ -1078,6 +1268,7 @@ export default function Reader({
             time: Date.now(),
           };
         }}
+        onPointerMove={navigation.onPointerMove}
         onPointerUp={navigation.onPointerUp}
         onPointerCancel={navigation.onPointerCancel}
         onMouseUp={readSelection}
@@ -1117,190 +1308,197 @@ export default function Reader({
               if (
                 !window.getSelection()?.toString().trim() &&
                 Date.now() - selectionTime.current > 400
-              )
-                setChromeVisible((visible) => !visible);
+              ) {
+                const bounds = readerRef.current
+                  ?.querySelector('.page-viewport')
+                  ?.getBoundingClientRect();
+                const fraction = bounds ? (event.clientX - bounds.left) / bounds.width : 0.5;
+                if (settings.navigationMode === 'paged' && (fraction < 0.2 || fraction > 0.8))
+                  navigation.turn(
+                    ((fraction < 0.2 ? -1 : 1) * (book.pageDirection === 'rtl' ? -1 : 1)) as -1 | 1,
+                  );
+                else setChromeVisible((visible) => !visible);
+              }
             }, 200);
           }
         }}
       >
-        <article
-          className="book-page"
-          data-book-page
-          data-mode={view}
-          data-font={settings.fontFamily}
-          aria-label={chapter.title}
-        >
-          {!hasChapterHeading && (
-            <h1
-              className="chapter-title"
-              dir="auto"
-              lang={book.language === 'auto' ? undefined : book.language}
-            >
-              {chapter.title}
-            </h1>
-          )}
-          {chapter.paragraphs.map((paragraph, index) => {
-            const translated = getTranslation(paragraph);
-            const streaming =
-              automaticTranslation.streaming?.id === paragraph.id
-                ? automaticTranslation.streaming
-                : undefined;
-            const isTitle = index === 0 && hasChapterHeading;
+        <div className="reader-chapters">
+          {renderedChapters.map(({ chapter: visibleChapter, index: chapterIndex }) => {
+            const hasChapterHeading =
+              normalizeHeading(visibleChapter.paragraphs[0]?.text ?? '') ===
+              normalizeHeading(visibleChapter.title);
+            const hidden = settings.navigationMode === 'paged' && chapterIndex !== position.chapter;
             return (
               <section
-                key={paragraph.id}
-                id={`passage-${paragraph.id}`}
-                data-paragraph={paragraph.id}
-                data-kind={paragraph.kind}
-                data-title={isTitle}
-                data-annotated={notes.some((note) => note.paragraphId === paragraph.id)}
-                className="reading-passage group/passage"
+                key={visibleChapter.id}
+                className="reader-chapter"
+                data-chapter-index={chapterIndex}
+                data-current={chapterIndex === position.chapter}
+                aria-hidden={hidden || undefined}
+                inert={hidden || undefined}
               >
-                {view !== 'translation' &&
-                  (isTitle ? (
-                    <h1
-                      className="chapter-title"
-                      data-note-source="original"
-                      lang={book.language === 'auto' ? undefined : book.language}
-                      dir="auto"
-                    >
-                      {markedPassage(
-                        paragraph.text,
-                        notes.filter((note) => note.paragraphId === paragraph.id),
-                      )}
-                    </h1>
-                  ) : (
-                    <div
-                      className="passage-original"
-                      data-note-source="original"
-                      lang={book.language === 'auto' ? undefined : book.language}
-                      dir="auto"
-                    >
-                      {markedPassage(
-                        paragraph.text,
-                        notes.filter((note) => note.paragraphId === paragraph.id),
-                      )}
-                    </div>
-                  ))}
-                {view !== 'original' && (
-                  <div
-                    data-translation
-                    data-note-source={translated ? 'translation' : undefined}
-                    data-note-key={translated ? translationKey(settings, paragraph.id) : undefined}
-                    className={
-                      isTitle && view === 'translation' ? 'chapter-title' : 'passage-translation'
-                    }
-                    style={
-                      !translated && streaming ? { minHeight: streaming.minHeight } : undefined
-                    }
-                    lang={settings.language}
-                    dir="auto"
+                <div className="page-viewport">
+                  <article
+                    className="book-page"
+                    data-book-page
+                    data-mode={view}
+                    data-font={settings.fontFamily}
+                    aria-label={visibleChapter.title}
                   >
-                    {(translated
-                      ? markedPassage(
-                          translated,
-                          notes.filter((note) => note.paragraphId === paragraph.id),
-                          'translation',
-                          translationKey(settings, paragraph.id),
-                        )
-                      : streaming?.text) || (
-                      <>
-                        {view === 'translation' && (
-                          <div
-                            data-note-source="original"
-                            lang={book.language}
-                            dir="auto"
-                            className="mb-3 text-foreground"
-                          >
-                            {markedPassage(
-                              paragraph.text,
-                              notes.filter((note) => note.paragraphId === paragraph.id),
-                            )}
-                          </div>
-                        )}
-                        <div
-                          lang={locale}
-                          dir={directionFor(locale)}
-                          className="flex items-center gap-2 text-xs font-sans font-normal leading-6 text-muted-foreground"
-                        >
-                          {!aiReady ? (
-                            <Button
-                              variant="link"
-                              size="plain"
-                              className="text-xs font-normal text-muted-foreground"
-                              onClick={() => (needsLogin ? openLogin() : setSettingsOpen(true))}
-                            >
-                              {needsLogin ? t('登录后继续 AI 翻译') : t('连接模型以显示译文')}
-                            </Button>
-                          ) : automaticTranslation.status === 'error' ? (
-                            <Button
-                              variant="link"
-                              size="plain"
-                              className="text-xs font-normal text-muted-foreground"
-                              onClick={automaticTranslation.retry}
-                              title={localize(automaticTranslation.error || '')}
-                            >
-                              {t('译文暂不可用 · 重试')}
-                            </Button>
-                          ) : automaticTranslation.status === 'offline' ? (
-                            t('联网后继续翻译')
-                          ) : (
-                            <>
-                              <LoaderCircle size={12} className="animate-spin" />
-                              {t('正在准备译文')}
-                            </>
-                          )}
-                        </div>
-                      </>
+                    {!hasChapterHeading && (
+                      <h1
+                        className="chapter-title"
+                        dir="auto"
+                        lang={book.language === 'auto' ? undefined : book.language}
+                      >
+                        {visibleChapter.title}
+                      </h1>
                     )}
-                  </div>
+                    {visibleChapter.paragraphs.map((paragraph, index) => {
+                      const translated = stableTranslations.read(chapterIndex, paragraph);
+                      const isTitle = index === 0 && hasChapterHeading;
+                      return (
+                        <section
+                          key={paragraph.id}
+                          id={`passage-${paragraph.id}`}
+                          data-paragraph={paragraph.id}
+                          data-jump-target={jumpHighlight === paragraph.id || undefined}
+                          data-kind={paragraph.kind}
+                          data-title={isTitle}
+                          data-annotated={notes.some((note) => note.paragraphId === paragraph.id)}
+                          className="reading-passage group/passage"
+                        >
+                          {view !== 'translation' &&
+                            (isTitle ? (
+                              <h1
+                                className="chapter-title"
+                                data-note-source="original"
+                                lang={book.language === 'auto' ? undefined : book.language}
+                                dir="auto"
+                              >
+                                {markedPassage(
+                                  paragraph.text,
+                                  notes.filter((note) => note.paragraphId === paragraph.id),
+                                )}
+                              </h1>
+                            ) : (
+                              <div
+                                className="passage-original"
+                                data-note-source="original"
+                                lang={book.language === 'auto' ? undefined : book.language}
+                                dir="auto"
+                              >
+                                {markedPassage(
+                                  paragraph.text,
+                                  notes.filter((note) => note.paragraphId === paragraph.id),
+                                )}
+                              </div>
+                            ))}
+                          {view !== 'original' && (translated || view === 'translation') && (
+                            <div
+                              data-translation
+                              data-note-source={translated ? 'translation' : undefined}
+                              data-note-key={
+                                translated ? translationKey(settings, paragraph.id) : undefined
+                              }
+                              className={
+                                isTitle && view === 'translation'
+                                  ? 'chapter-title'
+                                  : 'passage-translation'
+                              }
+                              lang={settings.language}
+                              dir="auto"
+                            >
+                              {translated ? (
+                                markedPassage(
+                                  translated,
+                                  notes.filter((note) => note.paragraphId === paragraph.id),
+                                  'translation',
+                                  translationKey(settings, paragraph.id),
+                                )
+                              ) : (
+                                <div
+                                  data-note-source="original"
+                                  lang={book.language}
+                                  dir="auto"
+                                  className="text-foreground"
+                                >
+                                  {markedPassage(
+                                    paragraph.text,
+                                    notes.filter((note) => note.paragraphId === paragraph.id),
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          {!isTitle && (
+                            <div className="passage-actions">
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                className="rounded-full"
+                                aria-label={t('摘录段落 {value0}', { value0: paragraph.id })}
+                                title={t('摘录这一段')}
+                                onClick={() => {
+                                  setSelected({ paragraph, text: paragraph.text });
+                                  openNoteComposer({ paragraph, text: paragraph.text });
+                                }}
+                              >
+                                <Bookmark size={15} />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                className="rounded-full"
+                                aria-label={t('解释段落 {value0}', { value0: paragraph.id })}
+                                title={t('围绕这一段提问')}
+                                disabled={Boolean(busy)}
+                                onClick={() => {
+                                  const passage = { paragraph, text: paragraph.text };
+                                  setSelected(passage);
+                                  openCompanion('chat');
+                                }}
+                              >
+                                <Sparkles size={15} />
+                              </Button>
+                            </div>
+                          )}
+                        </section>
+                      );
+                    })}
+                  </article>
+                </div>
+                {settings.navigationMode === 'paged' && (
+                  <>
+                    <span
+                      data-page-grip
+                      className="reader-page-grip reader-page-grip-left"
+                      aria-hidden="true"
+                    />
+                    <span
+                      data-page-grip
+                      className="reader-page-grip reader-page-grip-right"
+                      aria-hidden="true"
+                    />
+                  </>
                 )}
-                {!isTitle && (
-                  <div className="passage-actions">
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      className="rounded-full"
-                      aria-label={t('摘录段落 {value0}', { value0: paragraph.id })}
-                      title={t('摘录这一段')}
-                      onClick={() => {
-                        setSelected({ paragraph, text: paragraph.text });
-                        openNoteComposer({ paragraph, text: paragraph.text });
-                      }}
-                    >
-                      <Bookmark size={15} />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      className="rounded-full"
-                      aria-label={t('解释段落 {value0}', { value0: paragraph.id })}
-                      title={t('围绕这一段提问')}
-                      disabled={Boolean(busy)}
-                      onClick={() => {
-                        const passage = { paragraph, text: paragraph.text };
-                        setSelected(passage);
-                        openCompanion('chat');
-                      }}
-                    >
-                      <Sparkles size={15} />
-                    </Button>
-                  </div>
+                {settings.navigationMode === 'scroll' && settings.scrollFlow === 'chapter' && (
+                  <ChapterEnding
+                    chapter={visibleChapter}
+                    next={book.chapters[chapterIndex + 1]}
+                    previous={book.chapters[chapterIndex - 1]}
+                    index={chapterIndex}
+                    turning={navigation.turning}
+                    onChapter={navigation.changeChapter}
+                    onContents={() => setSidebarOpen(true)}
+                    onFinish={() => router.push('/library')}
+                  />
                 )}
               </section>
             );
           })}
-          <ChapterEnding
-            chapter={chapter}
-            next={book.chapters[position.chapter + 1]}
-            previous={book.chapters[position.chapter - 1]}
-            index={position.chapter}
-            turning={navigation.turning}
-            onChapter={navigation.changeChapter}
-            onContents={() => setSidebarOpen(true)}
-            onFinish={() => router.push('/library')}
-          />
-        </article>
+        </div>
       </main>
 
       <nav className="desktop-reading-tools reading-chrome" aria-label={t('阅读工具')}>
@@ -1399,8 +1597,41 @@ export default function Reader({
           <Maximize2 size={17} />
         </Button>
       )}
+      {view !== 'original' &&
+        !stableTranslations.pending &&
+        chapter.paragraphs.some((p) => !getTranslation(p)) && (
+          <div className="reader-translation-status" role="status">
+            {!aiReady ? (
+              <button onClick={() => (needsLogin ? openLogin() : setSettingsOpen(true))}>
+                {needsLogin ? t('登录后继续 AI 翻译') : t('连接模型以显示译文')}
+              </button>
+            ) : automaticTranslation.status === 'error' ? (
+              <button
+                onClick={automaticTranslation.retry}
+                title={localize(automaticTranslation.error || '')}
+              >
+                {t('译文暂不可用 · 重试')}
+              </button>
+            ) : automaticTranslation.status === 'offline' ? (
+              t('联网后继续翻译')
+            ) : (
+              t('正在准备译文')
+            )}
+          </div>
+        )}
+      {stableTranslations.pending && settings.navigationMode === 'paged' && (
+        <button
+          className="reader-translation-ready"
+          onClick={stableTranslations.apply}
+          disabled={navigation.turning}
+        >
+          {t('译文已就绪 · 显示译文')}
+        </button>
+      )}
       <ReadingNavigation
         mode={settings.navigationMode}
+        chapterTitle={chapter.title}
+        rtl={book.pageDirection === 'rtl'}
         page={navigation.page}
         pages={navigation.pages}
         atStart={navigation.atStart}
@@ -1421,7 +1652,10 @@ export default function Reader({
         </div>
       )}
       <footer className="mobile-reading-tools reading-chrome">
-        <div className="mb-3 flex items-center gap-3 px-3 text-[11px] text-muted-foreground">
+        <div
+          dir={book.pageDirection === 'rtl' ? 'rtl' : 'ltr'}
+          className="mb-3 flex items-center gap-3 px-3 text-[11px] text-muted-foreground"
+        >
           <Button
             variant="ghost"
             size="icon-sm"
@@ -1434,10 +1668,10 @@ export default function Reader({
             onClick={() =>
               settings.navigationMode === 'paged'
                 ? void navigation.turn(-1)
-                : navigation.changeChapter(position.chapter - 1)
+                : navigation.changeChapter(position.chapter - 1, 'end')
             }
           >
-            <ChevronLeft size={15} />
+            {book.pageDirection === 'rtl' ? <ChevronRight size={15} /> : <ChevronLeft size={15} />}
           </Button>
           <button
             className="flex min-h-8 min-w-0 flex-1 items-center gap-3"
@@ -1447,7 +1681,7 @@ export default function Reader({
             <span className="min-w-0 flex-1 truncate text-start">{chapter.title}</span>
             <span className="shrink-0 tabular-nums">
               {settings.navigationMode === 'paged'
-                ? t('{value0}/{value1} 屏', { value0: navigation.page, value1: navigation.pages })
+                ? t('{value0}/{value1} 页', { value0: navigation.page, value1: navigation.pages })
                 : `${progress}%`}
             </span>
           </button>
@@ -1472,7 +1706,7 @@ export default function Reader({
                 : navigation.changeChapter(position.chapter + 1)
             }
           >
-            <ChevronRight size={15} />
+            {book.pageDirection === 'rtl' ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}
           </Button>
         </div>
         <nav className="grid grid-cols-5" aria-label={t('手机阅读工具')}>
@@ -1529,17 +1763,6 @@ export default function Reader({
         </nav>
       </footer>
 
-      <Button
-        variant="plain"
-        size="plain"
-        className="mobile-ai-entry reading-chrome"
-        aria-label={t('打开 AI 伴读')}
-        onClick={() => openCompanion('chat')}
-      >
-        <Sparkles size={23} strokeWidth={1.5} />
-        <span className="text-[10px]">{t('AI 伴读')}</span>
-      </Button>
-
       {referenceReturn && !tool && (
         <div className="reference-return fixed bottom-10 left-1/2 z-30 flex -translate-x-1/2 items-center gap-1 rounded-full border bg-card p-1 shadow-lg">
           <Button
@@ -1548,9 +1771,11 @@ export default function Reader({
             onClick={returnFromReference}
           >
             <ArrowLeft size={14} />
-            {t('返回{value0}', {
-              value0: referenceReturn.panel === 'chat' ? t('AI 伴读') : t('笔记'),
-            })}
+            {referenceReturn.panel
+              ? t('返回{value0}', {
+                  value0: referenceReturn.panel === 'chat' ? t('AI 伴读') : t('笔记'),
+                })
+              : t('返回刚才位置')}
           </Button>
           <Button
             variant="ghost"
@@ -1696,7 +1921,10 @@ export default function Reader({
                 key={item.id}
                 aria-current={position.chapter === index ? 'location' : undefined}
                 className="flex w-full items-center justify-between gap-4 rounded-lg px-3 py-4 text-start text-sm leading-7 hover:bg-muted aria-[current=location]:text-primary"
-                onClick={() => toChapter(index)}
+                onClick={() => {
+                  const firstParagraph = item.paragraphs[0];
+                  if (firstParagraph) navigate(firstParagraph.id);
+                }}
                 disabled={switching}
               >
                 <span>{item.title}</span>

@@ -140,8 +140,14 @@ export function useAutomaticTranslation(options: Options) {
       const bounds = root!.getBoundingClientRect();
       const elements = Array.from(root!.querySelectorAll<HTMLElement>('[data-paragraph]'));
       const visible = elements.filter((element) => {
-        const rect = element.getBoundingClientRect();
-        return rect.bottom > bounds.top + 24 && rect.top < bounds.bottom - 24;
+        if (element.closest('[aria-hidden="true"]')) return false;
+        return Array.from(element.getClientRects()).some(
+          (rect) =>
+            rect.bottom > bounds.top + 24 &&
+            rect.top < bounds.bottom - 24 &&
+            rect.right > bounds.left + 24 &&
+            rect.left < bounds.right - 24,
+        );
       });
       // At the chapter heading, prepare the first passage before it enters view.
       const first =
@@ -170,6 +176,7 @@ export function useAutomaticTranslation(options: Options) {
     const page = root.querySelector('[data-book-page]');
     if (page) resize.observe(page);
     root.addEventListener('scroll', scheduleScan, { passive: true });
+    root.addEventListener('reader-location', scheduleScan);
     window.addEventListener('online', scan);
     window.addEventListener('offline', scan);
     document.addEventListener('visibilitychange', scan);
@@ -182,6 +189,7 @@ export function useAutomaticTranslation(options: Options) {
       clearTimeout(retryTimer);
       resize.disconnect();
       root.removeEventListener('scroll', scheduleScan);
+      root.removeEventListener('reader-location', scheduleScan);
       window.removeEventListener('online', scan);
       window.removeEventListener('offline', scan);
       document.removeEventListener('visibilitychange', scan);

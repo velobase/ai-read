@@ -166,6 +166,42 @@ export function ReadingAppearance({
         mode={settings.navigationMode}
         onChange={(navigationMode) => update({ navigationMode })}
       />
+      <div
+        className="reading-submode-picker"
+        role="group"
+        aria-label={settings.navigationMode === 'paged' ? t('翻页效果') : t('滚动跨章')}
+      >
+        {settings.navigationMode === 'paged'
+          ? (
+              [
+                ['curl', t('卷页')],
+                ['slide', t('平移')],
+                ['none', t('无动画')],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                aria-pressed={settings.pageEffect === value}
+                onClick={() => update({ pageEffect: value })}
+              >
+                {label}
+              </button>
+            ))
+          : (
+              [
+                ['continuous', t('连续跨章')],
+                ['chapter', t('章末停下')],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                aria-pressed={settings.scrollFlow === value}
+                onClick={() => update({ scrollFlow: value })}
+              >
+                {label}
+              </button>
+            ))}
+      </div>
       <div className="mb-4 flex items-center gap-5 md:mb-6">
         <span className="text-sm text-muted-foreground" aria-hidden="true">
           A

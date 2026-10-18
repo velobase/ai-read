@@ -620,5 +620,18 @@
   "本机数据已保存。登录后可跨设备同步。": "Data is saved on this device. Sign in to sync across devices.",
   "{count} 条数据暂未同步，已保留在本机；其他数据继续同步。": "{count} items could not sync and are kept on this device. Other data continues syncing.",
   "这条笔记已更新，未删除。请查看最新内容后重试。": "This note has changed and was not deleted. Review the latest content and try again.",
-  "书籍正文过长，请选择较小的文件。": "The book contains too much text. Please choose a smaller file."
+  "书籍正文过长，请选择较小的文件。": "The book contains too much text. Please choose a smaller file.",
+  "左右轻扫翻页，可以拖回取消；长按仍可选文。": "Swipe to turn a page; drag back to cancel. Long-press to select text.",
+  "上下滚动，阅读位置自动保存；空格向下滚动一屏。": "Scroll vertically; your place is saved. Space scrolls down one screen.",
+  "{value0} / {value1} 页": "{value0} / {value1} pages",
+  "{value0}/{value1} 页": "{value0}/{value1} pages",
+  "译文已就绪 · 显示译文": "Translation ready · Show",
+  "翻页效果": "Page effect",
+  "滚动跨章": "Chapter scrolling",
+  "卷页": "Curl",
+  "平移": "Slide",
+  "无动画": "None",
+  "连续跨章": "Continuous",
+  "章末停下": "Stop at chapter end",
+  "返回刚才位置": "Back to previous location"
 }

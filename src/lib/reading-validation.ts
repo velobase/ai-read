@@ -16,6 +16,10 @@ export function validPosition(book: Book, value: unknown): value is Position {
     Number.isInteger(p.farthest) &&
     p.farthest >= p.chapter &&
     p.farthest < book.chapters.length &&
+    (p.textOffset === undefined ||
+      (Number.isSafeInteger(p.textOffset) && p.textOffset >= 0 && p.textOffset <= MAX_BOOK_TEXT)) &&
+    (p.textSource === undefined || p.textSource === 'original' || p.textSource === 'translation') &&
+    (p.textQuote === undefined || (typeof p.textQuote === 'string' && p.textQuote.length <= 64)) &&
     book.chapters[p.chapter].paragraphs.some((paragraph) => paragraph.id === p.paragraph)
   );
 }

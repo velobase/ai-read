@@ -269,6 +269,10 @@ export async function importBook(
     title: text(packageDoc, 'title') || file.name.replace(/\.epub$/i, ''),
     author: text(packageDoc, 'creator') || labels.unknownAuthor,
     language: text(packageDoc, 'language') || 'auto',
+    pageDirection:
+      descendants(packageDoc, 'spine')[0]?.getAttribute('page-progression-direction') === 'rtl'
+        ? 'rtl'
+        : 'ltr',
     chapters,
     importedAt: Date.now(),
     cover,

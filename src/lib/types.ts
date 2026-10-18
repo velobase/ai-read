@@ -14,13 +14,17 @@ export type Book = {
   description?: string;
   category?: string;
   cover?: string;
+  pageDirection?: 'ltr' | 'rtl';
 };
 export type Position = {
   chapter: number;
   paragraph: string;
   farthest: number;
-  /** Fraction of the current paragraph already above the reading line. */
+  /** Approximate original-text fraction; retained for older progress records. */
   offset?: number;
+  textOffset?: number;
+  textSource?: 'original' | 'translation';
+  textQuote?: string;
 };
 export type NoteAnchor = {
   source: 'original' | 'translation';
@@ -60,6 +64,8 @@ export type Settings = {
   scope: 'chapter' | 'read' | 'book';
   readingMode: 'original' | 'bilingual' | 'translation';
   navigationMode: 'scroll' | 'paged';
+  pageEffect: 'curl' | 'slide' | 'none';
+  scrollFlow: 'continuous' | 'chapter';
 };
 export const languages = readingLanguages;
 export const defaults: Settings = {
@@ -76,6 +82,8 @@ export const defaults: Settings = {
   theme: 'paper',
   scope: 'chapter',
   readingMode: 'original',
-  navigationMode: 'scroll',
+  navigationMode: 'paged',
+  pageEffect: 'curl',
+  scrollFlow: 'continuous',
 };
 export const languageName = (code: string) => languages.find(([id]) => id === code)?.[1] ?? code;
