@@ -1,8 +1,10 @@
 import { strFromU8, unzip } from 'fflate';
 import type { Book, Chapter, Paragraph } from './types';
+import { validateBook } from './reading-backup';
+import { MAX_BOOK_TEXT } from './reading-validation';
 
 const MAX_FILE = 30 * 1024 * 1024;
-const MAX_TEXT = 20 * 1024 * 1024;
+const MAX_TEXT = MAX_BOOK_TEXT;
 const MAX_ENTRY = 4 * 1024 * 1024;
 const xml = (value: string) => new DOMParser().parseFromString(value, 'application/xml');
 const descendants = (doc: Document | Element, name: string) =>
@@ -39,7 +41,7 @@ function paragraphize(value: string, chapterIndex: number): Paragraph[] {
     const normalized = tag === 'pre' ? raw.trim() : raw.replace(/\s+/g, ' ').trim();
     if (!normalized) return;
     // Keep individual sources bounded so translations and citations stay usable.
-    const pieces = normalized.match(/[\s\S]{1,2400}(?:\s|$)|[\s\S]{1,2400}/g) || [];
+    const pieces = normalized.match(/[\s\S]{1,2400}(?:\s|$)|[\s\S]{1,2400}/gu) || [];
     for (const piece of pieces)
       paragraphs.push({
         id: `${chapterIndex + 1}.${paragraphs.length + 1}`,
@@ -114,7 +116,19 @@ function paragraphize(value: string, chapterIndex: number): Paragraph[] {
   return paragraphs;
 }
 
-export async function importBook(file: File): Promise<Book> {
+type ImportLabels = {
+  unknownAuthor: string;
+  section: (number: number) => string;
+  chapter: (number: number) => string;
+};
+export async function importBook(
+  file: File,
+  labels: ImportLabels = {
+    unknownAuthor: 'Unknown author',
+    section: (number) => `Section ${number}`,
+    chapter: (number) => `Chapter ${number}`,
+  },
+): Promise<Book> {
   if (file.size > MAX_FILE) throw new Error('文件超过 30 MB，请选择较小的 EPUB 或 TXT。');
   if (!/\.(epub|txt)$/i.test(file.name))
     throw new Error('目前支持无 DRM 的 EPUB 和 UTF-8 TXT 文件。');
@@ -134,27 +148,27 @@ export async function importBook(file: File): Promise<Book> {
       .split(/\n\s*\n/)
       .map((p) => p.trim())
       .filter(Boolean);
-    const paras = blocks.flatMap((p) => p.match(/[\s\S]{1,2400}(?:\s|$)|[\s\S]{1,2400}/g) || []);
+    const paras = blocks.flatMap((p) => p.match(/[\s\S]{1,2400}(?:\s|$)|[\s\S]{1,2400}/gu) || []);
     const chapters: Chapter[] = [];
     for (let start = 0; start < paras.length; start += 60) {
       const i = chapters.length;
       chapters.push({
         id: `chapter-${i}`,
-        title: `第 ${i + 1} 节`,
+        title: labels.section(i + 1),
         paragraphs: paras
           .slice(start, start + 60)
           .map((p, j) => ({ id: `${i + 1}.${j + 1}`, text: p.trim(), kind: 'text' })),
       });
     }
     if (!chapters.length) throw new Error('文件没有可阅读的文字。');
-    return {
+    return validateBook({
       id,
       title: file.name.replace(/\.txt$/i, ''),
-      author: '未知作者',
+      author: labels.unknownAuthor,
       language: 'auto',
       importedAt: Date.now(),
       chapters,
-    };
+    });
   }
   let total = 0;
   let tooLarge = false;
@@ -205,18 +219,60 @@ export async function importBook(file: File): Promise<Book> {
     const heading = paragraphs.find((p) => p.kind === 'heading');
     chapters.push({
       id: `chapter-${chapters.length}`,
-      title: heading?.text.slice(0, 160) || `第 ${chapters.length + 1} 章`,
+      title: heading?.text.slice(0, 160) || labels.chapter(chapters.length + 1),
       paragraphs,
     });
   }
   if (!chapters.length)
     throw new Error('没有找到可读取的文字章节；暂不支持 DRM、扫描版和纯图片书籍。');
-  return {
+  // Decode only the declared cover, never remote image URLs or executable SVG.
+  let cover: string | undefined;
+  const coverId = descendants(packageDoc, 'meta')
+    .find((el) => el.getAttribute('name') === 'cover')
+    ?.getAttribute('content');
+  const coverItem =
+    [...manifest.values()].find((el) =>
+      el.getAttribute('properties')?.split(/\s+/).includes('cover-image'),
+    ) || (coverId ? manifest.get(coverId) : undefined);
+  const coverHref = coverItem?.getAttribute('href');
+  const mime = coverItem?.getAttribute('media-type');
+  if (coverHref && mime && ['image/jpeg', 'image/png', 'image/webp'].includes(mime)) {
+    try {
+      const coverPath = normalizePath(directory, coverHref);
+      const images = await new Promise<Record<string, Uint8Array>>((resolve, reject) => {
+        unzip(
+          new Uint8Array(buffer),
+          { filter: (entry) => entry.name === coverPath && entry.originalSize <= 2 * 1024 * 1024 },
+          (error, result) => (error ? reject(error) : resolve(result)),
+        );
+      });
+      const bytes = images[coverPath];
+      if (bytes?.length && bytes.length <= 2 * 1024 * 1024) {
+        let binary = '';
+        for (let offset = 0; offset < bytes.length; offset += 8192)
+          binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
+        cover = `data:${mime};base64,${btoa(binary)}`;
+      }
+    } catch {
+      /* An unavailable cover must not discard readable chapters. */
+    }
+  }
+  const rawDescription = text(packageDoc, 'description');
+  const description = rawDescription
+    ? new DOMParser()
+        .parseFromString(rawDescription, 'text/html')
+        .body.textContent?.trim()
+        .slice(0, 20000)
+    : undefined;
+  return validateBook({
     id,
     title: text(packageDoc, 'title') || file.name.replace(/\.epub$/i, ''),
-    author: text(packageDoc, 'creator') || '未知作者',
+    author: text(packageDoc, 'creator') || labels.unknownAuthor,
     language: text(packageDoc, 'language') || 'auto',
     chapters,
     importedAt: Date.now(),
-  };
+    cover,
+    description,
+    category: text(packageDoc, 'subject').slice(0, 200) || undefined,
+  });
 }

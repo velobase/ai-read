@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+  <!-- 07: Swiss Negative-Space Figure/Ground Book + Leaf + Nib -->
+  <!-- Deep Literary Forest-Ink Squircle -->
+  <rect x="16" y="16" width="224" height="224" rx="52" fill="#11221D" />
+  <rect x="24" y="24" width="208" height="208" rx="44" stroke="#F6F3EB" stroke-opacity="0.14" stroke-width="2" />
+
+  <!-- Left & Right Bold Flat Book Wings in Warm Archival Paper (#F6F3EB) -->
+  <!-- The central negative space between the wings carves out an upward-tilted Botanical Leaf -->
+  <path
+    d="M52 72C78 72 102 82 118 100C106 124 108 154 124 184C102 170 78 164 52 164V72Z"
+    fill="#F6F3EB"
+  />
+  <path
+    d="M204 72V164C178 164 154 170 132 184C158 158 172 122 170 78C181 74 192 72 204 72Z"
+    fill="#F6F3EB"
+  />
+
+  <!-- Positive-Space Floating Leaf Blade (Warm Emerald Accent #2DD4BF / #10B981) -->
+  <!-- Fits with surgical precision inside the negative-space channel between the two pages -->
+  <path
+    d="M128 180C114 146 120 104 160 66C162 110 150 152 128 180Z"
+    fill="#10B981"
+  />
+  <!-- Negative-space central vein / fountain pen slit -->
+  <path
+    d="M128 180C134 150 142 122 152 96"
+    stroke="#11221D"
+    stroke-width="5"
+    stroke-linecap="round"
+  />
+  <circle cx="152" cy="96" r="5.5" fill="#11221D" />
+
+  <!-- Bottom Minimalist Page Horizon Rule -->
+  <path
+    d="M64 190C90 190 112 196 128 206C144 196 166 190 192 190"
+    stroke="#F6F3EB"
+    stroke-width="6"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>

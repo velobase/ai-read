@@ -1,0 +1,138 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id                  String    @id @default(uuid())
+  name                String?
+  email               String    @unique
+  emailVerified       DateTime?
+  image               String?
+  bio                 String    @default("")
+  color               String    @default("#77a98c")
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  accounts            Account[]
+  sessions            Session[]
+  preferences         Json      @default("{}")
+  preferencesVersion  Int       @default(0)
+  preferencesMutation String?
+  books               Book[]
+}
+
+// IDs remain compatible with existing IndexedDB books. Ownership is part of every key.
+model Book {
+  userId       String
+  id           String
+  sourceHash   String
+  title        String
+  content      Json
+  shelfState   Json               @default("{}")
+  version      Int                @default(1)
+  mutationId   String
+  updatedAt    DateTime           @updatedAt
+  deletedAt    DateTime?
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  progress     ReadingProgress?
+  notes        Note[]
+  chats        ChatTurn[]
+  translations TranslationCache[]
+
+  @@id([userId, id])
+  @@unique([userId, sourceHash])
+}
+
+model ReadingProgress {
+  userId     String
+  bookId     String
+  position   Json
+  version    Int       @default(1)
+  mutationId String
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+  book       Book      @relation(fields: [userId, bookId], references: [userId, id], onDelete: Cascade)
+
+  @@id([userId, bookId])
+}
+
+model Note {
+  userId      String
+  bookId      String
+  id          String
+  paragraphId String
+  quote       String
+  anchor      Json?
+  content     String
+  createdAt   DateTime
+  version     Int       @default(1)
+  mutationId  String
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  book        Book      @relation(fields: [userId, bookId], references: [userId, id], onDelete: Cascade)
+
+  @@id([userId, bookId, id])
+}
+
+model ChatTurn {
+  userId     String
+  bookId     String
+  id         String
+  question   String
+  answer     String
+  sources    Json
+  partial    Boolean   @default(false)
+  createdAt  DateTime
+  version    Int       @default(1)
+  mutationId String
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+  book       Book      @relation(fields: [userId, bookId], references: [userId, id], onDelete: Cascade)
+
+  @@id([userId, bookId, id])
+}
+
+model TranslationCache {
+  userId         String
+  bookId         String
+  id             String
+  paragraphId    String
+  targetLanguage String
+  translation    String
+  version        Int       @default(1)
+  mutationId     String
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+  book           Book      @relation(fields: [userId, bookId], references: [userId, id], onDelete: Cascade)
+
+  @@id([userId, bookId, id])
+}
+
+model Account {
+  id                String @id @default(uuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  user              User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  createdAt    DateTime @default(now())
+  device       String   @default("浏览器")
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expires])
+}

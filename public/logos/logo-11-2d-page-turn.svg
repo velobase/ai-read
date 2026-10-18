@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+  <!-- 11: Minimalist Sunlit Dog-Ear Page Turn ("逐页 · 折角晨读") -->
+  <!-- Deep Nordic Navy Squircle -->
+  <rect x="16" y="16" width="224" height="224" rx="52" fill="#172554" />
+
+  <!-- Back Offset Page (2D Layered Stack in Sky Blue) -->
+  <rect x="64" y="44" width="116" height="156" rx="16" fill="#38BDF8" fill-opacity="0.35" />
+
+  <!-- Main Vertical Page Sheet with Top-Right Dog-Ear Cutout (Warm Cream Paper) -->
+  <path
+    d="M86 48H146L196 98V192C196 200.837 188.837 208 180 208H86C77.1634 208 70 200.837 70 192V64C70 55.1634 77.1634 48 86 48Z"
+    fill="#FAF8F5"
+  />
+
+  <!-- Flat 2D Cast Shadow Under the Folded Leaf Corner -->
+  <path
+    d="M146 98L196 98L146 142V98Z"
+    fill="#E2DDD3"
+  />
+
+  <!-- The Dog-Ear Folded Flap — Sculpted as a Crisp 2D Botanical Leaf -->
+  <path
+    d="M146 48C146 76 168 98 196 98H158C151.373 98 146 92.6274 146 86V48Z"
+    fill="#3489E7"
+  />
+  <!-- Leaf Highlight Arc on the Fold -->
+  <path
+    d="M146 48C174 48 196 70 196 98C168 98 146 76 146 48Z"
+    fill="#60A5FA"
+  />
+  <path
+    d="M152 54L190 92"
+    stroke="#FAF8F5"
+    stroke-width="3.5"
+    stroke-linecap="round"
+  />
+
+  <!-- Warm Morning Sun / Bookmark Circle + Minimalist Typography Rules -->
+  <circle cx="104" cy="92" r="13" fill="#F59E0B" />
+  <path d="M92 132H154" stroke="#1E3A8A" stroke-width="8" stroke-linecap="round" />
+  <path d="M92 154H168" stroke="#1E3A8A" stroke-opacity="0.55" stroke-width="8" stroke-linecap="round" />
+  <path d="M92 176H134" stroke="#3489E7" stroke-width="8" stroke-linecap="round" />
+</svg>

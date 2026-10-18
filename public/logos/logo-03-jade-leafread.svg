@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+  <defs>
+    <!-- Deep Forest Obsidian Base -->
+    <linearGradient id="bg-03" x1="24" y1="16" x2="232" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0F2922" />
+      <stop offset="52%" stop-color="#091915" />
+      <stop offset="100%" stop-color="#040D0A" />
+    </linearGradient>
+
+    <!-- Subsurface Emerald Glow -->
+    <radialGradient id="glow-03" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(154 96) rotate(125) scale(150 140)">
+      <stop offset="0%" stop-color="#34D399" stop-opacity="0.35" />
+      <stop offset="55%" stop-color="#059669" stop-opacity="0.1" />
+      <stop offset="100%" stop-color="#040D0A" stop-opacity="0" />
+    </radialGradient>
+
+    <!-- Squircle Rim Stroke -->
+    <linearGradient id="border-03" x1="24" y1="16" x2="232" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6EE7B7" stop-opacity="0.55" />
+      <stop offset="50%" stop-color="#10B981" stop-opacity="0.18" />
+      <stop offset="100%" stop-color="#34D399" stop-opacity="0.4" />
+    </linearGradient>
+
+    <!-- Left Vellum Book Page (Warm Cream Parchment) -->
+    <linearGradient id="vellum-03" x1="48" y1="74" x2="126" y2="196" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FAF6EE" />
+      <stop offset="70%" stop-color="#EFE7D6" />
+      <stop offset="100%" stop-color="#D5C7B0" />
+    </linearGradient>
+
+    <!-- 3D Sculpted Jade Leaf Upper Half -->
+    <linearGradient id="jade-top-03" x1="112" y1="48" x2="208" y2="156" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#A7F3D0" />
+      <stop offset="38%" stop-color="#34D399" />
+      <stop offset="80%" stop-color="#059669" />
+      <stop offset="100%" stop-color="#065F46" />
+    </linearGradient>
+
+    <!-- 3D Sculpted Jade Leaf Lower Facet (Rich Deep Emerald) -->
+    <linearGradient id="jade-bottom-03" x1="120" y1="96" x2="206" y2="194" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#10B981" />
+      <stop offset="60%" stop-color="#047857" />
+      <stop offset="100%" stop-color="#064E3B" />
+    </linearGradient>
+
+    <!-- Specular Rim on Jade Leaf -->
+    <linearGradient id="jade-rim-03" x1="116" y1="48" x2="204" y2="180" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ECFDF5" />
+      <stop offset="50%" stop-color="#6EE7B7" stop-opacity="0.7" />
+      <stop offset="100%" stop-color="#10B981" stop-opacity="0.2" />
+    </linearGradient>
+
+    <!-- Gold Spine & Stem Accent -->
+    <linearGradient id="stem-gold-03" x1="108" y1="198" x2="198" y2="58" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FDE68A" />
+      <stop offset="50%" stop-color="#FBBF24" />
+      <stop offset="100%" stop-color="#ECFDF5" />
+    </linearGradient>
+
+    <filter id="drop-03" x="-20%" y="-20%" width="145%" height="145%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="14" stdDeviation="12" flood-color="#010504" flood-opacity="0.65" />
+    </filter>
+    <filter id="leaf-shadow-03" x="-25%" y="-25%" width="150%" height="150%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="-8" dy="10" stdDeviation="8" flood-color="#02100C" flood-opacity="0.5" />
+    </filter>
+  </defs>
+
+  <!-- Squircle Icon Base -->
+  <rect x="16" y="16" width="224" height="224" rx="54" fill="url(#bg-03)" />
+  <rect x="16" y="16" width="224" height="224" rx="54" fill="url(#glow-03)" />
+  <rect x="17.25" y="17.25" width="221.5" height="221.5" rx="52.75" stroke="url(#border-03)" stroke-width="2.5" />
+
+  <g filter="url(#drop-03)">
+    <!-- Left Vellum Page Stacked Base (3D Page Thickness) -->
+    <path d="M48 92C72 84 98 90 118 106V200C98 184 72 178 48 186V92Z" fill="#C4B59B" />
+    <!-- Left Vellum Main Page -->
+    <path d="M52 82C76 74 100 80 120 96V192C100 176 76 170 52 178V82Z" fill="url(#vellum-03)" stroke="#FFFFFF" stroke-width="1.5" stroke-linejoin="round" />
+
+    <!-- Subtle Literary Lines on Left Vellum Page -->
+    <path d="M68 108C82 105 94 108 104 114" stroke="#8C7A6B" stroke-opacity="0.45" stroke-width="3.5" stroke-linecap="round" />
+    <path d="M68 126C82 123 94 126 104 132" stroke="#8C7A6B" stroke-opacity="0.38" stroke-width="3.5" stroke-linecap="round" />
+    <path d="M68 144C78 142 88 144 96 148" stroke="#8C7A6B" stroke-opacity="0.3" stroke-width="3.5" stroke-linecap="round" />
+
+    <!-- Right Page Morphing into a 3D Sculpted Jade Leaf -->
+    <g filter="url(#leaf-shadow-03)">
+      <!-- Upper Jade Leaf Blade -->
+      <path d="M120 96C122 64 156 44 206 48C202 98 176 148 120 192V96Z" fill="url(#jade-top-03)" />
+      <!-- Lower Jade Leaf Facet (Creates 3D Central Ridge along the Vein) -->
+      <path d="M206 48C176 96 148 144 120 192C168 184 204 142 206 48Z" fill="url(#jade-bottom-03)" />
+      <!-- Outer Specular Bevel of Jade Leaf -->
+      <path d="M120 96C122 64 156 44 206 48C204 142 168 184 120 192V96Z" stroke="url(#jade-rim-03)" stroke-width="2.2" stroke-linejoin="round" />
+
+      <!-- Golden-Mint Central Leaf Vein & Spine Stem -->
+      <path d="M116 196C142 150 172 100 205 49" stroke="url(#stem-gold-03)" stroke-width="3.5" stroke-linecap="round" />
+      <!-- Secondary Leaf Veins (Echoing Page Lines) -->
+      <path d="M150 138L178 130" stroke="#A7F3D0" stroke-opacity="0.55" stroke-width="2.5" stroke-linecap="round" />
+      <path d="M166 110L190 104" stroke="#A7F3D0" stroke-opacity="0.55" stroke-width="2.5" stroke-linecap="round" />
+      <path d="M144 114L140 86" stroke="#ECFDF5" stroke-opacity="0.5" stroke-width="2.5" stroke-linecap="round" />
+    </g>
+  </g>
+</svg>

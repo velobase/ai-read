@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+  <!-- 10: Bilingual Interlocking Ribbon / Mobius Book-Leaf (原文 ⇄ 译文) -->
+  <!-- Crisp White Squircle with Subtle Cool Border -->
+  <rect x="16" y="16" width="224" height="224" rx="52" fill="#FFFFFF" />
+  <rect x="17" y="17" width="222" height="222" rx="51" stroke="#E2E8F0" stroke-width="2" />
+
+  <!-- Left Loop: Deep Slate Ink Page (Original Text Metaphor) -->
+  <path
+    d="M128 92C106 66 62 64 54 98C46 132 76 176 128 190V92Z"
+    fill="#0F172A"
+    fill-opacity="0.06"
+    stroke="#0F172A"
+    stroke-width="12"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+
+  <!-- Right Loop: Electric Cobalt Leaf-Page (Translated Text Metaphor, Lifted Higher Like a Leaf) -->
+  <path
+    d="M128 92C146 56 198 48 202 88C206 130 174 176 128 190"
+    fill="#2563EB"
+    fill-opacity="0.1"
+    stroke="#2563EB"
+    stroke-width="12"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+
+  <!-- Secondary Page Echo Curve on Right (Page-by-Page "逐页" Rhythm) -->
+  <path
+    d="M156 60C180 62 198 76 196 104"
+    stroke="#60A5FA"
+    stroke-width="7"
+    stroke-linecap="round"
+  />
+
+  <!-- Central Interlocking Spine Axis & Leaf Vein -->
+  <path
+    d="M128 74V198"
+    stroke="#0F172A"
+    stroke-width="12"
+    stroke-linecap="round"
+  />
+  <!-- Diagonal Leaf Vein Extending into Right Cobalt Page -->
+  <path
+    d="M128 142L172 98"
+    stroke="#2563EB"
+    stroke-width="9"
+    stroke-linecap="round"
+  />
+
+  <!-- Small Bilingual Spark Dot Above Spine -->
+  <circle cx="128" cy="48" r="7" fill="#2563EB" />
+</svg>

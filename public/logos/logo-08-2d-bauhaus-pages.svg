@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+  <!-- 08: Bauhaus / Swiss Geometric Grid Fanning Pages ("逐页") -->
+  <!-- Warm Paper Squircle Base -->
+  <rect x="16" y="16" width="224" height="224" rx="52" fill="#F8F9FB" />
+  <rect x="17" y="17" width="222" height="222" rx="51" stroke="#E2E8F0" stroke-width="2" />
+
+  <!-- Subtle Swiss Construction Grid Hairlines -->
+  <line x1="72" y1="36" x2="72" y2="220" stroke="#CBD5E1" stroke-opacity="0.45" stroke-width="1.5" stroke-dasharray="4 4" />
+  <line x1="36" y1="192" x2="220" y2="192" stroke="#CBD5E1" stroke-opacity="0.45" stroke-width="1.5" stroke-dasharray="4 4" />
+
+  <!-- Page 1 (Back): Deep Ultramarine Geometric Quarter-Circle -->
+  <path
+    d="M72 52C136 52 188 104 188 168V192H72V52Z"
+    fill="#1E3A8A"
+  />
+
+  <!-- Page 2 (Middle): Cerulean Azure Shifted Leaf-Arc -->
+  <path
+    d="M72 76C138 76 192 128 192 192H72V76Z"
+    fill="#3489E7"
+  />
+
+  <!-- Page 3 (Front): Pure Crisp Cyan-Sky Leaf Intersection -->
+  <path
+    d="M72 108C124 108 166 145 172 192H72V108Z"
+    fill="#7DD3FC"
+  />
+
+  <!-- Negative-Space Geometric Leaf Cutout Inside the Fan -->
+  <path
+    d="M72 192C72 140 114 98 166 98C166 150 124 192 72 192Z"
+    fill="#FFFFFF"
+  />
+
+  <!-- Bauhaus Vermilion-Red Reading Point / Bookmark Circle -->
+  <circle cx="176" cy="68" r="16" fill="#EF4444" />
+
+  <!-- Crisp Spine Anchor Bar -->
+  <rect x="64" y="52" width="10" height="140" rx="5" fill="#0F172A" />
+</svg>

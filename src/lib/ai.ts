@@ -9,7 +9,6 @@ type Request = {
   target?: string;
   selection?: string;
   readingPassage?: string;
-  glossary?: string;
   scope?: string;
   sources?: Source[];
   history?: Message[];
@@ -221,8 +220,8 @@ export function buildContext(
   return { sources: chosen, partial: chosen.length < candidates.length, total: candidates.length };
 }
 
-export function translationKey(settings: Settings, paragraphId: string, glossary: string) {
-  const input = [settings.baseUrl, settings.model, glossary].join('|');
+export function translationKey(settings: Settings, paragraphId: string) {
+  const input = [settings.baseUrl, settings.model, ''].join('|');
   let hash = 2166136261;
   for (let i = 0; i < input.length; i++) hash = Math.imul(hash ^ input.charCodeAt(i), 16777619);
   return `${settings.language}:${paragraphId}:${hash >>> 0}`;

@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+  <!-- 09: Neo-Oriental Seal / Cinnabar Book-Stamp ("逐页 · 藏书印") -->
+  <!-- Warm Xuan-Paper Squircle Base -->
+  <rect x="16" y="16" width="224" height="224" rx="52" fill="#F7F3EA" />
+  <rect x="17" y="17" width="222" height="222" rx="51" stroke="#E5DEC9" stroke-width="2" />
+
+  <!-- Traditional Cinnabar Seal Inner Frame (朱文印章) -->
+  <rect x="40" y="40" width="176" height="176" rx="34" fill="#C83E2B" />
+  <rect x="50" y="50" width="156" height="156" rx="26" stroke="#F7F3EA" stroke-opacity="0.85" stroke-width="3" />
+
+  <!-- Stylized Seal-Script / Geometric Monogram combining 「页 / 叶」 and Turning Book Pages -->
+  <!-- Top Horizontal Heaven Bar (「页」首横 / 书眉) -->
+  <path d="M78 78H178" stroke="#F7F3EA" stroke-width="9" stroke-linecap="round" />
+
+  <!-- Central Spine & Stem -->
+  <path d="M128 78V178" stroke="#F7F3EA" stroke-width="8" stroke-linecap="round" />
+
+  <!-- Left Page Wing (Structured Rectangular Scroll Frame) -->
+  <path
+    d="M84 104H128V160H84C79.5817 160 76 156.418 76 152V112C76 107.582 79.5817 104 84 104Z"
+    stroke="#F7F3EA"
+    stroke-width="8"
+    stroke-linejoin="round"
+  />
+  <path d="M94 123H114M94 141H114" stroke="#F7F3EA" stroke-width="6" stroke-linecap="round" />
+
+  <!-- Right Page Wing Morphing into a Graceful 2D Leaf (「叶/页」意象) -->
+  <path
+    d="M128 104C158 104 182 118 182 148C152 164 128 160 128 160"
+    fill="#F7F3EA"
+  />
+  <!-- Cinnabar Leaf Vein Carved Inside Right Leaf -->
+  <path
+    d="M134 148C146 140 158 130 170 118"
+    stroke="#C83E2B"
+    stroke-width="5.5"
+    stroke-linecap="round"
+  />
+
+  <!-- Bottom Page Turn Wave (「逐」之走之底) -->
+  <path
+    d="M74 182C98 182 114 176 128 168C144 178 162 182 182 182"
+    stroke="#F7F3EA"
+    stroke-width="7.5"
+    stroke-linecap="round"
+  />
+</svg>

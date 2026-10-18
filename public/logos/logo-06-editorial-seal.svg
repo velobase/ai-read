@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+  <defs>
+    <!-- Deep Editorial Ink Background -->
+    <linearGradient id="bg-06" x1="24" y1="16" x2="232" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#18181B" />
+      <stop offset="100%" stop-color="#09090B" />
+    </linearGradient>
+
+    <!-- Champagne Gold Foil Gradient -->
+    <linearGradient id="gold-foil-06" x1="48" y1="44" x2="208" y2="212" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFBEB" />
+      <stop offset="30%" stop-color="#FDE68A" />
+      <stop offset="65%" stop-color="#D97706" />
+      <stop offset="100%" stop-color="#FEF3C7" />
+    </linearGradient>
+
+    <!-- Warm Silk Ivory Accent -->
+    <linearGradient id="silk-06" x1="64" y1="64" x2="192" y2="192" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="100%" stop-color="#E4E4E7" />
+    </linearGradient>
+  </defs>
+
+  <!-- Squircle Base -->
+  <rect x="16" y="16" width="224" height="224" rx="54" fill="url(#bg-06)" />
+  <rect x="26" y="26" width="204" height="204" rx="44" stroke="url(#gold-foil-06)" stroke-opacity="0.28" stroke-width="1.5" />
+
+  <!-- Interlocking Bilingual Pages + Botanical Leaf Monogram -->
+  <!-- Left Arching Page (Original Text Metaphor) -->
+  <path d="M128 196C84 196 54 164 54 118C54 88 70 66 96 58C116 52 128 68 128 88V196Z" stroke="url(#silk-06)" stroke-width="6.5" stroke-linejoin="round" />
+  <!-- Inner Guilloche Echo Curves on Left Page -->
+  <path d="M114 176C86 170 68 148 68 118C68 96 80 78 100 72" stroke="url(#silk-06)" stroke-opacity="0.4" stroke-width="3" stroke-linecap="round" />
+
+  <!-- Right Overlapping Leaf-Page (Translation / Illumination Metaphor) -->
+  <path d="M128 196C128 134 156 76 202 56C202 120 176 178 128 196Z" fill="url(#gold-foil-06)" fill-opacity="0.16" stroke="url(#gold-foil-06)" stroke-width="6.5" stroke-linejoin="round" />
+
+  <!-- Central Botanical Vein / Nib Axis -->
+  <path d="M128 196C146 150 170 104 202 56" stroke="url(#gold-foil-06)" stroke-width="4" stroke-linecap="round" />
+
+  <!-- Top North-Star / Literary Compass Spark -->
+  <path d="M128 38L131.5 47.5L141 51L131.5 54.5L128 64L124.5 54.5L115 51L124.5 47.5L128 38Z" fill="url(#gold-foil-06)" />
+</svg>

@@ -86,7 +86,7 @@ const chapters = [
 export const sampleBook: Book = {
   id: 'ai-read-original-demo-v1',
   title: 'The Art of Paying Attention',
-  author: 'AI Read · 原创示例',
+  author: '叶读 · 原创示例',
   language: 'en',
   sample: true,
   importedAt: 0,

@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+  <!-- 12: Penguin/New Yorker Style 2D Ex-Libris Fountain Nib & Book Leaf -->
+  <!-- Warm Archival Sage-Charcoal Squircle -->
+  <rect x="16" y="16" width="224" height="224" rx="52" fill="#182226" />
+  <rect x="28" y="28" width="200" height="200" rx="42" stroke="#D6C7B2" stroke-opacity="0.28" stroke-width="2" />
+
+  <!-- Outer Engraved Oval Medallion -->
+  <ellipse cx="128" cy="128" rx="76" ry="84" stroke="#D6C7B2" stroke-opacity="0.4" stroke-width="2" stroke-dasharray="6 4" />
+
+  <!-- Combined Fountain-Pen Nib (Top) + Botanical Leaf & Open Pages (Bottom) -->
+  <path
+    d="M128 42C154 78 176 112 176 146C176 174 155 196 128 208C101 196 80 174 80 146C80 112 102 78 128 42Z"
+    fill="#F5F0E6"
+  />
+
+  <!-- Left Half Warm Brass-Gold Accent Plane (2D Split-Tone Engraving) -->
+  <path
+    d="M128 42V208C101 196 80 174 80 146C80 112 102 78 128 42Z"
+    fill="#E6B86A"
+  />
+
+  <!-- Nib Slit & Breather Hole (Center Axis) -->
+  <line x1="128" y1="42" x2="128" y2="122" stroke="#182226" stroke-width="5.5" />
+  <circle cx="128" cy="124" r="9" fill="#182226" />
+
+  <!-- Lower Half: Engraved Fanning Book Pages / Leaf Veins -->
+  <path d="M128 132V208" stroke="#182226" stroke-width="5.5" />
+  <path d="M92 146C106 150 118 158 128 170C138 158 150 150 164 146" stroke="#182226" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M88 166C104 170 118 178 128 190C138 178 152 170 168 166" stroke="#182226" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" />
+</svg>

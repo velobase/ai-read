@@ -1,5 +1,8 @@
 node_modules/
 dist/
+.next/
+out/
+next-env.d.ts
 .env
 .env.*
 !.env.example
@@ -7,3 +10,5 @@ dist/
 *.tsbuildinfo
 .DS_Store
 work/
+
+/src/generated/prisma/

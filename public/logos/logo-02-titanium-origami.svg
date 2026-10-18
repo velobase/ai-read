@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+  <defs>
+    <!-- Warm Brushed Titanium & Espresso Charcoal Base -->
+    <linearGradient id="bg-02" x1="24" y1="16" x2="232" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#272422" />
+      <stop offset="50%" stop-color="#191716" />
+      <stop offset="100%" stop-color="#0E0D0C" />
+    </linearGradient>
+
+    <!-- Warm Studio Key Light Glow -->
+    <radialGradient id="keylight-02" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(82 46) rotate(45) scale(180 160)">
+      <stop offset="0%" stop-color="#F59E0B" stop-opacity="0.24" />
+      <stop offset="55%" stop-color="#D97706" stop-opacity="0.06" />
+      <stop offset="100%" stop-color="#0E0D0C" stop-opacity="0" />
+    </radialGradient>
+
+    <!-- Titanium Metallic Bevel Border -->
+    <linearGradient id="border-02" x1="20" y1="16" x2="236" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FDE68A" stop-opacity="0.55" />
+      <stop offset="35%" stop-color="#78716C" stop-opacity="0.25" />
+      <stop offset="70%" stop-color="#44403C" stop-opacity="0.2" />
+      <stop offset="100%" stop-color="#F59E0B" stop-opacity="0.4" />
+    </linearGradient>
+
+    <!-- Left Ceramic Page Plane (Lit from Top-Left) -->
+    <linearGradient id="ceramic-left-02" x1="52" y1="62" x2="128" y2="196" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFDF9" />
+      <stop offset="65%" stop-color="#F5EFE6" />
+      <stop offset="100%" stop-color="#DFD5C5" />
+    </linearGradient>
+
+    <!-- Right Ceramic Page Under-Fold (Warm Stone Shadow) -->
+    <linearGradient id="ceramic-under-02" x1="128" y1="74" x2="208" y2="198" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#D6C9B6" />
+      <stop offset="50%" stop-color="#BFAEA0" />
+      <stop offset="100%" stop-color="#9A8978" />
+    </linearGradient>
+
+    <!-- Sculpted 3D Origami Leaf-Curl Plane (Champagne Gold & Warm Ivory) -->
+    <linearGradient id="gold-fold-02" x1="128" y1="48" x2="206" y2="178" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FEF3C7" />
+      <stop offset="35%" stop-color="#FBBF24" />
+      <stop offset="75%" stop-color="#D97706" />
+      <stop offset="100%" stop-color="#92400E" />
+    </linearGradient>
+
+    <!-- Specular Crest on Folded Page -->
+    <linearGradient id="crest-02" x1="128" y1="50" x2="198" y2="162" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.95" />
+      <stop offset="50%" stop-color="#FDE68A" stop-opacity="0.6" />
+      <stop offset="100%" stop-color="#F59E0B" stop-opacity="0.1" />
+    </linearGradient>
+
+    <!-- Inner Spine Crease Shadow -->
+    <linearGradient id="crease-02" x1="116" y1="120" x2="132" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#78716C" stop-opacity="0" />
+      <stop offset="100%" stop-color="#44403C" stop-opacity="0.38" />
+    </linearGradient>
+
+    <filter id="sculpture-shadow-02" x="-20%" y="-20%" width="145%" height="145%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="16" stdDeviation="14" flood-color="#000000" flood-opacity="0.65" />
+    </filter>
+    <filter id="fold-cast-02" x="-25%" y="-25%" width="150%" height="150%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="-8" dy="10" stdDeviation="7" flood-color="#1C1917" flood-opacity="0.45" />
+    </filter>
+  </defs>
+
+  <!-- Squircle Base -->
+  <rect x="16" y="16" width="224" height="224" rx="54" fill="url(#bg-02)" />
+  <rect x="16" y="16" width="224" height="224" rx="54" fill="url(#keylight-02)" />
+  <rect x="17.25" y="17.25" width="221.5" height="221.5" rx="52.75" stroke="url(#border-02)" stroke-width="2.5" />
+
+  <g filter="url(#sculpture-shadow-02)">
+    <!-- Thick Architectural Base Plinth of the Open Book -->
+    <path d="M52 178L128 202L204 178L204 190L128 214L52 190Z" fill="#78716C" fill-opacity="0.45" />
+    <path d="M52 178L128 202V214L52 190Z" fill="#A8A29E" fill-opacity="0.55" />
+
+    <!-- Left Sculpted Ceramic Page -->
+    <path d="M52 74C78 66 106 72 128 88V202C106 186 78 180 52 188V74Z" fill="url(#ceramic-left-02)" />
+    <!-- Spine Crease Shading on Left Page -->
+    <path d="M112 79C118 82 123 85 128 88V202C123 199 118 196 112 193V79Z" fill="url(#crease-02)" />
+
+    <!-- Right Under-Page (Stone Ceramic) -->
+    <path d="M128 88C150 72 178 66 204 74V188C178 180 150 186 128 202V88Z" fill="url(#ceramic-under-02)" />
+
+    <!-- Minimalist Debossed Editorial Lines on Left Ceramic Page -->
+    <path d="M70 104C86 101 100 103 112 110" stroke="#A8A29E" stroke-width="3.5" stroke-linecap="round" />
+    <path d="M70 122C86 119 100 121 112 128" stroke="#A8A29E" stroke-width="3.5" stroke-linecap="round" />
+    <path d="M70 140C82 138 94 140 104 145" stroke="#C7C0B8" stroke-width="3.5" stroke-linecap="round" />
+
+    <!-- Right Page 3D Origami Leaf-Curl (Brushed Champagne Gold) -->
+    <g filter="url(#fold-cast-02)">
+      <path d="M128 88C136 62 164 46 200 46C200 88 186 130 162 158C148 174 136 188 128 202V88Z" fill="url(#gold-fold-02)" stroke="url(#crest-02)" stroke-width="2" stroke-linejoin="round" />
+      <!-- Folded Back-Bevel Highlight (Origami Leaf Turn) -->
+      <path d="M200 46C174 58 154 84 146 118C168 106 186 82 200 46Z" fill="#FFFBEB" fill-opacity="0.72" />
+    </g>
+
+    <!-- Central Precision Brass Spine Pin -->
+    <path d="M128 84V206" stroke="#FEF3C7" stroke-width="2.5" stroke-linecap="round" />
+  </g>
+</svg>

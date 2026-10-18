@@ -1,0 +1,20 @@
+name: ai-read
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ai_read
+      POSTGRES_USER: ai_read
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    ports:
+      - '127.0.0.1:54341:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ai_read -d ai_read']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+volumes:
+  postgres_data:

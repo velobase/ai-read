@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+  <defs>
+    <linearGradient id="bgD" x1="128" y1="16" x2="128" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="100%" stop-color="#F1F5F9" />
+    </linearGradient>
+    <linearGradient id="leftD" x1="52" y1="74" x2="128" y2="192" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#2563EB" />
+      <stop offset="100%" stop-color="#1D4ED8" />
+    </linearGradient>
+    <linearGradient id="midD" x1="128" y1="46" x2="194" y2="168" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#7DD3FC" stop-opacity="0.85" />
+      <stop offset="100%" stop-color="#38BDF8" stop-opacity="0.55" />
+    </linearGradient>
+    <linearGradient id="rightD" x1="128" y1="70" x2="204" y2="192" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#60A5FA" />
+      <stop offset="50%" stop-color="#3489E7" />
+      <stop offset="100%" stop-color="#2563EB" />
+    </linearGradient>
+    <filter id="shD" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#1E3A8A" flood-opacity="0.18" />
+    </filter>
+  </defs>
+
+  <rect x="16" y="16" width="224" height="224" rx="54" fill="url(#bgD)" />
+  <rect x="17" y="17" width="222" height="222" rx="53" stroke="#E2E8F0" stroke-width="2" />
+
+  <g filter="url(#shD)">
+    <!-- Right Upper Turning Leaf-Page (Cyan Translucent) -->
+    <path d="M128 106C136 74 160 52 188 46C193.5 44.8 198 49.2 198 54.8V140C168 140 144 156 128 184V106Z"
+          fill="url(#midD)" />
+
+    <!-- Left Deep Cobalt Book Wing (Meets exactly at x=128) -->
+    <path d="M52 84C52 77.3726 57.3726 72 64 72C94 72 116 86 128 106V192C116 172 94 160 64 160C57.3726 160 52 154.627 52 148V84Z"
+          fill="url(#leftD)" />
+
+    <!-- Right Cerulean Foreground Wing (Meets exactly at x=128) -->
+    <path d="M128 106C140 86 162 72 192 72C198.627 72 204 77.3726 204 84V148C204 154.627 198.627 160 192 160C162 160 140 172 128 192V106Z"
+          fill="url(#rightD)" />
+  </g>
+</svg>

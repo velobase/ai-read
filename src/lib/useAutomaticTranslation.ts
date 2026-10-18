@@ -11,7 +11,6 @@ type Options = {
   book: Book;
   chapter: Chapter;
   settings: Settings;
-  glossary: string;
   enabled: boolean;
   readerRef: RefObject<HTMLElement | null>;
   getTranslation: (paragraph: Paragraph) => string | undefined;
@@ -21,7 +20,7 @@ type Options = {
 // A session owns one request at a time. Scrolling changes its queue, while chat
 // keeps its own controller and remains usable throughout background translation.
 export function useAutomaticTranslation(options: Options) {
-  const { book, chapter, settings, glossary, enabled, readerRef } = options;
+  const { book, chapter, settings, enabled, readerRef } = options;
   const callbacks = useRef(options);
   useLayoutEffect(() => {
     callbacks.current = options;
@@ -51,7 +50,6 @@ export function useAutomaticTranslation(options: Options) {
         current.enabled &&
         current.book === book &&
         current.chapter === chapter &&
-        current.glossary === glossary &&
         current.settings.baseUrl === settings.baseUrl &&
         current.settings.model === settings.model &&
         current.settings.apiKey === settings.apiKey &&
@@ -82,7 +80,7 @@ export function useAutomaticTranslation(options: Options) {
       );
       // Keep the original/placeholder's space until a streamed translation is complete.
       const minHeight =
-        passage?.querySelector('.translated-text')?.getBoundingClientRect().height || 0;
+        passage?.querySelector('[data-translation]')?.getBoundingClientRect().height || 0;
       setState({ status: 'translating', streaming: { id: p.id, text: '', minHeight } });
       try {
         const index = chapter.paragraphs.findIndex((item) => item.id === p.id);
@@ -91,7 +89,7 @@ export function useAutomaticTranslation(options: Options) {
           .map((item) => ({ id: item.id, chapter: chapter.title, text: item.text }));
         const value = await streamAI(
           settings,
-          { action: 'translate', title: book.title, target: p.text, glossary, sources },
+          { action: 'translate', title: book.title, target: p.text, sources },
           controller.signal,
           (text) => {
             if (currentSession() && !controller.signal.aborted)
@@ -101,7 +99,7 @@ export function useAutomaticTranslation(options: Options) {
         if (!currentSession() || controller.signal.aborted) return;
         completed.add(p.id);
         failures.delete(p.id);
-        callbacks.current.onComplete(translationKey(settings, p.id, glossary), value);
+        callbacks.current.onComplete(translationKey(settings, p.id), value);
       } catch (error) {
         if (!currentSession() || controller.signal.aborted) return;
         const attempts = (failures.get(p.id)?.attempts || 0) + 1;
@@ -162,7 +160,7 @@ export function useAutomaticTranslation(options: Options) {
     }
     const resize = new ResizeObserver(scheduleScan);
     resize.observe(root);
-    const page = root.querySelector('.book-page');
+    const page = root.querySelector('[data-book-page]');
     if (page) resize.observe(page);
     root.addEventListener('scroll', scheduleScan, { passive: true });
     window.addEventListener('online', scan);
@@ -185,7 +183,6 @@ export function useAutomaticTranslation(options: Options) {
     book,
     chapter,
     enabled,
-    glossary,
     settings.baseUrl,
     settings.model,
     settings.apiKey,

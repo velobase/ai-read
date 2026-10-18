@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+  <defs>
+    <!-- Soft Warm Alabaster Studio Background Squircle -->
+    <linearGradient id="bg-05" x1="32" y1="16" x2="224" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="55%" stop-color="#F3F5F8" />
+      <stop offset="100%" stop-color="#E2E7F0" />
+    </linearGradient>
+
+    <!-- Squircle Crisp Border -->
+    <linearGradient id="border-05" x1="32" y1="16" x2="224" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="100%" stop-color="#CBD5E1" />
+    </linearGradient>
+
+    <!-- 3D Hardcover Book Cobalt-Azure Cover -->
+    <linearGradient id="cover-blue-05" x1="64" y1="44" x2="188" y2="196" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#60A5FA" />
+      <stop offset="45%" stop-color="#3489E7" />
+      <stop offset="100%" stop-color="#1D4ED8" />
+    </linearGradient>
+
+    <!-- 3D Book Spine Rounded Cylinder Shading -->
+    <linearGradient id="spine-blue-05" x1="58" y1="120" x2="86" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1E40AF" />
+      <stop offset="35%" stop-color="#60A5FA" />
+      <stop offset="75%" stop-color="#2563EB" />
+      <stop offset="100%" stop-color="#1E3A8A" />
+    </linearGradient>
+
+    <!-- Stacked Paper Block (Bottom & Right Fore-Edge) -->
+    <linearGradient id="paper-block-05" x1="72" y1="172" x2="194" y2="200" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#EDE9FE" />
+      <stop offset="20%" stop-color="#FFFDF9" />
+      <stop offset="85%" stop-color="#F1ECE1" />
+      <stop offset="100%" stop-color="#D6CFC2" />
+    </linearGradient>
+
+    <!-- Silk Coral-Vermilion Bookmark Ribbon -->
+    <linearGradient id="ribbon-05" x1="142" y1="176" x2="164" y2="226" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FB7185" />
+      <stop offset="50%" stop-color="#F43F5E" />
+      <stop offset="100%" stop-color="#BE123C" />
+    </linearGradient>
+
+    <!-- Embossed White Leaf Emblem on Cover -->
+    <linearGradient id="emblem-05" x1="112" y1="74" x2="164" y2="144" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="100%" stop-color="#DBEAFE" />
+    </linearGradient>
+
+    <filter id="book-drop-05" x="-25%" y="-20%" width="150%" height="155%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="18" stdDeviation="14" flood-color="#1E293B" flood-opacity="0.24" />
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#0F172A" flood-opacity="0.12" />
+    </filter>
+  </defs>
+
+  <!-- Soft Tactile Squircle Base -->
+  <rect x="16" y="16" width="224" height="224" rx="54" fill="url(#bg-05)" />
+  <rect x="17.25" y="17.25" width="221.5" height="221.5" rx="52.75" stroke="url(#border-05)" stroke-width="2.5" />
+
+  <!-- Tilted 3D Tactile Book Object -->
+  <g transform="rotate(-6 128 128)" filter="url(#book-drop-05)">
+    <!-- Back Hardcover Lip -->
+    <rect x="64" y="54" width="132" height="152" rx="18" fill="#1E3A8A" />
+
+    <!-- 3D Paper Fore-Edge Block (Cream Pages Inside) -->
+    <path d="M74 168H192V190C192 197 186 202 179 202H74V168Z" fill="url(#paper-block-05)" />
+    <!-- Subtle Page Ridges on Bottom Fore-Edge -->
+    <path d="M84 182H186M84 188H184M84 194H180" stroke="#DFD8CA" stroke-width="1.8" stroke-linecap="round" />
+
+    <!-- 3D Silk Bookmark Ribbon Draping Out from Pages -->
+    <path d="M142 188H164V222L153 212L142 222V188Z" fill="url(#ribbon-05)" />
+
+    <!-- Upper Hardcover Board -->
+    <rect x="62" y="42" width="132" height="142" rx="18" fill="url(#cover-blue-05)" />
+    <!-- Specular Top-Edge Highlight on Cover -->
+    <path d="M80 43.5H176C185 43.5 192 50.5 192.5 59.5C191 51.5 184 46 175 46H80C71 46 64 51.5 63.5 59.5C64 50.5 71 43.5 80 43.5Z" fill="#FFFFFF" fill-opacity="0.55" />
+
+    <!-- Rounded 3D Spine Cylinder on Left -->
+    <path d="M62 60C62 50 70 42 80 42H86V184H80C70 184 62 176 62 166V60Z" fill="url(#spine-blue-05)" />
+    <!-- Spine Groove Crease -->
+    <path d="M86 42V184" stroke="#1E3A8A" stroke-opacity="0.45" stroke-width="2" />
+    <path d="M88 43V183" stroke="#93C5FD" stroke-opacity="0.4" stroke-width="1.2" />
+
+    <!-- Sculpted 3D Porcelain Leaf-Page Emblem on Cover -->
+    <path d="M114 138C114 104 134 82 166 78C164 110 146 134 114 138Z" fill="url(#emblem-05)" />
+    <path d="M114 138C130 118 146 98 165 79" stroke="#2563EB" stroke-width="3" stroke-linecap="round" />
+    <circle cx="114" cy="138" r="4" fill="#FFFFFF" />
+  </g>
+</svg>
