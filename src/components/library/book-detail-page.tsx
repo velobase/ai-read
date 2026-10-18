@@ -21,6 +21,7 @@ import { Modal } from '@/components/reader/reader-dialogs';
 import { cn } from '@/lib/utils';
 import { useLibrary } from './library-provider';
 import { BookCover, Empty, LibraryShell } from './library-ui';
+import { BookTranslationCard } from './book-translation-card';
 
 export function BookDetailPage({ id }: { id: string }) {
   const { t, text: localize, locale } = useI18n();
@@ -49,7 +50,8 @@ export function BookDetailPage({ id }: { id: string }) {
               : '原创短文'
             : 'Original essay'
       }`
-    : book?.author.replace(/^(ByPage · 逐页|逐页|逐頁|叶读|葉讀|LeafRead)/, t('ByPage · 逐页')) || '';
+    : book?.author.replace(/^(ByPage · 逐页|逐页|逐頁|叶读|葉讀|LeafRead)/, t('ByPage · 逐页')) ||
+      '';
   const displayDescription =
     book?.id === 'ai-read-original-demo-v1' && !isChineseUi
       ? 'An original English demonstration essay on attention, translation, and asking questions, accompanied by prewritten Chinese translations.'
@@ -176,6 +178,7 @@ export function BookDetailPage({ id }: { id: string }) {
               {position ? t('继续阅读') : t('阅读')}
             </button>
           </div>
+          {owned && <BookTranslationCard book={book} chapter={position?.chapter || 0} />}
           <div className="detail-tabs" role="tablist" aria-label={t('书籍内容')}>
             {[
               ['intro', t('简介')],

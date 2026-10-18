@@ -12,7 +12,7 @@ A local-first, self-hostable ebook reader with bilingual reading and source-grou
 
 - Import DRM-free EPUB or UTF-8 TXT into a browser-local library.
 - Switch between original, bilingual, and translation-only reading in reading settings; original is the default for new users, and existing choices are remembered.
-- Translate visible passages automatically, prepare the next three, and reuse completed local translations without a click. Background translation does not block questions.
+- Prepare complete chapters, prefetch the next chapter, or prepare an entire book. Saved editions support pause/resume and remain readable when model settings change.
 - Translate a passage or a chapter using your own OpenAI-compatible model service.
 - Ask questions in your preferred language, with streamed answers and clickable paragraph references.
 - Limit context to the current chapter, all chapters up to the furthest opened chapter, or the whole book.
@@ -76,7 +76,7 @@ PORT=4173
 
 Restart the server after changing `.env`. The server key is never returned to the browser and is only used with its configured endpoint. Choosing a different endpoint in the UI requires a separate key if that endpoint needs one.
 
-Both AI settings screens also offer editable translation prompts with Natural, Academic and Close-to-source starting points. Use `{{to}}` and `{{from}}` for language variables; source text and adjacent context are supplied automatically. Account prompts apply immediately and use separate translation cache identities. See [prompt behavior](docs/translation-prompts.md).
+Both AI settings screens also offer editable translation prompts with Natural, Academic and Close-to-source starting points. Use `{{to}}` and `{{from}}` for language variables; source text and adjacent context are supplied automatically. New editions snapshot the current prompt; existing editions keep their style until you explicitly retranslate and switch. See [prompt behavior](docs/translation-prompts.md).
 
 For a locally running Ollama service with an installed model:
 
@@ -86,7 +86,7 @@ AI_MODEL=your-installed-model
 AI_API_KEY=
 ```
 
-No API key, credits, hosted AI subscription, or model weights are bundled. Requests may incur costs with your provider. Bilingual and translation-only modes automatically issue sequential requests for uncached visible passages and the next three paragraphs. Switching to original mode, leaving the chapter, hiding the page, or going offline cancels translation. Returning to the page or reconnecting resumes it. Temporary failures retry at most twice; configuration errors pause with an explanation. Originals remain readable while translations are prepared.
+No API key, credits, hosted AI subscription, or model weights are bundled. Requests may incur costs with your provider. Bilingual and translation-only modes prepare the current and next chapters and publish complete chapters after structural validation. Book details and the reader’s Translation panel support whole-book preparation, pause/resume, and new editions. Reading the original, navigating away, or hiding the page does not cancel a started task. Account jobs continue on the server; local jobs pause when the browser closes and resume from saved checkpoints. You can read original text while preparing. See [persistent book translations](docs/chapter-translations.md).
 
 Questions follow the current reading position unless an explicit selection takes priority. Background translation and chat run independently. A long-context question may issue an additional query-expansion request. Answer generation can be stopped at any time.
 
@@ -110,7 +110,7 @@ Sync runs after edits, on focus/reconnect, and periodically while the page is vi
 - Context retrieval is lexical, with model-generated multilingual terms. It is **not** an exhaustive semantic index or guaranteed whole-book reasoning.
 - “Up to furthest chapter” includes all text in any earlier chapter, even if not read. Progress controls reduce supplied spoilers; model prior knowledge may still leak them.
 - Only source IDs included in the current request become clickable citations. This verifies the reference exists, not that the cited passage entails the model's claim.
-- Changing provider, model, or target language changes the translation cache key. Completed automatic translations synchronize; there is no manual revision workflow.
+- Each edition freezes its source, target language, model, and prompt. Settings changes leave existing editions intact; explicit retranslation creates a new version. A bounded generated glossary helps consistency; manual translation editing is not implemented.
 - The selected passage and chat panel are text based; Markdown formatting is intentionally limited, and model-generated HTML is never rendered.
 
 ## Development

@@ -1,5 +1,7 @@
 'use client';
 
+import { SUPPORT_EMAIL, SUPPORT_MAILTO } from '@/lib/contact';
+
 import { useI18n } from '@/lib/i18n/provider';
 import { TranslationPromptEditor } from '@/components/reader/translation-prompt-editor';
 import { ContentLanguageLabel } from '@/components/library/language-menu';
@@ -197,8 +199,8 @@ export function ProfilePage() {
             leafread.ai
           </a>{' '}
           ·{' '}
-          <a href="mailto:support@leafread.ai" className="hover:underline">
-            support@leafread.ai
+          <a href={SUPPORT_MAILTO} className="hover:underline">
+            {SUPPORT_EMAIL}
           </a>
         </p>
       </main>
@@ -642,7 +644,7 @@ export function PreferencesPage({ models = false }: { models?: boolean }) {
                       <SelectItem value="translation">{t('译文')}</SelectItem>
                     </SelectContent>
                   </Select>
-                  <small>{t('双语与译文模式会在阅读时按需请求翻译。')}</small>
+                  <small>{t('双语与译文模式准备当前章和下一章，可在“译本”中管理任务。')}</small>
                 </div>
               </div>
             </>
@@ -714,10 +716,10 @@ export function AboutPage() {
               <ArrowUpRight size={16} />
             </a>
             <a
-              href="mailto:support@leafread.ai"
+              href={SUPPORT_MAILTO}
               className="flex items-center gap-2 text-primary"
             >
-              {isZh ? '联系支持 · support@leafread.ai' : 'Support · support@leafread.ai'}
+              {isZh ? '联系支持' : 'Support'} · {SUPPORT_EMAIL}
             </a>
             <div className="flex flex-wrap gap-5 pt-1">
               <Link href="/privacy" className="text-primary hover:underline">

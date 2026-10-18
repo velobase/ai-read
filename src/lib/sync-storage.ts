@@ -22,6 +22,7 @@ import {
 import type { Book, Message, Note, Position } from './types';
 import type { BookState } from './library-state';
 import type { ReadingBackup } from './reading-backup';
+import { removeBookTranslations } from './translation-storage';
 
 export function readJSON(key: string): Record<string, any> {
   try {
@@ -185,13 +186,32 @@ export async function keepRecovery(tx: IDBTransaction, bookId: string) {
   const position = await idb(tx.objectStore('positions').get(bookId));
   const chats = (await idb(tx.objectStore('chats').get(bookId))) || [];
   const translations = (await idb(tx.objectStore('translations').get(bookId))) || {};
+  const translationManifests = (await idb(tx.objectStore('translation-manifests').getAll())).filter(
+    (m) => m.editions?.some((e: { bookId: string }) => e.bookId === bookId),
+  );
+  const chapterTranslations = (await idb(tx.objectStore('chapter-translations').getAll())).filter(
+    (c) => c.bookId === bookId,
+  );
   await idb(
     tx
       .objectStore('sync-recovery')
-      .put({ book, notes, position, chats, translations, savedAt: Date.now() }, bookId),
+      .put(
+        {
+          book,
+          notes,
+          position,
+          chats,
+          translations,
+          translationManifests,
+          chapterTranslations,
+          savedAt: Date.now(),
+        },
+        bookId,
+      ),
   );
 }
 export async function removeLocalBook(tx: IDBTransaction, bookId: string) {
+  await removeBookTranslations(tx, bookId);
   for (const store of ['books', 'notes', 'positions', 'chats', 'translations'])
     await idb(tx.objectStore(store).delete(bookId));
   const turns: (ChatTurn & { bookId: string })[] = await idb(tx.objectStore('turns').getAll());

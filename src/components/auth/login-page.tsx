@@ -1,5 +1,7 @@
 'use client';
 
+import { SUPPORT_EMAIL, SUPPORT_MAILTO } from '@/lib/contact';
+
 import { useI18n } from '@/lib/i18n/provider';
 
 import Link from 'next/link';
@@ -125,8 +127,8 @@ export function LoginPage() {
           <Link href="/terms" className="hover:underline">
             Terms
           </Link>
-          <a href="mailto:support@leafread.ai" className="hover:underline">
-            support@leafread.ai
+          <a href={SUPPORT_MAILTO} className="hover:underline">
+            {SUPPORT_EMAIL}
           </a>
         </p>
       </div>

@@ -54,6 +54,8 @@ model Book {
   notes        Note[]
   chats        ChatTurn[]
   translations TranslationCache[]
+  translationEditions TranslationEdition[]
+  translationSelections TranslationSelection[]
 
   @@id([userId, id])
   @@unique([userId, sourceHash])
@@ -122,6 +124,61 @@ model TranslationCache {
   book           Book      @relation(fields: [userId, bookId], references: [userId, id], onDelete: Cascade)
 
   @@id([userId, bookId, id])
+}
+
+// Published chapters are immutable. Jobs and their checkpoints survive HTTP
+// disconnects and process restarts; a lease fences competing server instances.
+model TranslationEdition {
+  id             String @id
+  userId         String
+  bookId         String
+  targetLanguage String
+  sourceHash     String
+  profile        Json
+  glossary       Json @default("[]")
+  state          String @default("idle")
+  error          String?
+  leaseToken     String?
+  leaseUntil     DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  book           Book @relation(fields: [userId, bookId], references: [userId, id], onDelete: Cascade)
+  chapters       TranslationChapter[]
+  selections     TranslationSelection[]
+
+  @@index([userId, bookId, targetLanguage, createdAt])
+  @@index([state, leaseUntil])
+}
+
+model TranslationChapter {
+  editionId      String
+  chapterIndex   Int
+  sourceHash     String
+  state          String @default("missing")
+  priority       Int @default(0)
+  totalChunks    Int
+  completedChunks Int @default(0)
+  checkpoint     Json @default("[]")
+  paragraphs     Json?
+  attempts       Int @default(0)
+  retryAt        DateTime?
+  error          String?
+  updatedAt      DateTime @updatedAt
+  edition        TranslationEdition @relation(fields: [editionId], references: [id], onDelete: Cascade)
+
+  @@id([editionId, chapterIndex])
+  @@index([editionId, state, priority])
+}
+
+model TranslationSelection {
+  userId         String
+  bookId         String
+  targetLanguage String
+  editionId      String
+  book           Book @relation(fields: [userId, bookId], references: [userId, id], onDelete: Cascade)
+  edition        TranslationEdition @relation(fields: [editionId], references: [id], onDelete: Cascade)
+
+  @@id([userId, bookId, targetLanguage])
 }
 
 model Account {

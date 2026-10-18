@@ -542,3 +542,14 @@
     max-width: 110px;
   }
 }
+.chapter-preparation {
+  display: flex;
+  min-height: min(28rem, 65dvh);
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+  text-align: center;
+  break-inside: avoid;
+  font-family: var(--font-translation);
+}

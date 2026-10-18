@@ -14,6 +14,7 @@ import { I18nProvider } from '@/lib/i18n/provider';
 import { serverI18n } from '@/lib/i18n/server';
 import { createTranslator } from '@/lib/i18n/messages';
 import { directionFor } from '@/lib/i18n/config';
+import { TranslationRuntime } from '@/components/reader/translation-runtime';
 
 export async function generateMetadata(): Promise<Metadata> {
   const { locale, messages } = await serverI18n();
@@ -41,6 +42,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       <body>
         <I18nProvider initialLocale={locale} initialPreference={preference} messages={messages}>
           <IdentityProvider>
+            <TranslationRuntime />
             <SyncProvider>
               <LibraryProvider>
                 <Suspense fallback={<div className="min-h-dvh bg-[#f5f5f7]" />}>

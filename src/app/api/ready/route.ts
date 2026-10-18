@@ -11,6 +11,9 @@ export async function GET() {
     assertAIEncryptionConfigured();
     await database.user.findFirst({ select: { id: true } });
     await database.aIConnection.findFirst({ select: { userId: true, translationPrompt: true } });
+    await database.translationEdition.findFirst({ select: { id: true, leaseUntil: true } });
+    await database.translationChapter.findFirst({ select: { editionId: true, checkpoint: true } });
+    await database.translationSelection.findFirst({ select: { editionId: true } });
     return Response.json({ status: 'ready' }, { headers: { 'Cache-Control': 'no-store' } });
   } catch {
     return Response.json(

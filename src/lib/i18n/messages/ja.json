@@ -633,5 +633,10 @@
   "无动画": "なし",
   "连续跨章": "連続",
   "章末停下": "章末で停止",
-  "返回刚才位置": "直前の位置に戻る"
+  "返回刚才位置": "直前の位置に戻る",
+  "只显示原文；已开始的准备任务可在“译本”中暂停。": "Show original text. Pause existing preparation tasks in Translation.",
+  "完整章节准备好后显示译文；等待时可以先读原文。": "Read translations when the complete chapter is ready, or read the original while waiting.",
+  "双语和译文按章节准备并保存在本机，也可以提前准备整本。": "Bilingual and translation modes prepare and save complete chapters. You can also prepare the entire book ahead.",
+  "双语与译文模式准备当前章和下一章，可在“译本”中管理任务。": "Bilingual and translation modes prepare the current and next chapters. Manage tasks in Translation.",
+  "从书架导入 EPUB 或 TXT。双语和译文模式按章节准备，完整章节就绪后自动打开。可在“译本”中准备整本、暂停或继续；切回原文不会取消任务。已完成章节保存在本机。AI 跟随阅读位置，选中文字可指定提问范围。": "Import EPUB or TXT. Bilingual and translation modes prepare complete chapters, which open when ready. Use Translation to prepare a whole book, pause, or resume. Switching to original text does not cancel tasks. Completed chapters are saved locally. AI follows your reading position; select text for a precise question."
 }

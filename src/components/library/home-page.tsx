@@ -1,5 +1,7 @@
 'use client';
 
+import { SUPPORT_EMAIL, SUPPORT_MAILTO } from '@/lib/contact';
+
 import { useI18n } from '@/lib/i18n/provider';
 
 import Link from 'next/link';
@@ -182,7 +184,7 @@ export function HomePage({ discover = false }: { discover?: boolean }) {
           </a>
           <Link href="/privacy">{locale.startsWith('zh') ? '隐私政策' : 'Privacy Policy'}</Link>
           <Link href="/terms">{locale.startsWith('zh') ? '服务条款' : 'Terms of Service'}</Link>
-          <a href="mailto:support@leafread.ai">support@leafread.ai</a>
+          <a href={SUPPORT_MAILTO}>{SUPPORT_EMAIL}</a>
           <Link href="/me/about">{t('关于 ByPage · 逐页')}</Link>
         </footer>
       </main>

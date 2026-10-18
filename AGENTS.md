@@ -7,3 +7,13 @@
 - Do not run live paid model requests unless explicitly requested.
 - Avoid adding hosted accounts, telemetry, or vendor-specific dependencies without a clear requirement.
 - When the user asks Gemini or another named model to use CUA directly, do not substitute a workflow where Codex relays screenshots and executes that model's instructions. First check existing GitHub CUA skills, MCP servers, or CLI integrations. If direct integration cannot be completed, explain the blocker and stop unless the user explicitly authorizes an alternative.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+## This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

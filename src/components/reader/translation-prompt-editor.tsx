@@ -101,8 +101,8 @@ export function TranslationPromptEditor({
       </div>
       <p className="text-xs leading-6 text-muted-foreground">
         {zh
-          ? '保存后，双语和译文模式会按新 Prompt 重新生成当前可见内容。原文和笔记保留；伴读问答不受影响。'
-          : 'After saving, bilingual and translation views regenerate visible passages with the new prompt. Originals and notes are retained; reading chat is unchanged.'}
+          ? '保存后用于新建译本。正在阅读的译本保持原有风格；可在“书籍译本”中按最新设置重译，旧版和笔记保留。'
+          : 'Saved instructions apply to new editions. Your current edition keeps its style. Retranslate from Book translation to use the latest settings; old editions and notes are retained.'}
       </p>
     </section>
   );

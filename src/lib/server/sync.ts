@@ -290,6 +290,10 @@ export async function writeRecord(userId: string, raw: Record<string, unknown>) 
           },
         });
         if (deleted) {
+          await tx.translationEdition.updateMany({
+            where: { userId, bookId },
+            data: { state: 'paused', leaseToken: null, leaseUntil: null },
+          });
           const childStamp = { deletedAt: stamp.deletedAt, version: { increment: 1 }, mutationId };
           await tx.note.updateMany({
             where: { userId, bookId, deletedAt: null },

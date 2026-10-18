@@ -1,5 +1,7 @@
 'use client';
 
+import { SUPPORT_EMAIL, SUPPORT_MAILTO } from '@/lib/contact';
+
 import Link from 'next/link';
 import { BookOpen, Mail, Globe2, ShieldCheck, FileText } from 'lucide-react';
 import { useI18n } from '@/lib/i18n/provider';
@@ -188,11 +190,11 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' }) {
                 leafread.ai
               </a>
               <a
-                href="mailto:support@leafread.ai"
+                href={SUPPORT_MAILTO}
                 className="inline-flex items-center gap-1.5 text-primary hover:underline"
               >
                 <Mail size={14} />
-                support@leafread.ai
+                {SUPPORT_EMAIL}
               </a>
               <Link href="/me/about" className="inline-flex items-center gap-1.5 text-primary hover:underline">
                 <BookOpen size={14} />

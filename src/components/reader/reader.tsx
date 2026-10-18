@@ -1,5 +1,7 @@
 'use client';
 
+import { SUPPORT_EMAIL, SUPPORT_MAILTO } from '@/lib/contact';
+
 import { useI18n } from '@/lib/i18n/provider';
 import {
   readAIConnection,
@@ -85,10 +87,11 @@ import {
   X,
 } from 'lucide-react';
 import { Answer, Modal, SettingsModal } from './reader-dialogs';
-import { buildContext, expandQuestion, streamAI, translationKey } from '@/lib/ai';
+import { buildContext, expandQuestion, streamAI } from '@/lib/ai';
 import { sampleBook, sampleTranslations } from '@/lib/sample';
 import { loadSettings, saveSettings, storage } from '@/lib/storage';
-import { useAutomaticTranslation } from '@/lib/useAutomaticTranslation';
+import { useBookTranslation } from './use-book-translation';
+import { ChapterPreparation, TranslationPanel } from './translation-panel';
 import {
   type Book,
   type Message,
@@ -111,6 +114,7 @@ type ReaderTool =
   | 'settings'
   | 'help'
   | 'delete'
+  | 'translations'
   | 'more';
 type PassageSelection = { paragraph: Paragraph; text: string; anchor?: NoteAnchor };
 
@@ -255,15 +259,20 @@ export default function Reader({
     chapter.paragraphs.slice(readingIndex).find((p) => p.kind !== 'heading') ||
     chapter.paragraphs[readingIndex];
   const aiReady = !needsLogin && Boolean(settings.baseUrl && settings.model);
-  const automaticTranslation = useAutomaticTranslation({
-    book,
-    chapter,
-    settings,
-    readerRef,
-    enabled: ready && !missing && !switching && !jump && aiReady && view !== 'original',
-    getTranslation,
-    onComplete: (key, value) => setTranslations((previous) => ({ ...previous, [key]: value })),
+  const legacyTranslations = useMemo(
+    () => (book.id === sampleBook.id ? { ...sampleTranslations, ...translations } : translations),
+    [book.id, translations],
+  );
+  const bookTranslation = useBookTranslation(book, settings, {
+    chapter: position.chapter,
+    enabled: ready && !missing && !switching,
+    auto: aiReady && view !== 'original',
+    legacy: legacyTranslations,
   });
+  const paragraphChapters = useMemo(
+    () => new Map(book.chapters.flatMap((c, i) => c.paragraphs.map((p) => [p.id, i] as const))),
+    [book],
+  );
   const normalizeHeading = (text: string) => text.replace(/[\s\p{P}]/gu, '').toLowerCase();
   const allParagraphs = useMemo(() => book.chapters.flatMap((c) => c.paragraphs), [book]);
   const continuous = settings.navigationMode === 'scroll' && settings.scrollFlow === 'continuous';
@@ -288,7 +297,11 @@ export default function Reader({
     settings,
     chapterIndex: position.chapter,
     translations,
+    contentRevision: bookTranslation.revision,
+    version: bookTranslation.version,
     getTranslation,
+    getKey: (p) => bookTranslation.key(paragraphChapters.get(p.id) ?? 0, p.id),
+    preparationAnchor: position,
     root: readerRef,
   });
   const navigation = useReadingNavigation({
@@ -308,9 +321,7 @@ export default function Reader({
       settings.readingMode,
       settings.scrollFlow,
       settings.language,
-      settings.model,
-      settings.baseUrl,
-      settings.translationPrompt,
+      bookTranslation.version,
       stableTranslations.revision,
     ].join(':'),
     enabled: ready && !missing && !switching && !jump,
@@ -636,9 +647,6 @@ export default function Reader({
     };
   }, [book.id, messages, busy, ready, switching]);
   useEffect(() => {
-    if (ready && !switching) void storage.saveTranslations(book.id, translations).catch(report);
-  }, [book.id, translations, ready, switching]);
-  useEffect(() => {
     if (!jump) return;
     restoring.current = true;
     const frame = requestAnimationFrame(() => {
@@ -866,6 +874,22 @@ export default function Reader({
     }
     const { visualOffset: _visualOffset, chapter: anchoredChapter, ...contentAnchor } = anchor;
     const index = anchoredChapter ?? position.chapter;
+    if (
+      view !== 'original' &&
+      !book.chapters[index]?.paragraphs.every((p) => stableTranslations.read(index, p))
+    ) {
+      // A preparation screen has no text location. Never overwrite a saved
+      // paragraph/offset with its placeholder while a cached chapter downloads.
+      if (scrollTimer.current) clearTimeout(scrollTimer.current);
+      pendingPosition.current = null;
+      if (index !== position.chapter)
+        setPosition((p) => ({
+          chapter: index,
+          paragraph: book.chapters[index].paragraphs[0].id,
+          farthest: Math.max(p.farthest, index),
+        }));
+      return;
+    }
     const next = {
       ...position,
       ...contentAnchor,
@@ -939,12 +963,7 @@ export default function Reader({
   }
   function getTranslation(p: Paragraph) {
     if (book.language.toLowerCase() === settings.language.toLowerCase()) return p.text;
-    return (
-      translations[translationKey(settings, p.id)] ||
-      (book.id === sampleBook.id && settings.language === 'zh-CN'
-        ? sampleTranslations[`zh-CN:${p.id}:sample`]
-        : '')
-    );
+    return bookTranslation.text(paragraphChapters.get(p.id) ?? 0, p.id);
   }
   async function ask(prompt: string, passage = selected) {
     if (busy || !prompt.trim()) return;
@@ -1224,6 +1243,15 @@ export default function Reader({
         <span className="min-w-0 truncate text-sm text-muted-foreground">{book.title}</span>
         <Button
           variant="ghost"
+          size="sm"
+          className="shrink-0 rounded-full text-xs text-muted-foreground"
+          onClick={() => openTool('translations')}
+        >
+          <BookOpen size={16} />
+          {locale.startsWith('zh') ? '译本' : 'Translation'}
+        </Button>
+        <Button
+          variant="ghost"
           size="icon"
           className="shrink-0 rounded-full text-muted-foreground md:hidden"
           onClick={() => openCompanion('chat')}
@@ -1329,6 +1357,9 @@ export default function Reader({
               normalizeHeading(visibleChapter.paragraphs[0]?.text ?? '') ===
               normalizeHeading(visibleChapter.title);
             const hidden = settings.navigationMode === 'paged' && chapterIndex !== position.chapter;
+            const chapterReady = visibleChapter.paragraphs.every(
+              (p) => !!stableTranslations.read(chapterIndex, p),
+            );
             return (
               <section
                 key={visibleChapter.id}
@@ -1346,7 +1377,7 @@ export default function Reader({
                     data-font={settings.fontFamily}
                     aria-label={visibleChapter.title}
                   >
-                    {!hasChapterHeading && (
+                    {(!hasChapterHeading || (view !== 'original' && !chapterReady)) && (
                       <h1
                         className="chapter-title"
                         dir="auto"
@@ -1355,118 +1386,132 @@ export default function Reader({
                         {visibleChapter.title}
                       </h1>
                     )}
-                    {visibleChapter.paragraphs.map((paragraph, index) => {
-                      const translated = stableTranslations.read(chapterIndex, paragraph);
-                      const isTitle = index === 0 && hasChapterHeading;
-                      return (
-                        <section
-                          key={paragraph.id}
-                          id={`passage-${paragraph.id}`}
-                          data-paragraph={paragraph.id}
-                          data-jump-target={jumpHighlight === paragraph.id || undefined}
-                          data-kind={paragraph.kind}
-                          data-title={isTitle}
-                          data-annotated={notes.some((note) => note.paragraphId === paragraph.id)}
-                          className="reading-passage group/passage"
-                        >
-                          {view !== 'translation' &&
-                            (isTitle ? (
-                              <h1
-                                className="chapter-title"
-                                data-note-source="original"
-                                lang={book.language === 'auto' ? undefined : book.language}
-                                dir="auto"
-                              >
-                                {markedPassage(
-                                  paragraph.text,
-                                  notes.filter((note) => note.paragraphId === paragraph.id),
-                                )}
-                              </h1>
-                            ) : (
-                              <div
-                                className="passage-original"
-                                data-note-source="original"
-                                lang={book.language === 'auto' ? undefined : book.language}
-                                dir="auto"
-                              >
-                                {markedPassage(
-                                  paragraph.text,
-                                  notes.filter((note) => note.paragraphId === paragraph.id),
-                                )}
-                              </div>
-                            ))}
-                          {view !== 'original' && (translated || view === 'translation') && (
-                            <div
-                              data-translation
-                              data-note-source={translated ? 'translation' : undefined}
-                              data-note-key={
-                                translated ? translationKey(settings, paragraph.id) : undefined
-                              }
-                              className={
-                                isTitle && view === 'translation'
-                                  ? 'chapter-title'
-                                  : 'passage-translation'
-                              }
-                              lang={settings.language}
-                              dir="auto"
-                            >
-                              {translated ? (
-                                markedPassage(
-                                  translated,
-                                  notes.filter((note) => note.paragraphId === paragraph.id),
-                                  'translation',
-                                  translationKey(settings, paragraph.id),
-                                )
+                    {view !== 'original' && !chapterReady ? (
+                      <div data-paragraph={visibleChapter.paragraphs[0]?.id}>
+                        <ChapterPreparation
+                          controller={bookTranslation}
+                          index={chapterIndex}
+                          open={() => openTool('translations')}
+                          original={() => updateAppearance({ readingMode: 'original' })}
+                          connect={() => (needsLogin ? openLogin() : setSettingsOpen(true))}
+                        />
+                      </div>
+                    ) : (
+                      visibleChapter.paragraphs.map((paragraph, index) => {
+                        const translated = stableTranslations.read(chapterIndex, paragraph);
+                        const isTitle = index === 0 && hasChapterHeading;
+                        return (
+                          <section
+                            key={paragraph.id}
+                            id={`passage-${paragraph.id}`}
+                            data-paragraph={paragraph.id}
+                            data-jump-target={jumpHighlight === paragraph.id || undefined}
+                            data-kind={paragraph.kind}
+                            data-title={isTitle}
+                            data-annotated={notes.some((note) => note.paragraphId === paragraph.id)}
+                            className="reading-passage group/passage"
+                          >
+                            {view !== 'translation' &&
+                              (isTitle ? (
+                                <h1
+                                  className="chapter-title"
+                                  data-note-source="original"
+                                  lang={book.language === 'auto' ? undefined : book.language}
+                                  dir="auto"
+                                >
+                                  {markedPassage(
+                                    paragraph.text,
+                                    notes.filter((note) => note.paragraphId === paragraph.id),
+                                  )}
+                                </h1>
                               ) : (
                                 <div
+                                  className="passage-original"
                                   data-note-source="original"
-                                  lang={book.language}
+                                  lang={book.language === 'auto' ? undefined : book.language}
                                   dir="auto"
-                                  className="text-foreground"
                                 >
                                   {markedPassage(
                                     paragraph.text,
                                     notes.filter((note) => note.paragraphId === paragraph.id),
                                   )}
                                 </div>
-                              )}
-                            </div>
-                          )}
-                          {!isTitle && (
-                            <div className="passage-actions">
-                              <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                className="rounded-full"
-                                aria-label={t('摘录段落 {value0}', { value0: paragraph.id })}
-                                title={t('摘录这一段')}
-                                onClick={() => {
-                                  setSelected({ paragraph, text: paragraph.text });
-                                  openNoteComposer({ paragraph, text: paragraph.text });
-                                }}
+                              ))}
+                            {view !== 'original' && (translated || view === 'translation') && (
+                              <div
+                                data-translation
+                                data-note-source={translated ? 'translation' : undefined}
+                                data-note-key={
+                                  translated
+                                    ? stableTranslations.key(chapterIndex, paragraph)
+                                    : undefined
+                                }
+                                className={
+                                  isTitle && view === 'translation'
+                                    ? 'chapter-title'
+                                    : 'passage-translation'
+                                }
+                                lang={settings.language}
+                                dir="auto"
                               >
-                                <Bookmark size={15} />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                className="rounded-full"
-                                aria-label={t('解释段落 {value0}', { value0: paragraph.id })}
-                                title={t('围绕这一段提问')}
-                                disabled={Boolean(busy)}
-                                onClick={() => {
-                                  const passage = { paragraph, text: paragraph.text };
-                                  setSelected(passage);
-                                  openCompanion('chat');
-                                }}
-                              >
-                                <Sparkles size={15} />
-                              </Button>
-                            </div>
-                          )}
-                        </section>
-                      );
-                    })}
+                                {translated ? (
+                                  markedPassage(
+                                    translated,
+                                    notes.filter((note) => note.paragraphId === paragraph.id),
+                                    'translation',
+                                    stableTranslations.key(chapterIndex, paragraph),
+                                  )
+                                ) : (
+                                  <div
+                                    data-note-source="original"
+                                    lang={book.language}
+                                    dir="auto"
+                                    className="text-foreground"
+                                  >
+                                    {markedPassage(
+                                      paragraph.text,
+                                      notes.filter((note) => note.paragraphId === paragraph.id),
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            {!isTitle && (
+                              <div className="passage-actions">
+                                <Button
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  className="rounded-full"
+                                  aria-label={t('摘录段落 {value0}', { value0: paragraph.id })}
+                                  title={t('摘录这一段')}
+                                  onClick={() => {
+                                    setSelected({ paragraph, text: paragraph.text });
+                                    openNoteComposer({ paragraph, text: paragraph.text });
+                                  }}
+                                >
+                                  <Bookmark size={15} />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  className="rounded-full"
+                                  aria-label={t('解释段落 {value0}', { value0: paragraph.id })}
+                                  title={t('围绕这一段提问')}
+                                  disabled={Boolean(busy)}
+                                  onClick={() => {
+                                    const passage = { paragraph, text: paragraph.text };
+                                    setSelected(passage);
+                                    openCompanion('chat');
+                                  }}
+                                >
+                                  <Sparkles size={15} />
+                                </Button>
+                              </div>
+                            )}
+                          </section>
+                        );
+                      })
+                    )}
                   </article>
                 </div>
                 {settings.navigationMode === 'paged' && (
@@ -1597,37 +1642,17 @@ export default function Reader({
           <Maximize2 size={17} />
         </Button>
       )}
-      {view !== 'original' &&
-        !stableTranslations.pending &&
-        chapter.paragraphs.some((p) => !getTranslation(p)) && (
-          <div className="reader-translation-status" role="status">
-            {!aiReady ? (
-              <button onClick={() => (needsLogin ? openLogin() : setSettingsOpen(true))}>
-                {needsLogin ? t('登录后继续 AI 翻译') : t('连接模型以显示译文')}
-              </button>
-            ) : automaticTranslation.status === 'error' ? (
-              <button
-                onClick={automaticTranslation.retry}
-                title={localize(automaticTranslation.error || '')}
-              >
-                {t('译文暂不可用 · 重试')}
-              </button>
-            ) : automaticTranslation.status === 'offline' ? (
-              t('联网后继续翻译')
-            ) : (
-              t('正在准备译文')
-            )}
-          </div>
+      {stableTranslations.pending &&
+        settings.navigationMode === 'paged' &&
+        chapter.paragraphs.every((p) => stableTranslations.read(position.chapter, p)) && (
+          <button
+            className="reader-translation-ready"
+            onClick={stableTranslations.apply}
+            disabled={navigation.turning}
+          >
+            {t('译文已就绪 · 显示译文')}
+          </button>
         )}
-      {stableTranslations.pending && settings.navigationMode === 'paged' && (
-        <button
-          className="reader-translation-ready"
-          onClick={stableTranslations.apply}
-          disabled={navigation.turning}
-        >
-          {t('译文已就绪 · 显示译文')}
-        </button>
-      )}
       <ReadingNavigation
         mode={settings.navigationMode}
         chapterTitle={chapter.title}
@@ -1948,6 +1973,22 @@ export default function Reader({
           >
             {t('返回书架')}
           </Button>
+        </div>
+      </ReadingPanel>
+
+      <ReadingPanel
+        open={tool === 'translations'}
+        onOpenChange={(open) => openTool(open ? 'translations' : null)}
+        title={locale.startsWith('zh') ? '书籍译本' : 'Book translation'}
+      >
+        <div className="overflow-y-auto px-7 pb-8">
+          <p className="mb-5 text-sm leading-6 text-muted-foreground">{book.title}</p>
+          <TranslationPanel
+            controller={bookTranslation}
+            book={book}
+            chapter={position.chapter}
+            connect={() => (needsLogin ? openLogin() : setSettingsOpen(true))}
+          />
         </div>
       </ReadingPanel>
 
@@ -2462,7 +2503,7 @@ export default function Reader({
             </p>
             <p>
               {t(
-                '从书架导入 EPUB 或 TXT。双语和译文模式会自动翻译眼前内容，并提前准备后面几段；切回原文即暂停。阅读模式和已完成译文会自动保存。AI 会跟随阅读位置，直接提问即可；选中文字可指定更精确的范围。',
+                '从书架导入 EPUB 或 TXT。双语和译文模式按章节准备，完整章节就绪后自动打开。可在“译本”中准备整本、暂停或继续；切回原文不会取消任务。已完成章节保存在本机。AI 跟随阅读位置，选中文字可指定提问范围。',
               )}
             </p>
             <p>
@@ -2480,8 +2521,8 @@ export default function Reader({
               >
                 leafread.ai <ArrowUp size={14} />
               </a>
-              <a className="text-primary no-underline" href="mailto:support@leafread.ai">
-                support@leafread.ai
+              <a className="text-primary no-underline" href={SUPPORT_MAILTO}>
+                {SUPPORT_EMAIL}
               </a>
               <a className="text-primary no-underline" href="/privacy">
                 {locale.startsWith('zh') ? '隐私政策' : 'Privacy Policy'}

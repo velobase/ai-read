@@ -9,35 +9,47 @@ export function useReaderTranslations({
   settings,
   chapterIndex,
   translations,
+  contentRevision,
+  version,
   getTranslation,
+  getKey,
+  preparationAnchor,
   root,
 }: {
   book: Book;
   settings: Settings;
   chapterIndex: number;
   translations: Record<string, string>;
+  contentRevision: unknown;
+  version: string;
   getTranslation: (paragraph: Paragraph) => string;
+  getKey: (paragraph: Paragraph) => string;
+  preparationAnchor: ReadingAnchor;
   root: RefObject<HTMLElement | null>;
 }) {
   const cache = useMemo(
-    () => new Map<string, Record<string, string>>(),
-    [
-      book.id,
-      settings.language,
-      settings.readingMode,
-      settings.navigationMode,
-      settings.model,
-      settings.baseUrl,
-      settings.translationPrompt,
-    ],
+    () => new Map<string, Record<string, { text: string; key: string }>>(),
+    [book.id, settings.language, settings.readingMode, settings.navigationMode, version],
   );
   const visited = useMemo(() => new Set<string>(), [cache]);
-  const latest = useRef({ book, settings, getTranslation, chapterIndex });
-  latest.current = { book, settings, getTranslation, chapterIndex };
+  const latest = useRef({
+    book,
+    settings,
+    getTranslation,
+    getKey,
+    chapterIndex,
+    preparationAnchor,
+  });
+  latest.current = { book, settings, getTranslation, getKey, chapterIndex, preparationAnchor };
   const [revision, setRevision] = useState(0);
   const anchor = useRef<ReadingAnchor | null>(null);
   const snapshot = (index: number) =>
-    Object.fromEntries(book.chapters[index].paragraphs.map((p) => [p.id, getTranslation(p)]));
+    Object.fromEntries(
+      book.chapters[index].paragraphs.map((p) => [
+        p.id,
+        { text: getTranslation(p), key: getKey(p) },
+      ]),
+    );
   const chapter = book.chapters[chapterIndex];
   // A chapter version lives through adjacent forward/back navigation.
   if (!cache.has(chapter.id)) cache.set(chapter.id, snapshot(chapterIndex));
@@ -67,13 +79,34 @@ export function useReaderTranslations({
       let changed = false;
       anchor.current = readReadingAnchor(element);
       for (const [id, old] of cache) {
-        if (current.settings.navigationMode === 'paged' && visited.has(id)) continue;
+        // A preparation page can be replaced atomically as soon as the entire
+        // chapter is ready. An already-read version stays stable while paging.
+        if (
+          current.settings.navigationMode === 'paged' &&
+          visited.has(id) &&
+          Object.values(old).some((p) => p.text)
+        )
+          continue;
         const nextChapter = current.book.chapters.find((c) => c.id === id);
         if (!nextChapter) continue;
         const next = Object.fromEntries(
-          nextChapter.paragraphs.map((p) => [p.id, current.getTranslation(p)]),
+          nextChapter.paragraphs.map((p) => [
+            p.id,
+            { text: current.getTranslation(p), key: current.getKey(p) },
+          ]),
         );
-        if (Object.keys(next).some((id) => next[id] !== old[id])) {
+        if (!Object.values(next).every((p) => p.text)) continue;
+        if (
+          Object.keys(next).some(
+            (id) => next[id].text !== old[id]?.text || next[id].key !== old[id]?.key,
+          )
+        ) {
+          if (
+            current.settings.readingMode !== 'original' &&
+            id === current.book.chapters[current.chapterIndex].id &&
+            !Object.values(old).some((p) => p.text)
+          )
+            anchor.current = current.preparationAnchor;
           cache.set(id, next);
           changed = true;
         }
@@ -105,18 +138,23 @@ export function useReaderTranslations({
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', up);
     };
-  }, [translations, cache, visited, root, chapterIndex, settings.navigationMode]);
+  }, [translations, contentRevision, cache, visited, root, chapterIndex, settings.navigationMode]);
   return {
     revision,
     pending:
       settings.readingMode !== 'original' &&
       chapter.paragraphs.some(
-        (p) => getTranslation(p) && getTranslation(p) !== cache.get(chapter.id)?.[p.id],
+        (p) => getTranslation(p) && getTranslation(p) !== cache.get(chapter.id)?.[p.id]?.text,
       ),
     read(index: number, paragraph: Paragraph) {
       const chapter = book.chapters[index];
       if (!cache.has(chapter.id)) cache.set(chapter.id, snapshot(index));
-      return cache.get(chapter.id)?.[paragraph.id] || '';
+      return cache.get(chapter.id)?.[paragraph.id]?.text || '';
+    },
+    key(index: number, paragraph: Paragraph) {
+      const chapter = book.chapters[index];
+      if (!cache.has(chapter.id)) cache.set(chapter.id, snapshot(index));
+      return cache.get(chapter.id)?.[paragraph.id]?.key || '';
     },
     apply() {
       if (!root.current || root.current.dataset.turning === 'true') return;

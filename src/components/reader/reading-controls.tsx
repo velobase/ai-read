@@ -383,10 +383,10 @@ export function ReadingLanguage({
       </ToggleGroup>
       <p className="my-5 min-h-12 text-xs leading-6 text-muted-foreground">
         {settings.readingMode === 'original'
-          ? t('只显示原文，自动翻译暂停。')
+          ? t('只显示原文；已开始的准备任务可在“译本”中暂停。')
           : settings.readingMode === 'bilingual'
             ? t('原文在上，译文在下，逐段对照阅读。')
-            : t('优先显示译文；译文准备好之前保留原文。')}
+            : t('完整章节准备好后显示译文；等待时可以先读原文。')}
       </p>
       <label className="mb-3 block text-xs text-muted-foreground">{t('翻译语言')}</label>
       <Select value={settings.language} onValueChange={(language) => update({ language })}>
@@ -402,7 +402,7 @@ export function ReadingLanguage({
         </SelectContent>
       </Select>
       <p className="mt-4 text-xs leading-6 text-muted-foreground">
-        {t('双语和译文模式按需翻译眼前内容，已完成的译文会保存在本机。')}
+        {t('双语和译文按章节准备并保存在本机，也可以提前准备整本。')}
       </p>
       <Button variant="link" className="mt-4 h-auto p-0 text-xs font-normal" onClick={openSettings}>
         {t('翻译与 AI 连接设置')}

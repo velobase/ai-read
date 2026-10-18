@@ -194,13 +194,11 @@ Catalog keys and placeholders were checked statically. UI interaction, cross-tab
 
 ## Translation
 
-Translation uses the target paragraph and nearby original text. In bilingual and translation-only modes, a viewport queue prioritizes visible passages, then at most three following paragraphs in the current chapter. At the chapter heading, the first passage is prepared. Scroll and resize events update the queue after a brief debounce. One translation request runs at a time, independently of the chat controller. Requests that leave the queue are cancelled. Background work stops in original mode, when the page is hidden or offline, and on book/chapter/provider/model/key/language/prompt changes. Returning to the page or reconnecting resumes work.
+Translations are persistent book editions with immutable completed chapters. Opening a chapter queues it and the next chapter; users can prepare the entire book from book details or the reader's Translation panel. Requests contain consecutive passages with chapter context, fixed style instructions, and an accumulated glossary. Ordered segment validation and atomic chapter publication keep incomplete results out of the reading surface.
 
-Only a completed SSE response is cached; partial or interrupted translations never enter storage. Network, timeout, rate-limit, and server errors get at most two retries per paragraph per session (after two and six seconds). Other failures, or exhausted retries, pause the queue until an explicit retry or a new session. The proxy preserves upstream HTTP error statuses so authentication errors do not retry. The cache includes the target language, paragraph ID and provider/model fingerprint. The fingerprint includes the effective translation prompt as well as the provider/model. Prompt changes use a new cache identity without deleting old translations or note anchors. See [editable translation prompts](translation-prompts.md). A completed in-memory set prevents duplicate requests while React commits a cache update. Packaged sample translations are used when AI is not configured; exact source/target language matches always bypass model requests.
+Account jobs run in a leased PostgreSQL queue on the long-lived Node server, independently of browser connections. Local jobs use IndexedDB checkpoints and Web Locks and survive route changes. Completed chapter artifacts are downloaded once and reused locally. Changes to general AI settings do not replace an existing edition; explicit retranslation creates a separate version and preserves older note anchors. Complete legacy paragraph-cache chapters remain readable.
 
-Reading mode is a non-secret persisted preference. Uncached translation-only passages show the original while waiting. Neither background progress nor completion emits a toast or blocks reading and questions.
-
-Translations are automatic model output. There is no glossary management, manual revision workflow or promise of perfect name consistency.
+See [persistent book translations](chapter-translations.md) for lifecycle, deployment, storage, retry behavior, and limitations, and [editable translation prompts](translation-prompts.md) for configuration. No translation-quality or integration behavior has been verified through live model calls.
 
 ## Context and citations
 
