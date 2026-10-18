@@ -1,23 +1,62 @@
 import 'server-only';
 import { authEnabled } from './auth-config';
+import { database } from './database';
+import { decryptAIKey } from './ai-credentials';
 
-export type ServerAIConfig = { baseUrl: string; model: string; apiKey: string };
+export type ServerAIConfig = {
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+  accountManaged: boolean;
+};
 
-// Hosted credentials belong only to explicitly configured accounts. Other users
-// can still supply their own credentials for their selected service.
-export function serverAIConfig(userId?: string): ServerAIConfig {
-  const allowedUsers = new Set(
-    (process.env.AI_ALLOWED_USER_IDS || '').split(',').map((id) => id.trim()).filter(Boolean),
-  );
-  const local =
-    !authEnabled() ||
-    /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/?$/.test(process.env.APP_ORIGIN || '');
-  const allowed = local || Boolean(userId && allowedUsers.has(userId));
+const empty = { baseUrl: '', model: '', apiKey: '', accountManaged: false };
+
+function localConfig(): ServerAIConfig {
+  if (authEnabled()) return empty;
   return {
-    baseUrl: allowed ? process.env.AI_BASE_URL || '' : '',
-    model: allowed ? process.env.AI_MODEL || '' : '',
-    // Older runtimes only understand AI_API_KEY: a rollback must not turn this
-    // account-scoped hosted credential into an unrestricted shared key.
-    apiKey: allowed ? (local ? process.env.AI_API_KEY : process.env.AI_PRIVATE_API_KEY) || '' : '',
+    baseUrl: process.env.AI_BASE_URL || '',
+    model: process.env.AI_MODEL || '',
+    apiKey: process.env.AI_API_KEY || '',
+    accountManaged: false,
+  };
+}
+
+export async function publicAIConfig(userId?: string) {
+  if (userId) {
+    const connection = await database.aIConnection.findUnique({
+      where: { userId },
+      select: { baseUrl: true, model: true, encryptedKey: true, updatedAt: true },
+    });
+    return {
+      baseUrl: connection?.baseUrl || '',
+      model: connection?.model || '',
+      hasKey: Boolean(connection?.encryptedKey),
+      accountManaged: true,
+      updatedAt: connection?.updatedAt.toISOString() || null,
+    };
+  }
+  const local = localConfig();
+  return {
+    baseUrl: local.baseUrl,
+    model: local.model,
+    hasKey: Boolean(local.apiKey),
+    accountManaged: false,
+    updatedAt: null,
+  };
+}
+
+// Read on every request. User configuration is data, never a release artifact.
+export async function serverAIConfig(userId?: string): Promise<ServerAIConfig> {
+  if (!userId) return localConfig();
+  const connection = await database.aIConnection.findUnique({ where: { userId } });
+  if (!connection) return { ...empty, accountManaged: true };
+  return {
+    baseUrl: connection.baseUrl,
+    model: connection.model,
+    apiKey: connection.encryptedKey
+      ? decryptAIKey(connection.encryptedKey, userId, connection.baseUrl)
+      : '',
+    accountManaged: true,
   };
 }

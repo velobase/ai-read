@@ -66,7 +66,7 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' }) {
                 <div>
                   <h2 className="mb-2 text-base font-semibold text-foreground">3. AI 模型服务与密钥安全</h2>
                   <p>
-                    使用 AI 翻译或伴读问答时，当前选中的段落、相关参考原文、书名、你的问题以及近期对话上下文会通过本地代理发送至你所配置或选择的模型服务商，适用该服务商自身的数据与隐私政策。你在浏览器中输入的 API Key 仅保留在当前页面内存中，刷新即清除，绝不写入浏览器持久化存储或同步至服务器。
+                    使用 AI 翻译或伴读问答时，当前选中的段落、相关参考原文、书名、你的问题以及近期对话上下文会通过本地代理发送至你所配置或选择的模型服务商，适用该服务商自身的数据与隐私政策。登录账号后保存的 API Key 会在服务端加密存储，仅用于你选择的模型服务，读取设置时不会返回密钥。密钥不会写入浏览器持久化存储；未启用账号的本地模式仅在当前页面内存中保留手动输入的密钥，刷新后清除。
                   </p>
                 </div>
                 <div>
@@ -99,7 +99,7 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' }) {
                     3. AI Providers & API Key Security
                   </h2>
                   <p>
-                    When you use AI translation or reading assistance, selected passages, relevant source excerpts, the book title, your question, and recent conversation context are sent to your configured OpenAI-compatible model provider. Your provider’s own privacy and data retention policies apply. Browser-entered API keys stay only in page memory, are cleared on reload, and are never persisted or synchronized.
+                    When you use AI translation or reading assistance, selected passages, relevant source excerpts, the book title, your question, and recent conversation context are sent to your configured OpenAI-compatible model provider. Your provider’s own privacy and data retention policies apply. API keys saved to a signed-in account are encrypted on the server and used only with the selected provider. Reading settings never returns the key, and keys are never persisted in browser storage. In local mode without accounts, manually entered keys stay only in page memory and are cleared on reload.
                   </p>
                 </div>
                 <div>

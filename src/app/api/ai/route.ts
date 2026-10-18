@@ -11,5 +11,9 @@ export async function POST(request: Request) {
   const enabled = authEnabled();
   const userId = enabled ? (await auth())?.user?.id : undefined;
   if (enabled && !userId) return unauthorized();
-  return handleAI(request, serverAIConfig(userId));
+  try {
+    return await handleAI(request, await serverAIConfig(userId));
+  } catch {
+    return Response.json({ error: 'AI 配置暂时不可用，请稍后重试。' }, { status: 503 });
+  }
 }

@@ -1,5 +1,6 @@
 import 'server-only';
 import type { ServerAIConfig } from './ai-config';
+import { normalizeAIUrl } from './ai-endpoint';
 
 let active = 0;
 const str = (value: unknown, max = 5000) => (typeof value === 'string' ? value.slice(0, max) : '');
@@ -10,23 +11,6 @@ const asRecord = (value: unknown): Record<string, unknown> =>
 
 function json(status: number, data: unknown) {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
-}
-
-function normalizeUrl(value: string) {
-  const url = new URL(value);
-  const local = ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
-  const hosted = process.env.APP_ORIGIN?.startsWith('https://') === true;
-  if (
-    (hosted && local) ||
-    (url.protocol !== 'https:' && !(local && url.protocol === 'http:')) ||
-    url.username ||
-    url.password ||
-    url.search ||
-    url.hash
-  ) {
-    throw new Error('服务地址必须为 HTTPS；本机模型可使用 http://localhost。');
-  }
-  return url.href.replace(/\/+$/, '').replace(/\/chat\/completions$/, '');
 }
 
 async function readBody(request: Request): Promise<Record<string, unknown>> {
@@ -107,13 +91,17 @@ export async function handleAI(request: Request, server: ServerAIConfig): Promis
   try {
     const body = await readBody(request);
     const configuredUrl = server.baseUrl;
-    const baseUrl = normalizeUrl(str(body.baseUrl, 2000) || configuredUrl);
-    const model = str(body.model, 200) || server.model;
+    const selectedUrl = server.accountManaged
+      ? configuredUrl
+      : str(body.baseUrl, 2000) || configuredUrl;
+    if (!selectedUrl) throw new Error('请先在 AI 设置中填写模型服务地址。');
+    const baseUrl = normalizeAIUrl(selectedUrl);
+    const model = server.accountManaged ? server.model : str(body.model, 200) || server.model;
     if (!model) throw new Error('请先在 AI 设置中填写模型名称。');
     // A server key must never follow a caller-selected endpoint.
     const serverKey =
-      configuredUrl && baseUrl === normalizeUrl(configuredUrl) ? server.apiKey : '';
-    const apiKey = str(body.apiKey, 2000) || serverKey || '';
+      configuredUrl && baseUrl === normalizeAIUrl(configuredUrl) ? server.apiKey : '';
+    const apiKey = server.accountManaged ? serverKey : str(body.apiKey, 2000) || serverKey || '';
     const language = str(body.language, 60) || 'Simplified Chinese';
     const action = ['ask', 'translate', 'terms'].includes(str(body.action)) ? body.action : 'ask';
     const sources = Array.isArray(body.sources)

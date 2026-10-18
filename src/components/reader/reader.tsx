@@ -1,6 +1,7 @@
 'use client';
 
 import { useI18n } from '@/lib/i18n/provider';
+import { readAIConnection, saveAIConnection, applyAIConnection } from '@/lib/ai-connection';
 import { localeStorageKey, directionFor } from '@/lib/i18n/config';
 
 import { sameData } from '@/lib/sync-types';
@@ -399,21 +400,6 @@ export default function Reader({
         }
       }
     })();
-    fetch('/api/config')
-      .then((r) => r.json())
-      .then((config) => {
-        if (!alive) return;
-        setHasServerKey(config.hasKey);
-        if (!settingsEdited.current)
-          setSettings((s) => ({
-            ...s,
-            baseUrl: s.baseUrl || config.baseUrl || '',
-            model: s.model || config.model || '',
-          }));
-      })
-      .catch(() => {
-        if (alive) setNotice(t('AI 服务暂时不可用，仍可继续本地阅读。'));
-      });
     return () => {
       alive = false;
       activation.current++;
@@ -422,6 +408,27 @@ export default function Reader({
       if (tapTimer.current) clearTimeout(tapTimer.current);
     };
   }, []);
+  useEffect(() => {
+    let alive = true;
+    const refresh = () => {
+      void readAIConnection()
+        .then((config) => {
+          if (!alive) return;
+          setHasServerKey(config.hasKey);
+          if (config.accountManaged || !settingsEdited.current)
+            setSettings((s) => applyAIConnection(s, config));
+        })
+        .catch(() => {
+          if (alive) setNotice(t('AI 服务暂时不可用，仍可继续本地阅读。'));
+        });
+    };
+    refresh();
+    window.addEventListener('focus', refresh);
+    return () => {
+      alive = false;
+      window.removeEventListener('focus', refresh);
+    };
+  }, [user?.id]);
   useEffect(() => {
     if (!missing || !bookId) return;
     let alive = true;
@@ -2189,10 +2196,17 @@ export default function Reader({
         <SettingsModal
           settings={settings}
           hasServerKey={hasServerKey}
-          onSave={(s) => {
+          accountMode={authEnabled && Boolean(user)}
+          onSave={async (s, clearKey) => {
+            let next = s;
+            if (authEnabled && user) {
+              const config = await saveAIConnection(s, clearKey);
+              next = applyAIConnection(s, config);
+              setHasServerKey(config.hasKey);
+            }
             settingsEdited.current = true;
-            setSettings(s);
-            setNotice(t('设置已保存，API Key 仅在当前页面有效'));
+            setSettings(next);
+            setNotice(t('设置已保存。'));
           }}
           close={() => setSettingsOpen(false)}
         />

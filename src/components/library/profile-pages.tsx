@@ -27,6 +27,7 @@ import { Avatar, LibraryShell, PageHeading, SettingsRow } from './library-ui';
 import { profileColors, saveProfile } from '@/lib/library-state';
 import { defaults, languages, type Settings } from '@/lib/types';
 import { loadSettings, saveSettings } from '@/lib/storage';
+import { readAIConnection, saveAIConnection, applyAIConnection } from '@/lib/ai-connection';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
@@ -368,33 +369,31 @@ export function SettingsPage() {
 }
 
 export function PreferencesPage({ models = false }: { models?: boolean }) {
-  const { t } = useI18n();
+  const { t, text, locale } = useI18n();
+  const isZh = locale.startsWith('zh');
   const { notify } = useLibrary();
   const { user, enabled: identityEnabled } = useIdentity();
   const [settings, setSettings] = useState<Settings>(defaults);
   const [hasKey, setHasKey] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [clearKey, setClearKey] = useState(false);
+  const accountMode = identityEnabled && Boolean(user);
+  const readOnly = !loaded || saving || (models && identityEnabled && !user);
   useEffect(() => {
     let alive = true;
+    setLoaded(false);
     const saved = loadSettings();
     setSettings(saved);
     if (!models) {
       setLoaded(true);
       return;
     }
-    fetch('/api/config')
-      .then((r) => {
-        if (!r.ok) throw new Error();
-        return r.json();
-      })
+    readAIConnection()
       .then((config) => {
         if (alive) {
-          setHasKey(Boolean(config.hasKey));
-          setSettings((s) => ({
-            ...s,
-            baseUrl: s.baseUrl || config.baseUrl || '',
-            model: s.model || config.model || '',
-          }));
+          setHasKey(config.hasKey);
+          setSettings((s) => applyAIConnection(s, config));
         }
       })
       .catch(() => {
@@ -406,14 +405,26 @@ export function PreferencesPage({ models = false }: { models?: boolean }) {
     return () => {
       alive = false;
     };
-  }, [models]);
+  }, [models, user?.id]);
   const patch = (value: Partial<Settings>) => setSettings((s) => ({ ...s, ...value }));
-  const submit = () => {
+  const submit = async () => {
+    if (readOnly) return;
+    setSaving(true);
     try {
-      saveSettings(settings);
+      let next = settings;
+      if (models && accountMode) {
+        const config = await saveAIConnection(settings, clearKey);
+        next = applyAIConnection(settings, config);
+        setHasKey(config.hasKey);
+        setClearKey(false);
+        setSettings(next);
+      }
+      saveSettings(next);
       notify(t('设置已保存。'));
-    } catch {
-      notify(t('设置保存失败，请重试。'));
+    } catch (error) {
+      notify(error instanceof Error ? text(error.message) : t('设置保存失败，请重试。'));
+    } finally {
+      setSaving(false);
     }
   };
   return (
@@ -431,7 +442,7 @@ export function PreferencesPage({ models = false }: { models?: boolean }) {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            submit();
+            void submit();
           }}
         >
           {models ? (
@@ -451,9 +462,15 @@ export function PreferencesPage({ models = false }: { models?: boolean }) {
                     value={settings.baseUrl}
                     onChange={(e) => patch({ baseUrl: e.target.value })}
                     placeholder="https://your-provider.com/v1"
-                    disabled={!loaded}
+                    disabled={readOnly}
                   />
-                  <small>{t('兼容 OpenAI API；也支持本机服务。')}</small>
+                  <small>
+                    {identityEnabled
+                      ? isZh
+                        ? '使用兼容 OpenAI 的 HTTPS 服务地址。'
+                        : 'Use an OpenAI-compatible HTTPS endpoint.'
+                      : t('兼容 OpenAI API；也支持本机服务。')}
+                  </small>
                 </label>
                 <label className="settings-field">
                   <span>{t('模型名称')}</span>
@@ -462,7 +479,7 @@ export function PreferencesPage({ models = false }: { models?: boolean }) {
                     value={settings.model}
                     onChange={(e) => patch({ model: e.target.value })}
                     placeholder={t('服务商提供的模型 ID')}
-                    disabled={!loaded}
+                    disabled={readOnly}
                   />
                 </label>
                 <label className="settings-field">
@@ -472,14 +489,43 @@ export function PreferencesPage({ models = false }: { models?: boolean }) {
                     autoComplete="off"
                     value={settings.apiKey}
                     onChange={(e) => patch({ apiKey: e.target.value })}
-                    placeholder={hasKey ? t('服务端已配置，留空即可') : t('仅在当前会话有效')}
-                    disabled={!loaded}
+                    placeholder={
+                      hasKey
+                        ? isZh
+                          ? '已保存，留空保留现有密钥'
+                          : 'Saved; leave blank to keep'
+                        : accountMode
+                          ? isZh
+                            ? '输入你的 API Key'
+                            : 'Enter your API key'
+                          : t('仅在当前会话有效')
+                    }
+                    disabled={readOnly}
                   />
-                  <small>{t('密钥不写入浏览器存储，刷新后清除。')}</small>
+                  <small>
+                    {accountMode
+                      ? isZh
+                        ? '密钥加密保存到你的账号，保存后立即生效。'
+                        : 'Your key is encrypted in your account. Changes apply immediately.'
+                      : t('密钥不写入浏览器存储，刷新后清除。')}
+                  </small>
                 </label>
+                {accountMode && hasKey && (
+                  <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={clearKey}
+                      disabled={readOnly}
+                      onChange={(e) => setClearKey(e.target.checked)}
+                    />
+                    {isZh ? '移除已保存的密钥' : 'Remove saved key'}
+                  </label>
+                )}
               </div>
               <p className="my-5 text-xs leading-6 text-muted-foreground">
-                {t('相关原文与问题会发送到所选模型，密钥不会同步。')}
+                {isZh
+                  ? '相关原文与问题会发送到你所选择的模型服务商。'
+                  : 'Relevant passages and questions are sent to your chosen model provider.'}
               </p>
             </>
           ) : (
@@ -610,8 +656,8 @@ export function PreferencesPage({ models = false }: { models?: boolean }) {
               </Select>
             </div>
           </div>
-          <Button className="mt-6 h-12 w-full rounded-full" disabled={!loaded} type="submit">
-            {t('保存设置')}
+          <Button className="mt-6 h-12 w-full rounded-full" disabled={readOnly} type="submit">
+            {saving ? (isZh ? '正在保存…' : 'Saving…') : t('保存设置')}
           </Button>
         </form>
       </main>
