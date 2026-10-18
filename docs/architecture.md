@@ -75,7 +75,7 @@ Guest database `ai-read` and existing data are preserved. Signed-in identities u
 - `sync-recovery`: local snapshots retained before a conflicting progress update or remote book deletion.
 - The old `glossaries` store is left untouched for data preservation; it has no active UI, prompt or sync role.
 
-Local content and pending sync mutations commit in the same IndexedDB transaction. Shelf metadata and non-secret preferences remain in scoped localStorage and are reconciled on startup. Writes resolve after their transaction completes. Cross-tab signals carry no book content or credentials. Browser-entered API keys stay in memory and clear on full reload; provider connection settings and interface language stay device-local. The shelf’s hide action preserves reading assets.
+Local content and pending sync mutations commit in the same IndexedDB transaction. Shelf metadata and non-secret preferences remain in scoped localStorage and are reconciled on startup. Writes resolve after their transaction completes. Cross-tab signals carry no book content or credentials. Signed-in AI connections live in PostgreSQL, with API keys encrypted by AES-256-GCM using a server-only master key. Local mode without accounts keeps manually entered keys in memory until reload. Interface language stays device-local. The shelf’s hide action preserves reading assets.
 
 The data page exports the existing versioned backup of parsed books, covers, notes and positions. Restore validates the complete input, preserves existing books/positions and merges missing note IDs. The recovery export uses the same format. Conversations, translation caches, original files and keys are not in that export, even though conversations and translations synchronize separately. Recovery storage retains its extra chat/translation data locally.
 
@@ -83,11 +83,12 @@ Guest profiles stay local; signed-in profile edits use the account API. Auth.js 
 
 ## Simplified ER and account sync
 
-The six reading entities below reuse the existing authentication tables (`Account` and `Session` are omitted). Chapters and paragraphs remain inside `Book.content`; there is no glossary, translation-revision, device or change-log table. No Redis is required.
+The reading entities and account AI connection below reuse the existing authentication tables (`Account` and `Session` are omitted). Chapters and paragraphs remain inside `Book.content`; there is no glossary, translation-revision, device or change-log table. No Redis is required.
 
 ```mermaid
 erDiagram
     User ||--o{ Book : owns
+    User ||--o| AIConnection : configures
     Book ||--o| ReadingProgress : resumes
     Book ||--o{ Note : contains
     Book ||--o{ ChatTurn : discusses
@@ -96,6 +97,13 @@ erDiagram
         string id PK
         json preferences
         int preferencesVersion
+    }
+    AIConnection {
+        string userId PK,FK
+        string baseUrl
+        string model
+        string encryptedKey
+        datetime updatedAt
     }
     Book {
         string userId PK,FK
@@ -140,6 +148,8 @@ erDiagram
         int version
     }
 ```
+
+`AIConnection` is updated through the authenticated account API, separately from offline reading sync. Requests bind the browser's account scope to its server session. Keys are encrypted before storage and never returned by configuration APIs. Each AI request reads the current row, so provider/model/key changes require no deployment. The selected account connection is authoritative over stale browser values. See [credential storage](deployment.md#user-ai-connections).
 
 `prisma/schema.prisma` is the exact field definition. Each reading record also has a mutation ID, update time and deletion marker. Composite keys and foreign keys include the owner, retaining compatible local book and paragraph IDs. A book’s parsed content is immutable while active; shelf status, pinning, grouping and hiding live in `shelfState`. All account data is stored in PostgreSQL, including parsed text and covers. The raw EPUB/TXT file is not uploaded.
 

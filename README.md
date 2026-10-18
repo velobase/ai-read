@@ -47,7 +47,7 @@ npm run build
 npm start
 ```
 
-The server deliberately binds to the loopback interface and validates Host and Origin. This release is intended for a personal local instance. It is not a multi-user public SaaS deployment template. Keep the origin (including port) consistent: browser storage belongs to each origin.
+The local launcher binds to loopback and validates Host and Origin. For the hosted account deployment, see [deployment notes](docs/deployment.md). Keep the origin (including port) consistent: browser storage belongs to each origin.
 
 ## Connect a model
 
@@ -55,11 +55,13 @@ Open **AI connection settings** in the reading companion, then enter:
 
 1. A base URL ending in `/v1` (or the appropriate API prefix for your provider).
 2. An exact model ID supported by that provider.
-3. An API key, if required. Browser-entered keys remain in page memory and are cleared on reload.
+3. An API key, if required. Signed-in accounts save keys encrypted on the server. In local mode without accounts, manually entered keys stay in page memory and clear on reload.
+
+Account changes take effect on the next request without a release or restart. Leaving the key blank keeps the saved key; changing its endpoint requires a new key or explicit removal.
 
 The integration calls `POST {baseUrl}/chat/completions` with standard `messages`. It uses SSE streaming for translations and answers, and a non-streamed request for query expansion. No provider SDK or specific model is required. The provider must support the Chat Completions protocol, including `data: [DONE]` at the end of a stream.
 
-Alternatively, configure the trusted service on the server:
+For local mode without accounts, you can alternatively configure a trusted service in `.env`:
 
 ```sh
 cp .env.example .env
@@ -92,7 +94,7 @@ Books are parsed in the browser. The raw EPUB/TXT file is not uploaded. Extracte
 
 Using AI sends the selected text, relevant source passages, book title, question, and eligible recent conversation to your selected provider through the local proxy. The provider's own data policies apply. An entire short book may fit in the selected context; larger books use excerpts. The AI proxy does not log request bodies or credentials; completed conversations and translations are persisted by account sync.
 
-Clearing browser data deletes the local library. Keep original files and use **Me → Data & backup** to export parsed books, local covers, notes, and reading positions. Restore preserves existing books/positions and merges new note IDs. API keys, AI conversations, translation caches, and original EPUB files are excluded. API keys are never persisted or synchronized. Provider connection settings and interface language remain device-local.
+Clearing browser data deletes the local library. Keep original files and use **Me → Data & backup** to export parsed books, local covers, notes, and reading positions. Restore preserves existing books/positions and merges new note IDs. API keys, AI conversations, translation caches, and original EPUB files are excluded. Account provider settings are stored separately in PostgreSQL with encrypted keys, and are excluded from browser exports. The server never returns saved keys to the browser. Interface language remains device-local.
 
 Sync runs after edits, on focus/reconnect, and periodically while the page is visible. An already open page can read local books and save edits offline; offline PWA startup is not implemented. Position is a chapter/paragraph anchor with an approximate fraction within the paragraph. Percentages use original-text length and can decrease when rereading; “finished” is a manual shelf status. Remote progress never moves an active reader. Stale offline progress yields to the cloud version, with a local recovery export; conflicting note edits keep a separate copy. Sync needs PostgreSQL, not Redis. Devices must use the same deployment and account.
 

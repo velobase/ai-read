@@ -10,7 +10,8 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request) {
   const enabled = authEnabled();
   const userId = enabled ? (await auth())?.user?.id : undefined;
-  if (enabled && !userId) return unauthorized();
+  if (enabled && (!userId || request.headers.get('x-reader-user') !== userId))
+    return unauthorized();
   try {
     return await handleAI(request, await serverAIConfig(userId));
   } catch {

@@ -1,3 +1,4 @@
+import { storageUserId } from './storage-scope';
 import type { Settings } from './types';
 
 export type AIConnection = {
@@ -23,7 +24,7 @@ export async function saveAIConnection(
 ): Promise<AIConnection> {
   const response = await fetch('/api/account/ai', {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'x-reader-user': storageUserId() || '' },
     body: JSON.stringify({
       baseUrl: settings.baseUrl,
       model: settings.model,

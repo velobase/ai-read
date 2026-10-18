@@ -1,3 +1,4 @@
+import { storageUserId } from './storage-scope';
 import type { Book, Message, Paragraph, Settings } from './types';
 import { languageName } from './types';
 
@@ -26,7 +27,7 @@ export class AIRequestError extends Error {
 async function request(settings: Settings, body: Request, signal: AbortSignal) {
   const response = await fetch('/api/ai', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'x-reader-user': storageUserId() || '' },
     signal,
     body: JSON.stringify({
       ...body,

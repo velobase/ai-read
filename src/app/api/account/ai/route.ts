@@ -22,7 +22,7 @@ export async function GET() {
 
 export async function PUT(request: Request) {
   const userId = (await auth())?.user?.id;
-  if (!userId) return unauthorized();
+  if (!userId || request.headers.get('x-reader-user') !== userId) return unauthorized();
   let baseUrl: string, model: string, apiKey: string, clearKey: boolean;
   try {
     const body = await accountBody(request);
