@@ -20,7 +20,7 @@ Account sync requires separate authorization. Device books are copied to an acco
 ## Native sign-in update (1.0.1)
 
 - Apple uses the iOS system authorization sheet; Google uses its official iOS SDK with nonce-bound backend verification.
-- Existing provider identities keep their accounts. Keychain restores the app session; foreground renewal preserves permissions, and sign-out cannot be undone by a late callback.
+- The previous mobile browser authorization flow and all auth-version fallbacks are removed. Old cached credentials are cleared and require native sign-in. Existing provider identities keep their accounts. Keychain restores the app session; foreground renewal preserves permissions, and sign-out cannot be undone by a late callback.
 - Library sync is confirmed for the current account inside the app, without a second browser login. Device books still require an explicit copy action.
 - The Expo config plugin adds module maps needed by Google's optional App Check dependency under static CocoaPods linking. App Check itself is not configured or enabled.
 - Server configuration and account migration details: `docs/authentication.md`. Keep the Google iOS/Web public client IDs and URL scheme aligned; never embed server secrets.

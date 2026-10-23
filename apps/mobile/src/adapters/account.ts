@@ -3,8 +3,7 @@ import { fetch as nativeFetch } from 'expo/fetch';
 import * as nativeAuth from '../../modules/bypage-auth';
 import { measured } from './diagnostics';
 import { apiOrigin, requireServiceOrigin } from './server-origin';
-import { readMobilePermissions, type MobilePermission } from '@bypage/api-client';
-import { validSyncId } from '@bypage/reading-core';
+import { type MobilePermission } from '@bypage/api-client';
 
 export type AccountSession = {
   user: { id: string; name: string | null; email: string; image?: string | null };
@@ -185,48 +184,19 @@ export async function refreshAccount() {
     return;
   const revision = state.revision;
   refreshingRevision = revision;
-  const scope = requestScope(state.origin, undefined, nativeAuth.renewalAvailable ? 35000 : 8000);
+  const scope = requestScope(state.origin, undefined, 35000);
   try {
-    if (nativeAuth.renewalAvailable) {
-      const current = state.session!;
-      const session = await nativeAuth.renewSession(state.origin, current.sessionId);
-      scope.assertCurrent();
-      if (
-        session.sessionId !== current.sessionId ||
-        session.user.id !== current.user.id ||
-        session.permissions.length !== current.permissions.length ||
-        session.permissions.some((permission) => !current.permissions.includes(permission))
-      )
-        throw new Error('invalid_account_response');
-      publish({ session, verified: true, issue: '' });
-      return;
-    }
-    const headers = await scope.headers();
-    const response = await nativeFetch(`${scope.origin}/api/mobile/v1/auth/session`, {
-      credentials: 'omit',
-      redirect: 'error',
-      signal: scope.signal,
-      headers: { Accept: 'application/json', ...headers },
-    });
-    await scope.checkStatus(response.status);
-    if (!response.ok) throw new Error('account_unavailable');
-    const body = await response.json();
+    const current = state.session!;
+    const session = await nativeAuth.renewSession(state.origin, current.sessionId);
     scope.assertCurrent();
-    const permissions = readMobilePermissions(
-      body.permissions === undefined ? ['account_ai'] : body.permissions,
-    );
-    const session = state.session;
     if (
-      !session ||
-      !validSyncId(body.user?.id) ||
-      body.sessionId !== session.sessionId ||
-      body.user.id !== session.user.id ||
-      !permissions?.includes('account_ai') ||
-      permissions.length !== session.permissions.length ||
-      permissions.some((permission) => !session.permissions.includes(permission))
+      session.sessionId !== current.sessionId ||
+      session.user.id !== current.user.id ||
+      session.permissions.length !== current.permissions.length ||
+      session.permissions.some((permission) => !current.permissions.includes(permission))
     )
       throw new Error('invalid_account_response');
-    publish({ verified: true, issue: '' });
+    publish({ session, verified: true, issue: '' });
   } catch (cause) {
     if (cause instanceof Error && /native_session_expired/.test(cause.message)) {
       const session = state.session;

@@ -32,9 +32,6 @@ async function handleDELETE(request: Request) {
     });
     if (!acting) return false;
     if (body.scope === 'others') {
-      // A code already approved by this retained browser must not recreate a
-      // mobile device after "sign out other devices" completes.
-      await tx.mobileAuthorization.deleteMany({ where: { userId } });
       await tx.session.deleteMany({ where: { userId, sessionToken: { not: current } } });
     } else {
       await tx.session.deleteMany({ where: { id, userId, sessionToken: { not: current } } });

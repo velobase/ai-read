@@ -110,7 +110,7 @@ private struct TokenExchange: Decodable {
   let expires: String
   let user: AuthUser
   let sessionId: String
-  let permissions: [String]?
+  let permissions: [String]
 }
 
 private struct StoredAuthSession: Codable {
@@ -120,14 +120,14 @@ private struct StoredAuthSession: Codable {
   let expiresAt: String
   let user: AuthUser
   let sessionId: String
-  // Missing in a legacy v1 Keychain item; it can only mean AI permission.
-  let permissions: [String]?
-  let provider: String?
-  let providerSubject: String?
-  var grantedPermissions: [String] { permissions ?? aiPermissions }
+  let permissions: [String]
+  let provider: String
+  let providerSubject: String
+  var grantedPermissions: [String] { permissions }
 
   var valid: Bool {
-    version == 1 && validToken(token) && user.valid && validIdentity(sessionId)
+    version == 2 && validToken(token) && user.valid && validIdentity(sessionId)
+      && ["apple", "google"].contains(provider) && !providerSubject.isEmpty && providerSubject.utf8.count <= 255
       && validPermissions(grantedPermissions)
       && authDate(expiresAt) != nil
   }
@@ -330,12 +330,6 @@ public final class ByPageAuthModule: Module {
 
   public func definition() -> ModuleDefinition {
     Name("ByPageAuth")
-    Constant("version") { 3 }
-    Constant("libraryVersion") { 2 }
-    Constant("providerVersion") { 2 }
-    AsyncFunction("signIn") { (origin: String, promise: Promise) in
-      self.startSignIn(origin, provider: "google", promise: promise)
-    }.runOnQueue(.main)
     AsyncFunction("signInWithProvider") { (origin: String, provider: String, promise: Promise) in
       self.startSignIn(origin, provider: provider, promise: promise)
     }.runOnQueue(.main)
@@ -510,7 +504,8 @@ public final class ByPageAuthModule: Module {
       }
       let flow = try AuthFlow(origin: origin, operation: operation, promise: promise, original: stored)
       begin(flow, seconds: 30)
-      if operation == "refresh", stored.provider == "apple", let subject = stored.providerSubject {
+      if operation == "refresh", stored.provider == "apple" {
+        let subject = stored.providerSubject
         ASAuthorizationAppleIDProvider().getCredentialState(forUserID: subject) { [weak self] state, error in
           DispatchQueue.main.async {
             guard let self, self.pending?.id == flow.id else { return }
@@ -543,7 +538,7 @@ public final class ByPageAuthModule: Module {
           let expiry = authDate(exchange.expires), expiry > Date(), expiry.timeIntervalSinceNow <= 31 * 24 * 60 * 60 else {
       fail(id, "invalid_auth_response"); return
     }
-    let permissions = exchange.permissions ?? aiPermissions
+    let permissions = exchange.permissions
     let expected = flow.operation == "library" ? libraryPermissions : flow.original?.grantedPermissions ?? aiPermissions
     guard validPermissions(permissions), Set(permissions) == Set(expected) else {
       fail(id, "invalid_auth_permissions"); return
@@ -557,9 +552,12 @@ public final class ByPageAuthModule: Module {
           fail(id, "account_changed"); return
         }
       }
-      let session = StoredAuthSession(version: 1, origin: flow.origin, token: exchange.token,
+      guard let provider = flow.provider, let subject = flow.providerSubject else {
+        fail(id, "invalid_auth_response"); return
+      }
+      let session = StoredAuthSession(version: 2, origin: flow.origin, token: exchange.token,
         expiresAt: exchange.expires, user: exchange.user, sessionId: exchange.sessionId,
-        permissions: permissions, provider: flow.provider, providerSubject: flow.providerSubject)
+        permissions: permissions, provider: provider, providerSubject: subject)
       guard session.valid else { fail(id, "invalid_auth_response"); return }
       try AuthKeychain.save(session)
       pending = nil
@@ -585,7 +583,7 @@ public final class ByPageAuthModule: Module {
       try AuthKeychain.remove(origin)
       GIDSignIn.sharedInstance.signOut()
       guard let stored else { promise.resolve(["revoked": true]); return }
-      var request = authRequest(origin, path: "/api/mobile/v1/auth/session", method: "DELETE")
+      var request = authRequest(origin, path: "/api/mobile/v1/auth/native/session", method: "DELETE")
       request.setValue("Bearer \(stored.token)", forHTTPHeaderField: "Authorization")
       let id = UUID()
       let task = AuthHTTPTask(request: request) { [weak self] result in
