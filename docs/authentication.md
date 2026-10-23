@@ -76,7 +76,7 @@ Apple 使用 `ASAuthorizationController`，Google 使用官方 Google Sign-In iO
 
 `POST /api/mobile/v1/auth/native/challenge` 签发五分钟 nonce / PKCE challenge；`token` 校验提供方签名、issuer、audience、nonce，Google 同时限制 `azp` 为 `AUTH_GOOGLE_IOS_ID`。数据库消费 challenge 的摘要，防止跨实例重放。Apple 原生 client ID 为 `com.velobase.bypage`；Web Services ID 保持独立，注销时分别撤销对应授权。
 
-账号按现有 `provider + providerAccountId` 找回。相同邮箱的不同提供方不自动关联，界面提示使用原登录方式。原生授权初始只授予 `account_ai`，`library` 需要界面显示当前邮箱并单独确认 `library_sync`，不会上传本机书籍。同步授权复用当前会话，重试丢失的响应不会导致凭据失效。
+账号按现有 `provider + providerAccountId` 找回。相同邮箱的不同提供方不自动关联，界面提示使用原登录方式。已删除旧手机浏览器授权页面、换码接口、旧会话解析与回退分支；旧版需更新并重新登录。原生授权初始只授予 `account_ai`，`library` 需要界面显示当前邮箱并单独确认 `library_sync`，不会上传本机书籍。同步授权复用当前会话，重试丢失的响应不会导致凭据失效。
 
 `refresh` 在每次前台恢复时验证并续期有效移动端会话，最长延至未来 30 天，并限制自创建起 180 天后重新认证。过期、撤销或已删除账号的会话不能续期。网络失败保留本机状态；401 清理凭据。原生与 JS 层均校验原会话身份，防止迟到回调覆盖新登录。
 
