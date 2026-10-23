@@ -2,7 +2,7 @@ import 'server-only';
 import type { ServerAIConfig } from './ai-config';
 import { normalizeAIUrl } from './ai-endpoint';
 import { isLocalAI } from '../ai-availability';
-import { beginOperation } from './observability';
+import { beginOperation, logException } from './observability';
 import type { Outcome } from '../observability/schema';
 import {
   MAX_TRANSLATION_PROMPT_LENGTH,
@@ -104,19 +104,11 @@ export async function handleAI(request: Request, server: ServerAIConfig): Promis
   try {
     const body = await readBody(request);
     const configuredUrl = server.baseUrl;
-    const selectedUrl = server.accountManaged
-      ? configuredUrl
-      : str(body.baseUrl, 2000) || configuredUrl;
-    if (!selectedUrl) throw new Error('请先在 AI 设置中填写模型服务地址。');
-    const baseUrl = normalizeAIUrl(selectedUrl);
-    const model = server.accountManaged ? server.model : str(body.model, 200) || server.model;
-    if (!model) throw new Error('请先在 AI 设置中填写模型名称。');
-    // A server key must never follow a caller-selected endpoint.
-    const serverKey =
-      configuredUrl && baseUrl === normalizeAIUrl(configuredUrl) ? server.apiKey : '';
-    const apiKey = server.accountManaged ? serverKey : str(body.apiKey, 2000) || serverKey || '';
-    if (!apiKey.trim() && !isLocalAI(baseUrl))
-      throw new Error('尚未配置 API Key，请在 AI 设置中连接模型服务。');
+    if (!configuredUrl || !server.model) throw new Error('翻译服务暂未就绪，请稍后重试。');
+    const baseUrl = normalizeAIUrl(configuredUrl),
+      model = server.model,
+      apiKey = server.apiKey;
+    if (!apiKey.trim() && !isLocalAI(baseUrl)) throw new Error('翻译服务暂未就绪，请稍后重试。');
     const language = str(body.language, 60) || 'Simplified Chinese';
     const action = ['ask', 'translate', 'terms'].includes(str(body.action)) ? body.action : 'ask';
     const sources = Array.isArray(body.sources)
@@ -207,9 +199,16 @@ export async function handleAI(request: Request, server: ServerAIConfig): Promis
       cache: 'no-store',
     });
     if (!upstream.ok) {
-      await upstream.body?.cancel();
+      const upstreamBody = await upstream.text();
+      logException('ai.upstream', new Error(`Model provider returned ${upstream.status}`), {
+        status: upstream.status,
+        upstreamBody,
+        upstreamRequestId: upstream.headers.get('x-request-id'),
+        model,
+        baseUrl,
+      });
       const reasons: Record<number, string> = {
-        401: '模型服务拒绝了当前 API Key，请在 AI 设置中检查或更新密钥',
+        401: '翻译服务暂时无法认证，请稍后重试',
         402: '服务余额不足',
         403: '服务拒绝访问',
         404: '请检查服务地址和模型名称',
@@ -232,11 +231,12 @@ export async function handleAI(request: Request, server: ServerAIConfig): Promis
     let bytes = 0;
     const encoder = new TextEncoder();
     const closeReader = async () => {
-      await reader.cancel().catch(() => {});
+      await reader.cancel().catch((error) => logException('ai.stream.cancel', error));
       reader.releaseLock();
     };
     const failStream = (output: ReadableStreamDefaultController<Uint8Array>, error: unknown) => {
       if (finished) return;
+      logException('ai.stream', error, { requestId: measurement.traceId });
       const { message, status } = describeError(error, controller.signal.aborted);
       outcome = request.signal.aborted ? 'cancelled' : 'error';
       responseStatus = status;
@@ -293,6 +293,7 @@ export async function handleAI(request: Request, server: ServerAIConfig): Promis
       },
     });
   } catch (error) {
+    logException('ai.completion', error, { requestId: measurement.traceId });
     const { message, status } = describeError(error, controller.signal.aborted);
     outcome = request.signal.aborted ? 'cancelled' : 'error';
     responseStatus = status;

@@ -5,5 +5,7 @@ export async function register() {
   ) {
     const { startTranslationWorker } = await import('./lib/server/translation-worker');
     startTranslationWorker();
+    const { startCatalogWorker } = await import('./lib/server/catalog-worker');
+    startCatalogWorker();
   }
 }

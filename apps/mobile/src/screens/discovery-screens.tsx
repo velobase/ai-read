@@ -1,3 +1,4 @@
+import { Storefront } from '../components/storefront';
 import { AccountCard, AccountSyncSummary } from '../components/account-card';
 import { useLibrary } from '../library-context';
 import { useMemo, useState } from 'react';
@@ -33,6 +34,7 @@ export function HomeScreen({
   importBook,
   notes,
   discover = false,
+  downloaded,
 }: {
   books: ShelfBook[];
   search: () => void;
@@ -41,20 +43,15 @@ export function HomeScreen({
   importBook: () => void;
   notes: () => void;
   discover?: boolean;
+  downloaded: (book: Book) => Promise<void>;
 }) {
   const { colors, t } = useApp();
-  const { width, fontScale } = useWindowDimensions();
-  const columns = width < 350 || fontScale > 1.3 ? 2 : width > 700 ? 5 : 3;
-  const coverWidth = (Math.min(width, 900) - 44 - (columns - 1) * 22) / columns;
-  const [category, setCategory] = useState('全部');
-  const [showCategories, setShowCategories] = useState(false);
   const recent = books
     .filter((b) => (b.lastOpened > 0 || b.hasPosition) && !b.finished)
     // Restored progress can be continued immediately; its import date is real,
     // while its last-reading time on another device is deliberately unknown.
     .sort((a, b) => (b.lastOpened || b.importedAt) - (a.lastOpened || a.importedAt))
     .slice(0, 4);
-  const visible = catalog.filter((b) => category === '全部' || b.category === category);
   return (
     <ScrollView
       contentContainerStyle={{
@@ -67,72 +64,17 @@ export function HomeScreen({
         gap: 24,
       }}
     >
-      <SearchEntry
-        search={search}
-        discover={() => {
-          setShowCategories(true);
-          setCategory('全部');
-        }}
-      />
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ gap: 10 }}
-      >
-        {[
-          { label: t('categories'), action: () => setShowCategories(!showCategories) },
-          {
-            label: t('originals'),
-            action: () => {
-              setCategory('全部');
-              setShowCategories(true);
-            },
-          },
-          { label: t('notes'), action: notes },
-          { label: t('import'), action: importBook },
-        ].map((item) => (
-          <Pressable
-            key={item.label}
-            accessibilityRole="button"
-            onPress={item.action}
-            style={{
-              backgroundColor: colors.surface,
-              paddingVertical: 11,
-              paddingHorizontal: 18,
-              borderRadius: 24,
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 5,
-            }}
-          >
-            <Text style={{ color: colors.ink, fontSize: 13 }}>{item.label}</Text>
-            <Icon name="chevron-forward" size={11} color={colors.muted} />
-          </Pressable>
-        ))}
-      </ScrollView>
-      {showCategories && (
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-          {categories
-            .filter((c) => c !== '经济学' && c !== '商业管理')
-            .map((c) => (
-              <Pressable
-                key={c}
-                onPress={() => setCategory(c)}
-                style={{
-                  padding: 10,
-                  borderRadius: 16,
-                  backgroundColor: category === c ? colors.soft : colors.surface,
-                }}
-              >
-                <Text
-                  style={{ color: category === c ? colors.accent : colors.muted, fontSize: 12 }}
-                >
-                  {c === '全部' ? t('all') : c}
-                </Text>
-              </Pressable>
-            ))}
-        </View>
-      )}
+      <View style={{ flexDirection: 'row', gap: 12 }}>
+        <Button secondary onPress={search}>
+          {t('search')}
+        </Button>
+        <Button secondary onPress={importBook}>
+          {t('import')}
+        </Button>
+        <Button secondary onPress={notes}>
+          {t('notes')}
+        </Button>
+      </View>
       {!discover && (
         <ScrollView
           horizontal
@@ -199,27 +141,7 @@ export function HomeScreen({
           ))}
         </ScrollView>
       )}
-      <Text
-        accessibilityRole="header"
-        style={{ color: colors.ink, fontSize: 23, fontWeight: '600' }}
-      >
-        {t(discover ? 'bookstore' : 'recommendations')}
-      </Text>
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 22 }}>
-        {visible.map((book) => (
-          <Pressable
-            key={book.id}
-            onPress={() => detail(book.id)}
-            accessibilityRole="button"
-            accessibilityLabel={book.title}
-          >
-            <Cover book={book} width={coverWidth} />
-          </Pressable>
-        ))}
-      </View>
-      <Text style={{ fontSize: 11, color: colors.muted, lineHeight: 18 }}>
-        {t('recommendHint')}
-      </Text>
+      <Storefront downloaded={downloaded} open={detail} savedIds={books.map((b) => b.id)} />
     </ScrollView>
   );
 }

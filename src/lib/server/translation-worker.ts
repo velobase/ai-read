@@ -1,4 +1,5 @@
 import 'server-only';
+import { logException } from './observability';
 import { database } from './database';
 import { authEnabled } from './auth-config';
 import { serverAIConfig } from './ai-config';
@@ -148,6 +149,7 @@ async function runOne() {
         });
     });
   } catch (error) {
+    logException('translation.worker', error, { editionId: candidate.id, chapterIndex: index });
     if (index !== undefined)
       await database.$transaction(async (tx) => {
         const owned = await tx.translationEdition.updateMany({

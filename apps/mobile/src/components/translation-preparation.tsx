@@ -1,3 +1,4 @@
+import { useAccount } from '../adapters/account';
 import { useSyncExternalStore } from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
 import { bookSourceLanguages, type Book } from '@bypage/reading-core';
@@ -42,7 +43,8 @@ export function TranslationPreparation({
   translation: ReturnType<typeof useChapterTranslation>;
   wholeBookOnly?: boolean;
 }) {
-  const { colors, t, preferences } = useApp();
+  const { colors, t, preferences, openAccount } = useApp();
+  const account = useAccount();
   const job = translation.job;
   const message = job ? jobMessage(job) : null;
   const completedCurrentRange =
@@ -139,7 +141,18 @@ export function TranslationPreparation({
               )}
             </View>
           )}
-          {job?.busy ? (
+          {!account.session ? (
+            <View style={{ gap: 10 }}>
+              <Text style={{ color: colors.muted, lineHeight: 22 }}>
+                {preferences.locale === 'zh-CN'
+                  ? '登录即可使用 LeafRead 翻译，无需配置 Key。'
+                  : 'Sign in to use LeafRead translation. No API key required.'}
+              </Text>
+              <Button onPress={openAccount}>
+                {preferences.locale === 'zh-CN' ? '登录并翻译' : 'Sign in to translate'}
+              </Button>
+            </View>
+          ) : job?.busy ? (
             <Button secondary icon="pause" busy={!!job.reason} onPress={translation.stop}>
               {t(job.reason ? 'translationPausing' : 'pauseTranslation')}
             </Button>

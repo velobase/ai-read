@@ -289,7 +289,7 @@ export async function startTranslationQueue(
   try {
     assertCurrent();
     const account = accountSnapshot();
-    if (!origin || account.origin !== origin || account.loading || account.busy)
+    if (!account.session || !origin || account.origin !== origin || account.loading || account.busy)
       throw new Error('translation_connection_required');
     const saved = await refreshBookTranslations(lease.handle, book.id);
     assertCurrent();

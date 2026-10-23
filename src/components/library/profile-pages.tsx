@@ -195,7 +195,12 @@ export function ProfilePage() {
         </p>
         <p className="mt-2 text-center text-[10px] text-muted-foreground/70">
           © 2026 LeafRead ·{' '}
-          <a href="https://leafread.ai" target="_blank" rel="noreferrer" className="hover:underline">
+          <a
+            href="https://leafread.ai"
+            target="_blank"
+            rel="noreferrer"
+            className="hover:underline"
+          >
             leafread.ai
           </a>{' '}
           ·{' '}
@@ -399,8 +404,14 @@ export function PreferencesPage({ models = false }: { models?: boolean }) {
           setSettings((s) => applyAIConnection(s, config));
         }
       })
-      .catch(() => {
-        if (alive) notify(t('无法读取服务配置，可以手动填写。'));
+      .catch((error) => {
+        console.error('ai.preferences.load', error);
+        if (alive)
+          notify(
+            isZh
+              ? '翻译服务暂时无法连接，请重试。'
+              : 'Translation service unavailable. Please retry.',
+          );
       })
       .finally(() => {
         if (alive) setLoaded(true);
@@ -416,7 +427,7 @@ export function PreferencesPage({ models = false }: { models?: boolean }) {
     try {
       let next = settings;
       if (models && accountMode) {
-        const config = await saveAIConnection(settings, clearKey);
+        const config = await saveAIConnection(settings);
         next = applyAIConnection(settings, config);
         setHasKey(config.hasKey);
         setClearKey(false);
@@ -451,79 +462,27 @@ export function PreferencesPage({ models = false }: { models?: boolean }) {
           {models ? (
             <>
               <div className="settings-form-card">
-                <p className="mb-7 text-sm leading-7 text-muted-foreground">
-                  {t('连接熟悉的模型，在原文旁展开讨论。')}
+                <h2 className="font-semibold">
+                  {isZh ? 'LeafRead 翻译与伴读' : 'LeafRead translation & companion'}
+                </h2>
+                <p className="mt-3 text-sm leading-7 text-muted-foreground">
+                  {isZh
+                    ? '登录即可使用平台提供的翻译服务，无需配置 API Key。'
+                    : 'Sign in to use LeafRead translation. No API key required.'}
                 </p>
-                <label className="settings-field">
-                  <span>
-                    <Globe2 size={16} />
-                    {t('服务地址')}
-                  </span>
-                  <Input
-                    required
-                    type="url"
-                    value={settings.baseUrl}
-                    onChange={(e) => patch({ baseUrl: e.target.value })}
-                    placeholder="https://your-provider.com/v1"
-                    disabled={readOnly}
-                  />
-                  <small>
-                    {identityEnabled
+                <p className="mt-3 text-sm">
+                  {!loaded
+                    ? isZh
+                      ? '连接中…'
+                      : 'Connecting…'
+                    : hasKey
                       ? isZh
-                        ? '使用兼容 OpenAI 的 HTTPS 服务地址。'
-                        : 'Use an OpenAI-compatible HTTPS endpoint.'
-                      : t('兼容 OpenAI API；也支持本机服务。')}
-                  </small>
-                </label>
-                <label className="settings-field">
-                  <span>{t('模型名称')}</span>
-                  <Input
-                    required
-                    value={settings.model}
-                    onChange={(e) => patch({ model: e.target.value })}
-                    placeholder={t('服务商提供的模型 ID')}
-                    disabled={readOnly}
-                  />
-                </label>
-                <label className="settings-field">
-                  <span>API Key</span>
-                  <Input
-                    type="password"
-                    autoComplete="off"
-                    value={settings.apiKey}
-                    onChange={(e) => patch({ apiKey: e.target.value })}
-                    placeholder={
-                      hasKey
-                        ? isZh
-                          ? '已保存，留空保留现有密钥'
-                          : 'Saved; leave blank to keep'
-                        : accountMode
-                          ? isZh
-                            ? '输入你的 API Key'
-                            : 'Enter your API key'
-                          : t('仅在当前会话有效')
-                    }
-                    disabled={readOnly}
-                  />
-                  <small>
-                    {accountMode
-                      ? isZh
-                        ? '密钥加密保存到你的账号，保存后立即生效。'
-                        : 'Your key is encrypted in your account. Changes apply immediately.'
-                      : t('密钥不写入浏览器存储，刷新后清除。')}
-                  </small>
-                </label>
-                {accountMode && hasKey && (
-                  <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <input
-                      type="checkbox"
-                      checked={clearKey}
-                      disabled={readOnly}
-                      onChange={(e) => setClearKey(e.target.checked)}
-                    />
-                    {isZh ? '移除已保存的密钥' : 'Remove saved key'}
-                  </label>
-                )}
+                        ? '翻译服务已就绪'
+                        : 'Translation service ready'
+                      : isZh
+                        ? '请登录，或稍后重试连接服务。'
+                        : 'Please sign in, or retry the service later.'}
+                </p>
               </div>
               <div className="settings-form-card mt-4">
                 <TranslationPromptEditor
@@ -534,8 +493,8 @@ export function PreferencesPage({ models = false }: { models?: boolean }) {
               </div>
               <p className="my-5 text-xs leading-6 text-muted-foreground">
                 {isZh
-                  ? '相关原文与问题会发送到你所选择的模型服务商。'
-                  : 'Relevant passages and questions are sent to your chosen model provider.'}
+                  ? '只有使用翻译或伴读时，相关原文与问题才会发送到 LeafRead 的模型服务商。'
+                  : 'When you use translation or the companion, relevant passages and questions are sent to LeafRead’s model provider.'}
               </p>
             </>
           ) : (
@@ -715,10 +674,7 @@ export function AboutPage() {
               {isZh ? '官方网站 · leafread.ai' : 'Official website · leafread.ai'}
               <ArrowUpRight size={16} />
             </a>
-            <a
-              href={SUPPORT_MAILTO}
-              className="flex items-center gap-2 text-primary"
-            >
+            <a href={SUPPORT_MAILTO} className="flex items-center gap-2 text-primary">
               {isZh ? '联系支持' : 'Support'} · {SUPPORT_EMAIL}
             </a>
             <div className="flex flex-wrap gap-5 pt-1">
@@ -731,9 +687,7 @@ export function AboutPage() {
             </div>
           </div>
         </div>
-        <p className="my-8 text-center text-xs text-muted-foreground">
-          © 2026 LeafRead · v0.1.0
-        </p>
+        <p className="my-8 text-center text-xs text-muted-foreground">© 2026 LeafRead · v0.1.0</p>
       </main>
     </LibraryShell>
   );

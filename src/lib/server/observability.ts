@@ -62,6 +62,13 @@ function errorDetails(value: unknown, ancestors = new Set<object>()): unknown {
   return details;
 }
 
+/** Full exception details and provider responses stay in protected server logs. */
+export function logException(event: string, error: unknown, fields: Record<string, unknown> = {}) {
+  const context = state.context.getStore();
+  console.error(JSON.stringify({ timestamp: new Date().toISOString(), service: 'leafread', level: 'error', event, ...fields,
+    ...(context ? { trace_id: context.traceId, span_id: context.spanId } : {}), error: errorDetails(error) }));
+}
+
 export function logEvent(
   operation: Operation,
   fields: LogFields = {},

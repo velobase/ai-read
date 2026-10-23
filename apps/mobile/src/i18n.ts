@@ -110,7 +110,7 @@ const zh = {
   accountExpired: '登录已失效，请重新登录。',
   accountOffline: '暂时无法验证登录，联网后会重新检查。本机阅读仍可使用。',
   accountAiReady: 'AI 伴读已就绪，可在阅读时提问或翻译。',
-  accountAiSetup: '当前账号的 AI 服务暂不可用。稍后可在阅读时重试。',
+  accountAiSetup: '翻译服务暂时无法连接，请稍后重试。',
   accountAiChecking: '正在检查 AI 服务…',
   accountAiUnavailable: '暂时无法连接 AI 服务，请检查网络后重试。',
 
@@ -151,7 +151,7 @@ const zh = {
   aiAskPassage: '询问这段文字',
   aiExplain: '解释这段',
   aiExplainPrompt: '请解释这段文字的主要意思，并引用支持解释的原文。',
-  aiPrivacy: '相关原文和问题会发送到此服务及其模型服务商，调用可能计费。密钥保留在服务端。',
+  aiPrivacy: '相关原文和问题会发送到此服务及其模型服务商，由 LeafRead 提供翻译服务。密钥保留在服务端。',
   nativeAiSetup: '登录 叶子阅读，在阅读时围绕原文提问。',
   nativeAiUnavailable: '当前账号的 AI 服务暂不可用，请稍后重试。',
   nativeAiAvailable: 'AI 伴读已连接',
@@ -324,8 +324,8 @@ const zh = {
   none: '无动画',
   continuous: '连续滚动',
   chapterScroll: '按章滚动',
-  connectAiFirst: '请先连接 AI 服务，再准备译文。',
-  translationUnavailable: '当前服务尚未开放手机端翻译。',
+  connectAiFirst: '登录后即可使用 LeafRead 翻译服务。',
+  translationUnavailable: '翻译服务暂时无法连接，请稍后重试。',
   translationPaused: '已暂停。已完成的段落保留，再次准备将继续未完成部分。',
   translationTimedOut: '翻译等待超时，已完成的段落已保存。请重试未完成部分。',
   translationSameLanguage: '原文已经是目标语言，可以直接阅读，无需准备译文。',
@@ -354,9 +354,9 @@ const zh = {
   pauseTranslation: '暂停翻译',
   prepareTranslation: '准备译文 · {count} 段',
   translationServiceHint:
-    '本次待翻译原文约 {count} 字符，另发送邻近原文作为上下文，调用可能计费。已完成译文保存在本机。',
+    '本次待翻译原文约 {count} 字符，另发送邻近原文作为上下文，由 LeafRead 提供翻译服务。已完成译文保存在本机。',
   translationRunningServiceHint:
-    '当前任务原文约 {count} 字符，另发送邻近原文作为上下文，调用可能计费。已完成译文保存在本机。',
+    '当前任务原文约 {count} 字符，另发送邻近原文作为上下文，由 LeafRead 提供翻译服务。已完成译文保存在本机。',
 
   library: '书架',
   search: '搜索',
@@ -678,7 +678,7 @@ const en: Record<TextKey, string> = {
   accountOffline:
     'Sign-in could not be verified. We will check when connected. Local reading is still available.',
   accountAiReady: 'AI is ready. Ask questions or translate while reading.',
-  accountAiSetup: 'AI is not available for this account yet. You can try again while reading.',
+  accountAiSetup: 'Translation is temporarily unavailable. Please try again shortly.',
   accountAiChecking: 'Checking AI availability…',
   accountAiUnavailable: 'Could not reach the AI service. Check your connection and try again.',
 
@@ -913,8 +913,8 @@ const en: Record<TextKey, string> = {
   none: 'No animation',
   continuous: 'Continuous',
   chapterScroll: 'By chapter',
-  connectAiFirst: 'Connect an AI service before preparing a translation.',
-  translationUnavailable: 'This service does not support mobile translation yet.',
+  connectAiFirst: 'Sign in to use LeafRead translation.',
+  translationUnavailable: 'Translation is temporarily unavailable. Please retry shortly.',
   translationPaused:
     'Paused. Completed paragraphs are saved; preparing again continues the remaining ones.',
   translationTimedOut:
@@ -949,9 +949,9 @@ const en: Record<TextKey, string> = {
   pauseTranslation: 'Pause translation',
   prepareTranslation: 'Prepare translation · {count} paragraphs',
   translationServiceHint:
-    'About {count} source characters await translation. Nearby source passages are also sent as context. Requests may incur charges. Completed translations stay on this device.',
+    'About {count} source characters await translation. Nearby source passages are also sent as context. Translation is provided by LeafRead. Completed translations stay on this device.',
   translationRunningServiceHint:
-    'The current task covers about {count} source characters. Nearby source passages are also sent as context. Requests may incur charges. Completed translations stay on this device.',
+    'The current task covers about {count} source characters. Nearby source passages are also sent as context. Translation is provided by LeafRead. Completed translations stay on this device.',
 
   library: 'Library',
   search: 'Search',

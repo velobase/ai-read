@@ -832,6 +832,13 @@ function Main() {
               <SettingsScreen importBook={() => void importBook()} />
             ) : (
               <HomeScreen
+                downloaded={async (book) => {
+                  if (!library.isCurrent()) return;
+                  await addBook(library.handle, book);
+                  if (!library.isCurrent()) return;
+                  await refresh();
+                  if (library.isCurrent()) setDetail(book);
+                }}
                 books={books}
                 search={() => setPage('search')}
                 detail={(id) => void showDetail(id)}
@@ -847,6 +854,13 @@ function Main() {
             <View style={{ flex: 1 }}>
               {tab === 'home' && (
                 <HomeScreen
+                  downloaded={async (book) => {
+                    if (!library.isCurrent()) return;
+                    await addBook(library.handle, book);
+                    if (!library.isCurrent()) return;
+                    await refresh();
+                    if (library.isCurrent()) setDetail(book);
+                  }}
                   books={books}
                   search={() => setPage('search')}
                   detail={(id) => void showDetail(id)}

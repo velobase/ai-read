@@ -29,3 +29,5 @@ export * from './book-references';
 export * from './epub-navigation';
 export * from './contents-outline';
 export * from './reading-language';
+
+export * from './import-epub';
