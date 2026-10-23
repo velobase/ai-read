@@ -92,8 +92,8 @@ async function identityToken(value: string, provider: 'apple' | 'google', nonce:
     )
       throw new Error('identity_mismatch');
     return payload;
-  } catch {
-    throw new MobileAuthError('invalid_provider_token');
+  } catch (cause) {
+    throw new MobileAuthError('invalid_provider_token', 401, { cause });
   }
 }
 
@@ -136,8 +136,8 @@ export async function nativeProviderSignIn(request: Request, body: Record<string
       !opaque.test(challenge.nonce)
     )
       throw new Error('challenge');
-  } catch {
-    throw new MobileAuthError('invalid_grant');
+  } catch (cause) {
+    throw new MobileAuthError('invalid_grant', 401, { cause });
   }
   const identity = await identityToken(body.identityToken, provider, challenge.nonce as string);
   let appleRefresh: string | undefined;
@@ -161,14 +161,28 @@ export async function nativeProviderSignIn(request: Request, body: Record<string
         grant_type: 'authorization_code',
       }),
     });
-    if (!response.ok) throw new MobileAuthError('invalid_provider_code');
-    const tokens = await response.json();
+    const responseBody = await response.text();
+    if (!response.ok)
+      throw new MobileAuthError('invalid_provider_code', 401, {
+        cause: new Error(`Apple token exchange returned HTTP ${response.status}: ${responseBody}`),
+      });
+    let tokens;
+    try {
+      tokens = JSON.parse(responseBody);
+    } catch (cause) {
+      throw new MobileAuthError('auth_unavailable', 503, {
+        cause: new Error(`Apple token exchange returned invalid JSON: ${responseBody}`, { cause }),
+      });
+    }
     if (
+      !tokens ||
       typeof tokens.id_token !== 'string' ||
       typeof tokens.refresh_token !== 'string' ||
       tokens.refresh_token.length > 8192
     )
-      throw new MobileAuthError('auth_unavailable', 503);
+      throw new MobileAuthError('auth_unavailable', 503, {
+        cause: new Error(`Apple token exchange returned incomplete tokens: ${responseBody}`),
+      });
     const exchanged = await identityToken(tokens.id_token, provider, challenge.nonce as string);
     if (exchanged.sub !== identity.sub) throw new MobileAuthError('invalid_provider_token');
     appleRefresh = tokens.refresh_token;
@@ -180,7 +194,8 @@ export async function nativeProviderSignIn(request: Request, body: Record<string
     const session = await database.$transaction(async (tx) => {
       // Serialize both new and existing native sign-ins for this provider identity.
       const lock = `${provider}:${providerAccountId}`;
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lock}, 0))`;
+      // This statement returns void; execute it without asking Prisma to deserialize a row.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lock}, 0))`;
       await tx.nativeAuthUse.deleteMany({ where: { expires: { lte: new Date() } } });
       await tx.nativeAuthUse.create({
         data: {
@@ -256,7 +271,7 @@ export async function nativeProviderSignIn(request: Request, body: Record<string
   } catch (error) {
     if (error instanceof MobileAuthError) throw error;
     if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002')
-      throw new MobileAuthError('signin_retry', 409);
+      throw new MobileAuthError('signin_retry', 409, { cause: error });
     throw error;
   }
 }

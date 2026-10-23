@@ -9,6 +9,7 @@ import type { Adapter } from 'next-auth/adapters';
 import { headers } from 'next/headers';
 import { database } from './database';
 import { authEnabled, authConfigured, secureCookies, sessionCookieName } from './auth-config';
+import { logEvent } from './observability';
 
 export const hashSession = (token: string) => createHash('sha256').update(token).digest('hex');
 
@@ -102,7 +103,7 @@ const nextAuth = NextAuth(() => ({
   secret: process.env.AUTH_SECRET,
   logger: {
     error(error) {
-      console.error(`[auth] ${error.name}`);
+      logEvent('api.account', { outcome: 'error', error });
     },
   },
   useSecureCookies: secureCookies,
