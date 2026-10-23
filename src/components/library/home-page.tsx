@@ -7,7 +7,7 @@ import { useI18n } from '@/lib/i18n/provider';
 import Link from 'next/link';
 import { ArrowRight, BookOpen, ChevronRight, NotebookPen } from 'lucide-react';
 import { catalog, categories } from '@/lib/catalog';
-import { recommendedBooks, recommendationCopy } from '@/lib/recommended-books';
+import { Storefront } from './storefront';
 import { useLibrary } from './library-provider';
 import { BookCard, BookCover, LibraryShell, SearchBar } from './library-ui';
 
@@ -17,14 +17,6 @@ export function HomePage({ discover = false }: { discover?: boolean }) {
   const recent = [...books].sort(
     (a, b) => (state.books[b.id]?.lastOpenedAt || 0) - (state.books[a.id]?.lastOpenedAt || 0),
   );
-  const topicCopy: Record<string, string> = {
-    经济学: t('理解市场与经济协作'),
-    商业管理: t('竞争、组织与经营'),
-    阅读与思考: t('把问题留在页边'),
-    语言与表达: t('越过语言的边界'),
-    写作与记录: t('记录每一次发现'),
-    生活与观察: t('在日常里慢下来'),
-  };
   return (
     <LibraryShell>
       <section className="library-home-hero">
@@ -52,14 +44,6 @@ export function HomePage({ discover = false }: { discover?: boolean }) {
             <ChevronRight size={13} />
           </button>
         </div>
-        <div className="desktop-search-hints">
-          <span>{t('探索阅读')}</span>
-          {categories.slice(1).map((category) => (
-            <Link href={`/categories?category=${encodeURIComponent(category)}`} key={category}>
-              {localize(category)}
-            </Link>
-          ))}
-        </div>
       </section>
       <main className="library-container home-content">
         {!discover && (
@@ -85,58 +69,7 @@ export function HomePage({ discover = false }: { discover?: boolean }) {
             ))}
           </section>
         )}
-        <section className="home-recommendations catalog-recommendations">
-          <div className="mb-6 flex items-center justify-between">
-            <div className="flex items-baseline gap-3">
-              <h2 className="text-xl font-semibold sm:text-[22px]">
-                {discover ? t('精选书城') : t('为你推荐')}
-              </h2>
-              <span className="hidden text-xs text-muted-foreground sm:inline">
-                {t('经济学与商业管理 · 英文原版')}
-              </span>
-            </div>
-          </div>
-          <div className="home-recommendation-grid">
-            {recommendedBooks.map((book) => (
-              <div key={book.id} className="home-recommendation-card">
-                <BookCard book={book} showAuthor />
-                <p className="mt-3 line-clamp-3 text-xs leading-6 text-muted-foreground">
-                  {recommendationCopy(book, locale).reason}
-                </p>
-              </div>
-            ))}
-          </div>
-          <p className="mt-4 text-xs text-muted-foreground">
-            {t('精选英文原版书目，附版本信息与官方来源；站内全文暂未开放。')}
-          </p>
-        </section>
-        <section className="mt-12">
-          <h2 className="mb-5 text-xl font-semibold">{t('可直接阅读的原创')}</h2>
-          <div className="home-recommendation-grid">
-            {catalog.map((book) => (
-              <BookCard key={book.id} book={book} showAuthor />
-            ))}
-          </div>
-        </section>
-        <section className="home-topic-grid">
-          {categories.slice(1).map((category, i) => (
-            <Link
-              key={category}
-              href={`/categories?category=${encodeURIComponent(category)}`}
-              className="home-topic-card"
-            >
-              <span className="text-[10px] tracking-[.15em] text-muted-foreground">
-                {t('书单')} · {(i + 1).toLocaleString(locale, { minimumIntegerDigits: 2 })}
-              </span>
-              <h3>{localize(category)}</h3>
-              <p>{topicCopy[category]}</p>
-              <span className="mt-5 flex items-center gap-1 text-xs text-primary">
-                {t('去看看')}
-                <ArrowRight size={14} />
-              </span>
-            </Link>
-          ))}
-        </section>
+        <Storefront />
         {notes.length > 0 && (
           <section className="mt-12">
             <div className="mb-5 flex items-center justify-between">

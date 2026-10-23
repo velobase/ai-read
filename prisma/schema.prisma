@@ -13,6 +13,8 @@ model User {
   email               String    @unique
   emailVerified       DateTime?
   image               String?
+  isAdmin             Boolean   @default(false)
+  translationPrompt   String    @default("")
   bio                 String    @default("")
   color               String    @default("#77a98c")
   createdAt           DateTime  @default(now())
@@ -233,4 +235,82 @@ model Session {
 
   @@index([userId])
   @@index([expires])
+}
+
+// Public catalog content is separate from each reader's private library.
+model CatalogBook {
+  id String @id @default(uuid())
+  slug String @unique
+  title String
+  author String
+  description String @default("")
+  language String @default("en")
+  category String @default("Classics")
+  sourceUrl String @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  editions CatalogEdition[]
+  publication CatalogPublication?
+  collections CatalogCollectionItem[]
+}
+model CatalogEdition {
+  id String @id @default(uuid())
+  bookId String
+  state String @default("queued")
+  chapterCount Int @default(0)
+  paragraphCount Int @default(0)
+  characterCount Int @default(0)
+  warnings Json @default("[]")
+  createdAt DateTime @default(now())
+  book CatalogBook @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  assets CatalogAsset[]
+  job CatalogImportJob?
+  publication CatalogPublication?
+}
+model CatalogAsset {
+  id String @id @default(uuid())
+  editionId String
+  kind String
+  key String @unique
+  mime String
+  byteLength Int
+  sha256 String
+  fileName String
+  edition CatalogEdition @relation(fields: [editionId], references: [id], onDelete: Cascade)
+  @@unique([editionId, kind])
+}
+model CatalogImportJob {
+  id String @id @default(uuid())
+  editionId String @unique
+  state String @default("queued")
+  error String?
+  attempts Int @default(0)
+  leaseToken String?
+  leaseUntil DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  edition CatalogEdition @relation(fields: [editionId], references: [id], onDelete: Cascade)
+  @@index([state, leaseUntil])
+}
+model CatalogPublication {
+  bookId String @id
+  editionId String @unique
+  publishedAt DateTime @default(now())
+  book CatalogBook @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  edition CatalogEdition @relation(fields: [editionId], references: [id], onDelete: Restrict)
+}
+model CatalogCollection {
+  id String @id @default(uuid())
+  title String
+  description String @default("")
+  sortOrder Int @default(0)
+  items CatalogCollectionItem[]
+}
+model CatalogCollectionItem {
+  collectionId String
+  bookId String
+  sortOrder Int @default(0)
+  collection CatalogCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  book CatalogBook @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  @@id([collectionId, bookId])
 }

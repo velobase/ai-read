@@ -1,3 +1,4 @@
+import { logException } from '@/lib/server/observability';
 import { handleAI } from '@/lib/server/ai';
 import { auth } from '@/lib/server/auth';
 import { authEnabled } from '@/lib/server/auth-config';
@@ -14,7 +15,8 @@ export async function POST(request: Request) {
     return unauthorized();
   try {
     return await handleAI(request, await serverAIConfig(userId));
-  } catch {
+  } catch (error) {
+    logException('ai.request', error);
     return Response.json({ error: 'AI 配置暂时不可用，请稍后重试。' }, { status: 503 });
   }
 }

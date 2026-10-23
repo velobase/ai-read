@@ -1,3 +1,4 @@
+import { logException } from '@/lib/server/observability';
 import { accountBody } from '@/lib/server/account-request';
 import { handleAI } from '@/lib/server/ai';
 import { mobileAI, mobileTranslationContextKey } from '@/lib/server/mobile-ai';
@@ -12,6 +13,7 @@ export const POST = observedRoute('api.ai', async (request: Request) => {
   try {
     ({ config } = await mobileAI(request));
   } catch (error) {
+    logException('translation.mobile', error);
     return mobileAuthFailure(error);
   }
   if (!config) return Response.json({ error: 'native_ai_unavailable' }, { status: 403 });
@@ -71,7 +73,8 @@ export const POST = observedRoute('api.ai', async (request: Request) => {
       }),
       { ...config, accountManaged: true },
     );
-  } catch {
+  } catch (error) {
+    logException('translation.mobile', error);
     return Response.json({ error: 'invalid_reading_translation' }, { status: 400 });
   }
 });

@@ -2482,7 +2482,7 @@ export default function Reader({
           onSave={async (s, clearKey) => {
             let next = s;
             if (authEnabled && user) {
-              const config = await saveAIConnection(s, clearKey);
+              const config = await saveAIConnection(s);
               next = applyAIConnection(s, config);
               setHasServerKey(config.hasKey);
             }

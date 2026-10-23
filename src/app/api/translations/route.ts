@@ -1,3 +1,4 @@
+import { logException } from '@/lib/server/observability';
 import { auth } from '@/lib/server/auth';
 import { authEnabled } from '@/lib/server/auth-config';
 import { accountBody, unauthorized } from '@/lib/server/account-request';
@@ -45,7 +46,8 @@ export async function GET(request: Request) {
       });
     }
     return Response.json(await translationManifest(userId, bookId, language));
-  } catch {
+  } catch (error) {
+    logException('translation.request', error);
     return Response.json({ error: '译本暂时无法读取，请稍后重试。' }, { status: 503 });
   }
 }
@@ -58,6 +60,7 @@ export async function POST(request: Request) {
     startTranslationWorker();
     return Response.json(manifest);
   } catch (error) {
+    logException('translation.request', error);
     return Response.json(
       {
         error:

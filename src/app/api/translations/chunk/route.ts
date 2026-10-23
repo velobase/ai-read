@@ -1,3 +1,4 @@
+import { logException } from '@/lib/server/observability';
 import { authEnabled } from '@/lib/server/auth-config';
 import { accountBody } from '@/lib/server/account-request';
 import { serverAIConfig } from '@/lib/server/ai-config';
@@ -47,18 +48,15 @@ export async function POST(request: Request) {
     )
       return Response.json({ error: '翻译内容格式无效。' }, { status: 400 });
     const config = await serverAIConfig();
-    const baseUrl = normalizeAIUrl(raw.baseUrl);
-    const key = typeof body.apiKey === 'string' && body.apiKey.length <= 2000 ? body.apiKey : '';
-    const apiKey =
-      key || (config.baseUrl && normalizeAIUrl(config.baseUrl) === baseUrl ? config.apiKey : '');
     const result = await translateChunk(
       input,
-      translationProfile({ baseUrl, model: raw.model, translationPrompt: raw.translationPrompt }),
-      apiKey,
+      translationProfile(config),
+      config.apiKey,
       AbortSignal.any([request.signal, AbortSignal.timeout(120000)]),
     );
     return Response.json(result);
   } catch (error) {
+    logException('translation.chunk', error);
     return Response.json(
       {
         error: error instanceof Error ? error.message : '翻译暂时不可用。',

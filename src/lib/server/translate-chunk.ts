@@ -1,4 +1,5 @@
 import 'server-only';
+import { logException } from './observability';
 import { normalizeAIUrl } from './ai-endpoint';
 import { renderTranslationPrompt } from '../translation-prompt';
 import { languageName } from '../types';
@@ -63,9 +64,15 @@ Include every segment id exactly once, in input order. Keep paragraph boundaries
     }),
   });
   if (!response.ok) {
-    await response.body?.cancel();
+    const upstreamBody = await response.text();
+    logException('translation.upstream', new Error(`Model provider returned ${response.status}`), {
+      upstreamBody,
+      status: response.status,
+      model: profile.model,
+      upstreamRequestId: response.headers.get('x-request-id'),
+    });
     const messages: Record<number, string> = {
-      401: 'API Key 无效或缺失',
+      401: '翻译服务暂时无法认证，请稍后重试',
       402: '服务余额不足',
       403: '服务拒绝访问',
       404: '请检查服务地址和模型名称',
@@ -110,6 +117,7 @@ Include every segment id exactly once, in input order. Keep paragraph boundaries
     );
     return validateChunk(value, input.chunk);
   } catch (error) {
+    logException('translation.parse', error, { content, model: profile.model });
     throw new TranslationError(
       error instanceof SyntaxError
         ? '译文格式不完整，请重试。'

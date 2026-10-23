@@ -18,7 +18,8 @@ export async function GET() {
       },
       { headers: { 'Cache-Control': 'no-store' } },
     );
-  } catch {
+  } catch (error) {
+    console.error('ai.config', { userId }, error);
     return Response.json({ error: '暂时无法读取 AI 配置，请重试。' }, { status: 503 });
   }
 }

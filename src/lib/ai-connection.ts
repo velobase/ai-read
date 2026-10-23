@@ -22,17 +22,13 @@ export async function readAIConnection(): Promise<AIConnection> {
 
 export async function saveAIConnection(
   settings: Settings,
-  clearKey = false,
+
 ): Promise<AIConnection> {
   const response = await fetch('/api/account/ai', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', 'x-reader-user': storageUserId() || '' },
     body: JSON.stringify({
-      baseUrl: settings.baseUrl,
-      model: settings.model,
-      apiKey: settings.apiKey,
       translationPrompt: settings.translationPrompt,
-      clearKey,
     }),
     signal: AbortSignal.timeout(15_000),
   });

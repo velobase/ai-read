@@ -7,12 +7,7 @@ import { useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { FolderPlus, ChevronRight, Plus } from 'lucide-react';
 import { catalog, categories, bookDescription } from '@/lib/catalog';
-import {
-  recommendedBooks,
-  recommendationCopy,
-  isRecommendedBook,
-  type RecommendedBook,
-} from '@/lib/recommended-books';
+import { Storefront } from './storefront';
 import type { Book } from '@/lib/types';
 import { useLibrary } from './library-provider';
 import { BookCard, BookCover, Empty, LibraryShell, PageHeading, SearchBar } from './library-ui';
@@ -21,48 +16,13 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 
 export function CategoriesPage() {
-  const { t, text: localize } = useI18n();
+  const { t } = useI18n();
   const params = useSearchParams();
-  const [chosen, setChosen] = useState(params.get('category') || '全部');
-  const { books } = useLibrary();
-  const all = Array.from(
-    new Map<string, Book | RecommendedBook>(
-      [...recommendedBooks, ...catalog, ...books].map((b) => [b.id, b]),
-    ).values(),
-  );
-  const choices = [...new Set([...categories, ...all.map((b) => b.category || '其他')])];
-  const filtered = all.filter((b) => chosen === '全部' || (b.category || '其他') === chosen);
   return (
     <LibraryShell>
       <main className="library-container">
         <PageHeading title={t('分类')} back="/" />
-        <div className="category-layout">
-          <nav aria-label={t('书籍分类')} className="category-nav">
-            {choices.map((category) => (
-              <button
-                key={category}
-                className={chosen === category ? 'active' : ''}
-                aria-pressed={chosen === category}
-                onClick={() => setChosen(category)}
-              >
-                {localize(category)}
-              </button>
-            ))}
-          </nav>
-          <section className="category-results">
-            <h2 className="mb-6 text-lg font-semibold">
-              {localize(chosen)}
-              <span className="ms-3 text-xs font-normal text-muted-foreground">
-                {t('{count} 本', { count: filtered.length })}
-              </span>
-            </h2>
-            <div className="category-book-grid">
-              {filtered.map((book) => (
-                <BookCard key={book.id} book={book} showAuthor />
-              ))}
-            </div>
-          </section>
-        </div>
+        <Storefront initialCategory={params.get('category') || ''} />
       </main>
     </LibraryShell>
   );
@@ -121,30 +81,7 @@ export function CollectionsPage() {
             <span>{t('新建分组')}</span>
           </button>
         </div>
-        <h2 className="mb-5 mt-12 text-xl font-semibold">{t('主题书单')}</h2>
-        <div className="collection-grid">
-          {categories.slice(1).map((category) => (
-            <Link
-              key={category}
-              href={`/categories?category=${encodeURIComponent(category)}`}
-              className="collection-card"
-            >
-              <div className="collection-covers">
-                {[...recommendedBooks, ...catalog]
-                  .filter((b) => b.category === category)
-                  .slice(0, 3)
-                  .map((book) => (
-                    <BookCover key={book.id} book={book} />
-                  ))}
-              </div>
-              <h2>{localize(category)}</h2>
-              <p>
-                {t('书目精选')}
-                <ChevronRight size={15} />
-              </p>
-            </Link>
-          ))}
-        </div>
+        <Storefront collectionMode />
         {adding && (
           <Modal title={t('新建分组')} close={() => setAdding(false)}>
             <form
@@ -181,15 +118,11 @@ export function SearchPage() {
   const params = useSearchParams();
   const query = (params.get('q') || '').trim();
   const { allBooks, notes, readBook } = useLibrary();
-  const all = Array.from(
-    new Map<string, Book | RecommendedBook>(
-      [...recommendedBooks, ...catalog, ...allBooks].map((b) => [b.id, b]),
-    ).values(),
-  );
+  const all = Array.from(new Map<string, Book>([...allBooks].map((b) => [b.id, b])).values());
   const needle = query.toLocaleLowerCase();
   const found = query
     ? all.filter((b) =>
-        `${b.title} ${b.subtitle || ''} ${b.author} ${b.category || ''} ${isRecommendedBook(b) ? b.aliases.join(' ') + ' ' + b.isbn : ''}`
+        `${b.title} ${b.subtitle || ''} ${b.author} ${b.category || ''}`
           .toLocaleLowerCase()
           .includes(needle),
       )
@@ -240,15 +173,8 @@ export function SearchPage() {
                       <h3>{book.title}</h3>
                       <p className="mt-2 text-xs text-muted-foreground">{book.author}</p>
                       <p className="mt-3 line-clamp-2 text-xs leading-6 text-muted-foreground">
-                        {isRecommendedBook(book)
-                          ? recommendationCopy(book, locale).description
-                          : bookDescription(book)}
+                        {bookDescription(book)}
                       </p>
-                      {isRecommendedBook(book) && (
-                        <p className="mt-2 text-xs text-muted-foreground">
-                          {t('英文原版 · 书目推荐')}
-                        </p>
-                      )}
                     </div>
                     <ChevronRight size={18} className="hidden text-muted-foreground sm:block" />
                   </Link>
