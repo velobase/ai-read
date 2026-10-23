@@ -93,7 +93,7 @@ export function CatalogAdmin() {
   useEffect(() => {
     if (!pending) return;
     const timer = setInterval(() => {
-      void refresh().catch(() => {});
+      void refresh().catch((error) => console.error('catalog.admin.refresh', error));
     }, 5000);
     return () => clearInterval(timer);
   }, [pending]);

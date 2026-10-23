@@ -7,7 +7,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       <main className="mx-auto max-w-lg p-12">
         <h1 className="text-2xl font-semibold">LeafRead Admin</h1>
         <p className="my-6">Sign in with your administrator account to manage the bookstore.</p>
-        <Link className="library-primary" href="/login">
+        <Link className="library-primary" href="/login?returnTo=%2Fadmin">
           Sign in
         </Link>
         <Link className="ml-6 underline" href="/">

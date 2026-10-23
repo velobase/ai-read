@@ -38,7 +38,8 @@ function pathFor(base: string, href: string) {
   let decoded = href.split('#')[0];
   try {
     decoded = decodeURIComponent(decoded);
-  } catch {
+  } catch (error) {
+    console.warn('epub.optional-resource', error);
     /* Some books contain unescaped percent signs. */
   }
   if (/^[a-z]+:/i.test(decoded) || decoded.startsWith('/') || decoded.includes('\\'))
@@ -138,7 +139,8 @@ export async function parseEpub(
     try {
       const path = pathFor(base, href);
       navigationDocuments.push({ path, document: read(path), kind });
-    } catch {
+    } catch (error) {
+      console.warn('epub.optional-resource', error);
       /* Keep readable chapters when an optional navigation document is malformed. */
     }
   }
@@ -162,7 +164,8 @@ export async function parseEpub(
       const path = pathFor(base, entry.getAttribute('href') || '');
       if (referencePaths.has(path) && !referenceDocuments.some((doc) => doc.path === path))
         referenceDocuments.push({ path, document: read(path) });
-    } catch {
+    } catch (error) {
+      console.warn('epub.optional-resource', error);
       /* Missing or invalid optional targets are diagnosed without changing spine text. */
     }
   }
@@ -207,7 +210,8 @@ export async function parseEpub(
         }
         cover = `data:${mime};base64,${parts.join('')}`;
       }
-    } catch {
+    } catch (error) {
+      console.warn('epub.optional-resource', error);
       /* An unreadable cover does not discard readable chapters. */
     }
   }

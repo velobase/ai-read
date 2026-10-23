@@ -69,7 +69,7 @@ for (const entry of entries) {
     .flatMap((c) => c.paragraphs)
     .map((p) => p.text)
     .join('\n');
-  if (!text.includes('PROJECT GUTENBERG LICENSE'))
+  if (!/PROJECT GUTENBERG.{0,5} LICENSE/i.test(text))
     throw new Error(`Missing source license: ${entry.slug}`);
   await writeFile(
     resolve(directory, `${entry.slug}.preview.json`),
@@ -130,7 +130,7 @@ for (const entry of entries) {
     !normalized.chapters.length ||
     !normalized.chapters
       .flatMap((c) => c.paragraphs)
-      .some((p) => p.text.includes('PROJECT GUTENBERG LICENSE'))
+      .some((p) => /PROJECT GUTENBERG.{0,5} LICENSE/i.test(p.text))
   )
     throw new Error('Reading bundle is incomplete');
   await publishCatalogBook(book.id, edition.id);

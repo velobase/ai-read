@@ -1,5 +1,6 @@
 export type ReaderIdentity = {
   id: string;
+  isAdmin: boolean;
   name: string;
   email: string;
   image: string | null;

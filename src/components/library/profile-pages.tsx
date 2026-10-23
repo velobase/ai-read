@@ -80,6 +80,7 @@ export function ProfilePage() {
           </div>
           <ChevronRight size={22} className="text-muted-foreground/50" />
         </Link>
+        {user?.isAdmin && <Link className="mb-5 block rounded-xl bg-primary/10 p-4 text-sm font-medium text-primary" href="/admin">{locale.startsWith('zh') ? '书城管理 · 上书与发布' : 'Bookstore admin · Upload & publish'} →</Link>}
         <Link href="/library" className="profile-reading-card">
           <span className="profile-color-icon bg-[#edbd66]">
             <BookOpen size={22} />

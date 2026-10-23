@@ -60,5 +60,13 @@ export async function downloadStoreBook(
     throw new Error('The download is incomplete. Please try again.');
   const book = validateBook(JSON.parse(new TextDecoder().decode(bytes)));
   if (book.id !== entry.editionId) throw new Error('Unexpected book edition');
-  return { ...book, importedAt: Date.now() };
+  return {
+    ...book,
+    title: entry.title,
+    author: entry.author,
+    language: entry.language,
+    category: entry.category,
+    description: entry.description,
+    importedAt: Date.now(),
+  };
 }

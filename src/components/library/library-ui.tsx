@@ -269,7 +269,9 @@ export function BookCover({ book, className }: { book: BookDisplay; className?: 
     : book.author.replace(/^(ByPage · 逐页|LeafRead|叶读|葉讀|逐页|逐頁) · /, '');
   return (
     <div className={cn('library-book-cover', `cover-style-${variant}`, className)}>
-      {book.cover && /^data:image\/(png|jpeg|webp);base64,/.test(book.cover) ? (
+      {book.cover &&
+      (/^data:image\/(png|jpeg|webp);base64,/.test(book.cover) ||
+        /^\/api\/catalog\/[a-z0-9-]+\/cover$/.test(book.cover)) ? (
         <img
           src={book.cover}
           alt={t('{value0}封面', { value0: book.title })}
