@@ -99,7 +99,7 @@ export function TranslationPanel({
       )}
       <div className="flex flex-wrap gap-2">
         {!c.canPrepare ? (
-          <Button onClick={connect}>{zh ? '连接翻译模型' : 'Connect a translation model'}</Button>
+          <Button onClick={connect}>{zh ? '登录或查看翻译服务' : 'Sign in or check translation service'}</Button>
         ) : (
           <>
             {active ? (
@@ -150,8 +150,8 @@ export function TranslationPanel({
       {remainingChars > 0 && (
         <p className="text-xs text-muted-foreground">
           {zh
-            ? `整本剩余约 ${number(remainingChars)} 字符，使用当前译本的模型连接计费。`
-            : `About ${number(remainingChars)} source characters remain. Your edition’s model provider bills generation.`}
+            ? `整本剩余约 ${number(remainingChars)} 字符，由 LeafRead 提供翻译服务。`
+            : `About ${number(remainingChars)} source characters remain. Translation is provided by LeafRead.`}
         </p>
       )}
       {c.manifest.editions.length > 1 && (
