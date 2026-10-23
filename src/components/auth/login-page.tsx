@@ -15,25 +15,25 @@ import { safeReturnPath } from '@/lib/identity';
 import { Button } from '@/components/ui/button';
 
 const errors: Record<string, string> = {
-  AccessDenied: '这次登录未获授权。请使用已验证邮箱的 Google 账号重试。',
+  AccessDenied: '这次登录未获授权。请重试或选择另一种登录方式。',
   OAuthAccountNotLinked: '这个邮箱已关联其他登录身份，请使用原来的登录方式。',
   Configuration: '登录服务暂时不可用，请稍后再试。',
   OAuthCallbackError: '登录未完成，请重新开始。',
 };
 
 export function LoginPage() {
-  const { t, text: localize } = useI18n();
-  const { enabled, user } = useIdentity();
+  const { t, text: localize, locale } = useI18n();
+  const { enabled, user, providers = ['google'] } = useIdentity();
   const params = useSearchParams();
   const returnTo = safeReturnPath(params.get('returnTo') || params.get('callbackUrl'));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const oauthError = params.get('error');
-  const start = async () => {
+  const start = async (provider: 'apple' | 'google') => {
     setBusy(true);
     setError('');
     try {
-      await signIn('google', { redirectTo: returnTo });
+      await signIn(provider, { redirectTo: returnTo });
     } catch {
       setError(t('暂时无法开始登录，请检查网络后重试。'));
       setBusy(false);
@@ -52,7 +52,9 @@ export function LoginPage() {
         <span className="brand-mark">
           <BookOpen size={30} strokeWidth={1.5} />
         </span>
-        <p className="mt-7 text-xs tracking-[0.2em] text-muted-foreground">{t('ByPage · 逐页')}</p>
+        <p className="mt-7 text-xs tracking-[0.2em] text-muted-foreground">
+          {locale.startsWith('zh') ? '叶子阅读' : 'LeafRead'}
+        </p>
         <h1 className="mt-3 text-[30px] font-semibold tracking-tight">{t('阅读，从这里继续')}</h1>
         <p className="mt-4 text-sm leading-7 text-muted-foreground">
           {t('用一个熟悉的账号，拥有自己的阅读身份。')}
@@ -72,11 +74,20 @@ export function LoginPage() {
           </>
         ) : (
           <>
+            {providers.includes('apple') && (
+              <Button
+                className="mb-3 h-12 w-full rounded-full bg-black text-white hover:bg-black/85"
+                disabled={!enabled || busy}
+                onClick={() => void start('apple')}
+              >
+                {locale.startsWith('zh') ? '使用 Apple 继续' : 'Continue with Apple'}
+              </Button>
+            )}
             <Button
               variant="outline"
               className="h-12 w-full gap-3 rounded-full border-black/15 bg-white font-medium"
-              disabled={!enabled || busy}
-              onClick={() => void start()}
+              disabled={!enabled || busy || !providers.includes('google')}
+              onClick={() => void start('google')}
             >
               {busy ? <LoaderCircle size={19} className="animate-spin" /> : <GoogleMark />}
               {busy ? t('正在前往 Google…') : t('使用 Google 继续')}
@@ -109,16 +120,19 @@ export function LoginPage() {
         )}
         <div className="login-privacy">
           <ShieldCheck size={17} className="shrink-0 text-[#79a795]" />
-          <p>
-            {t('登录仅使用昵称、头像和邮箱。书籍与笔记保存在当前浏览器，游客书库会完整保留。')}
-          </p>
+          <p>{t('登录仅使用昵称、头像和邮箱。书籍与笔记保存在当前浏览器，游客书库会完整保留。')}</p>
         </div>
       </div>
       <div className="mt-10 flex flex-col items-center gap-2 text-center text-xs text-muted-foreground/70">
         <p>{t('跨越语言，读懂每一页。')}</p>
         <p className="flex flex-wrap items-center justify-center gap-3 text-[11px]">
           <span>© 2026 LeafRead</span>
-          <a href="https://leafread.ai" target="_blank" rel="noreferrer" className="hover:underline">
+          <a
+            href="https://leafread.ai"
+            target="_blank"
+            rel="noreferrer"
+            className="hover:underline"
+          >
             leafread.ai
           </a>
           <Link href="/privacy" className="hover:underline">

@@ -4,15 +4,27 @@ import { Prisma } from '@/generated/prisma/client';
 import {
   cleanPreferences,
   cleanShelf,
+  bookMetadata,
   syncEntities,
   type SyncEntity,
   type SyncRecord,
   type SyncData,
   type ChatTurn,
+  type BookMetadata,
 } from '../sync-types';
 import { validateBook } from '../reading-backup';
 import { validNoteAnchor, validPosition, validSyncId } from '../reading-validation';
 import type { Book, Note, Position } from '../types';
+import { supplementBookMetadata } from '../book-metadata';
+import { supplementBookMedia } from '../../../packages/reading-core/src/book-media';
+import { supplementBookReferences } from '../../../packages/reading-core/src/book-references';
+import { sameBookContent } from '../../../packages/reading-core/src/import-markup';
+import {
+  MAX_BOOKMARKS_PER_BOOK,
+  validateBookmark,
+} from '../../../packages/reading-core/src/bookmarks';
+import type { Bookmark } from '../../../packages/reading-core/src/types';
+import { resolveTranslationKey } from '../../../packages/reading-core/src/translation-key';
 
 type DB = Prisma.TransactionClient;
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
@@ -39,9 +51,11 @@ export async function syncBody(request: Request) {
       const { done, value } = await reader.read();
       if (done) break;
       size += value.byteLength;
-      if (size > 64 * 1024 * 1024) {
+      // The former 64 MiB text/metadata budget plus up to 16 MiB of base64
+      // image bytes and bounded placement metadata. Still cap the raw body.
+      if (size > 96 * 1024 * 1024) {
         await reader.cancel();
-        return fail();
+        throw new Error('sync-body-too-large');
       }
       chunks.push(value);
     }
@@ -75,16 +89,25 @@ export async function readRecord(
     };
   }
   if (entity === 'book') {
-    const row = await db.book.findUnique({
-      where: { userId_id: { userId, id } },
-      select: {
-        version: true,
-        deletedAt: true,
-        mutationId: true,
-        shelfState: true,
-        content: includeContent,
-      },
-    });
+    // Project metadata in PostgreSQL; shelf ACKs never load text or image bytes.
+    const [row] = await db.$queryRaw<
+      Array<{
+        version: number;
+        deletedAt: Date | null;
+        mutationId: string;
+        shelfState: unknown;
+        content: Book | null;
+        metadata: BookMetadata;
+      }>
+    >`SELECT "version", "deletedAt", "mutationId", "shelfState",
+      CASE WHEN ${includeContent} THEN "content" ELSE NULL END AS "content",
+      jsonb_strip_nulls(jsonb_build_object(
+        'toc', "content" -> 'toc', 'sourceFormat', "content" -> 'sourceFormat',
+        'sourceLanguage', "content" -> 'sourceLanguage',
+        'references', "content" -> 'references',
+        'mediaRevision', "content" -> 'media' -> 'revision'
+      )) AS "metadata"
+      FROM "Book" WHERE "userId" = ${userId} AND "id" = ${id}`;
     return row
       ? {
           ...base,
@@ -93,6 +116,7 @@ export async function readRecord(
           mutationId: row.mutationId,
           data: {
             shelfState: cleanShelf(row.shelfState),
+            ...(!row.deletedAt ? { metadata: bookMetadata(row.metadata) } : {}),
             ...(includeContent && !row.deletedAt
               ? { content: row.content as unknown as Book }
               : {}),
@@ -131,6 +155,18 @@ export async function readRecord(
             text: row.content,
             createdAt: row.createdAt.getTime(),
           },
+        }
+      : null;
+  }
+  if (entity === 'bookmark') {
+    const row = await db.bookmark.findUnique({ where: key });
+    return row
+      ? {
+          ...base,
+          version: row.version,
+          deleted: !!row.deletedAt,
+          mutationId: row.mutationId,
+          data: row.body as Bookmark,
         }
       : null;
   }
@@ -182,18 +218,20 @@ export async function listRecords(
         })
       : entity === 'note'
         ? await database.note.findMany(options)
-        : entity === 'chat'
-          ? await database.chatTurn.findMany(options)
-          : entity === 'translation'
-            ? await database.translationCache.findMany(options)
-            : entity === 'position'
-              ? (
-                  await database.readingProgress.findMany({
-                    where: { userId, bookId },
-                    select: { bookId: true, version: true, deletedAt: true },
-                  })
-                ).map((r) => ({ ...r, id: bookId }))
-              : [];
+        : entity === 'bookmark'
+          ? await database.bookmark.findMany(options)
+          : entity === 'chat'
+            ? await database.chatTurn.findMany(options)
+            : entity === 'translation'
+              ? await database.translationCache.findMany(options)
+              : entity === 'position'
+                ? (
+                    await database.readingProgress.findMany({
+                      where: { userId, bookId },
+                      select: { bookId: true, version: true, deletedAt: true },
+                    })
+                  ).map((r) => ({ ...r, id: bookId }))
+                : [];
   return {
     items: rows.map((row) => ({
       entity,
@@ -271,6 +309,23 @@ export async function writeRecord(userId: string, raw: Record<string, unknown>) 
           if (deleted) fail();
           content = validateBook(data.content);
           if (content.id !== id) fail();
+          content = supplementBookMetadata(content, data.metadata);
+        } else if (!deleted && (data.metadata !== undefined || data.content !== undefined)) {
+          const saved = await tx.book.findUniqueOrThrow({
+            where: { userId_id: { userId, id } },
+            select: { content: true },
+          });
+          const previous = saved.content as unknown as Book;
+          const incoming = data.content === undefined ? undefined : validateBook(data.content);
+          if (incoming && (incoming.id !== id || !sameBookContent(previous, incoming))) fail();
+          const withMedia = incoming
+            ? supplementBookReferences(supplementBookMedia(previous, incoming), incoming)
+            : previous;
+          const next = supplementBookMetadata(
+            withMedia,
+            data.metadata === undefined && incoming ? bookMetadata(incoming) : data.metadata,
+          );
+          if (next !== previous) content = next;
         }
         await tx.book.upsert({
           where: { userId_id: { userId, id } },
@@ -285,7 +340,8 @@ export async function writeRecord(userId: string, raw: Record<string, unknown>) 
           },
           update: {
             ...stamp,
-            ...(content ? { content: json(content), title: content.title } : {}),
+            ...(content ? { content: json(content) } : {}),
+            ...(content && (!current || current.deleted) ? { title: content.title } : {}),
             ...(!deleted ? { shelfState: json(cleanShelf(data.shelfState)) } : {}),
           },
         });
@@ -296,6 +352,10 @@ export async function writeRecord(userId: string, raw: Record<string, unknown>) 
           });
           const childStamp = { deletedAt: stamp.deletedAt, version: { increment: 1 }, mutationId };
           await tx.note.updateMany({
+            where: { userId, bookId, deletedAt: null },
+            data: childStamp,
+          });
+          await tx.bookmark.updateMany({
             where: { userId, bookId, deletedAt: null },
             data: childStamp,
           });
@@ -314,6 +374,7 @@ export async function writeRecord(userId: string, raw: Record<string, unknown>) 
         }
       } else if (deleted) {
         if (entity === 'note') await tx.note.update({ where: key, data: stamp });
+        else if (entity === 'bookmark') await tx.bookmark.update({ where: key, data: stamp });
         else if (entity === 'chat') await tx.chatTurn.update({ where: key, data: stamp });
         else if (entity === 'translation')
           await tx.translationCache.update({ where: key, data: stamp });
@@ -324,11 +385,13 @@ export async function writeRecord(userId: string, raw: Record<string, unknown>) 
           });
       } else {
         const data = object(raw.data);
-        const parent = await tx.book.findUniqueOrThrow({
-          where: { userId_id: { userId, id: bookId } },
-          select: { content: true },
-        });
-        const book = parent.content as unknown as Book;
+        // Paragraph validation does not need the EPUB image sidecar. Avoid
+        // loading it into Node on every progress, bookmark, note or translation mutation.
+        const [parent] = await tx.$queryRaw<Array<{ content: Book }>>`
+          SELECT "content" - 'media' AS "content" FROM "Book"
+          WHERE "userId" = ${userId} AND "id" = ${bookId}`;
+        if (!parent) fail();
+        const book = parent.content;
         const paragraphs = new Set(book.chapters.flatMap((c) => c.paragraphs.map((p) => p.id)));
         if (entity === 'position') {
           const p = data as Position;
@@ -344,11 +407,30 @@ export async function writeRecord(userId: string, raw: Record<string, unknown>) 
               typeof p.offset === 'number' && Number.isFinite(p.offset)
                 ? Math.max(0, Math.min(1, p.offset))
                 : 0,
+            ...(p.textOffset !== undefined ? { textOffset: p.textOffset } : {}),
+            ...(p.textSource !== undefined ? { textSource: p.textSource } : {}),
+            ...(p.textQuote !== undefined ? { textQuote: p.textQuote } : {}),
           };
           await tx.readingProgress.upsert({
             where: { userId_bookId: { userId, bookId } },
             create: { userId, bookId, position: json(position), ...stamp },
             update: { position: json(position), ...stamp },
+          });
+        } else if (entity === 'bookmark') {
+          const bookmark = validateBookmark(book, data);
+          if (bookmark.id !== id || bookmark.bookId !== bookId) fail();
+          // The same account lock above serializes creation/restoration with this bound.
+          if (
+            (!current || current.deleted) &&
+            (await tx.bookmark.count({ where: { userId, bookId, deletedAt: null } })) >=
+              MAX_BOOKMARKS_PER_BOOK
+          )
+            throw new Error('Invalid bookmark');
+          const values = { body: json(bookmark), createdAt: new Date(bookmark.createdAt) };
+          await tx.bookmark.upsert({
+            where: key,
+            create: { userId, bookId, id, ...values, ...stamp },
+            update: { ...values, ...stamp },
           });
         } else if (entity === 'note') {
           const note = data as Note;
@@ -401,23 +483,17 @@ export async function writeRecord(userId: string, raw: Record<string, unknown>) 
             update: { ...stamp },
           });
         } else {
-          const parts = id.split(':');
-          if (
-            data.key !== id ||
-            parts.length !== 3 ||
-            !paragraphs.has(parts[1]) ||
-            !/^[\w-]{2,30}$/.test(parts[0])
-          )
-            fail();
+          const translationKey = resolveTranslationKey(id, paragraphs);
+          if (data.key !== id || !translationKey) return fail();
           const values = {
-            paragraphId: parts[1],
-            targetLanguage: parts[0],
+            paragraphId: translationKey.paragraphId,
+            targetLanguage: translationKey.language,
             translation: text(data.text, 1024 * 1024),
           };
           await tx.translationCache.upsert({
             where: key,
             create: { userId, bookId, id, ...values, ...stamp },
-            update: { ...stamp },
+            update: { ...values, ...stamp },
           });
         }
       }

@@ -8,7 +8,11 @@ export type ReaderIdentity = {
   createdAt: string;
 };
 
-export type IdentityState = { enabled: boolean; user: ReaderIdentity | null };
+export type IdentityState = {
+  enabled: boolean;
+  providers?: ('google' | 'apple')[];
+  user: ReaderIdentity | null;
+};
 
 export function safeReturnPath(value: string | null | undefined) {
   if (!value || !value.startsWith('/') || value.startsWith('//') || /[\\\r\n]/.test(value))

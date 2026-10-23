@@ -15,7 +15,10 @@ export function proxy(request: NextRequest) {
   const api = request.nextUrl.pathname.startsWith('/api/');
   // Google navigates here from accounts.google.com. Auth.js verifies PKCE, state and nonce.
   const oauthCallback =
-    request.method === 'GET' && request.nextUrl.pathname === '/api/auth/callback/google';
+    (request.method === 'GET' && request.nextUrl.pathname === '/api/auth/callback/google') ||
+    (request.method === 'POST' &&
+      request.nextUrl.pathname === '/api/auth/callback/apple' &&
+      request.headers.get('origin') === 'https://appleid.apple.com');
   const unsafe = !['GET', 'HEAD', 'OPTIONS'].includes(request.method);
   let response: NextResponse;
   if (!hostAllowed) {

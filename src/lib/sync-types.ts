@@ -1,11 +1,18 @@
-import type { Book, Note, Position, Settings } from './types';
+import type { Book, Bookmark, Note, Position, Settings } from './types';
 import type { BookState } from './library-state';
+import { supplementReferences } from '../../packages/reading-core/src/book-references';
+import {
+  MAX_COLLECTIONS,
+  normalizeCollectionName,
+} from '../../packages/reading-core/src/collections';
 
-export type SyncEntity = 'book' | 'position' | 'note' | 'chat' | 'translation' | 'preferences';
+export type SyncEntity =
+  'book' | 'position' | 'note' | 'bookmark' | 'chat' | 'translation' | 'preferences';
 export const syncEntities: SyncEntity[] = [
   'book',
   'position',
   'note',
+  'bookmark',
   'chat',
   'translation',
   'preferences',
@@ -19,10 +26,36 @@ export type ChatTurn = {
   createdAt: number;
 };
 export type Preferences = { settings: Partial<Settings>; groups: string[] };
+export type BookMetadata = Pick<Book, 'toc' | 'sourceFormat' | 'sourceLanguage' | 'references'> & {
+  mediaRevision?: string;
+};
+/** Prefer supplied metadata; an absent language override never means deletion. */
+export function bookMetadata(
+  primary: BookMetadata & Pick<Book, 'media'>,
+  fallback: BookMetadata & Pick<Book, 'media'> = {},
+): BookMetadata {
+  const toc = primary.toc?.length ? primary.toc : fallback.toc;
+  const sourceFormat = primary.sourceFormat || fallback.sourceFormat;
+  const sourceLanguage = primary.sourceLanguage ?? fallback.sourceLanguage;
+  const references = supplementReferences(primary.references, fallback.references);
+  const mediaRevision =
+    primary.media?.revision ||
+    primary.mediaRevision ||
+    fallback.media?.revision ||
+    fallback.mediaRevision;
+  return {
+    ...(toc?.length ? { toc } : {}),
+    ...(sourceFormat ? { sourceFormat } : {}),
+    ...(sourceLanguage !== undefined ? { sourceLanguage } : {}),
+    ...(references ? { references } : {}),
+    ...(mediaRevision ? { mediaRevision } : {}),
+  };
+}
 export type SyncData = {
-  book: { content?: Book; shelfState: BookState };
+  book: { content?: Book; metadata?: BookMetadata; shelfState: BookState };
   position: Position;
   note: Note;
+  bookmark: Bookmark;
   chat: ChatTurn;
   translation: { key: string; text: string };
   preferences: Preferences;
@@ -48,6 +81,8 @@ export type SyncEntry = Omit<SyncRecord, 'data' | 'mutationId'> & {
   pending?: SyncMutation;
   /** Keep rejected data locally; retry only after an edit or an explicit sync. */
   rejectedMutationId?: string;
+  /** Device-local comparison only: do not repeatedly exchange incompatible sidecars. */
+  mediaChecked?: { localRevision: string; remoteRevision: string };
 };
 export const syncKey = (entity: SyncEntity, bookId: string, id: string) =>
   JSON.stringify([entity, bookId, id]);
@@ -117,11 +152,11 @@ export function cleanPreferences(value: unknown): Preferences {
     groups: Array.isArray(input.groups)
       ? [
           ...new Set(
-            input.groups.filter(
-              (g): g is string => typeof g === 'string' && !!g.trim() && g.length <= 40,
-            ),
+            input.groups
+              .map((group) => normalizeCollectionName(group)?.name)
+              .filter((group): group is string => group !== undefined),
           ),
-        ].slice(0, 100)
+        ].slice(0, MAX_COLLECTIONS)
       : [],
   };
 }
@@ -131,7 +166,7 @@ export function cleanShelf(value: unknown): BookState {
     status: ['unread', 'reading', 'finished'].includes(v.status || '') ? v.status : undefined,
     pinned: v.pinned === true,
     hidden: v.hidden === true,
-    group: typeof v.group === 'string' ? v.group.slice(0, 40) : undefined,
+    group: v.group === '' ? '' : normalizeCollectionName(v.group)?.name,
     lastOpenedAt:
       typeof v.lastOpenedAt === 'number' && Number.isFinite(v.lastOpenedAt)
         ? v.lastOpenedAt

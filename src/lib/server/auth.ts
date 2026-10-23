@@ -2,6 +2,8 @@ import 'server-only';
 import { createHash } from 'node:crypto';
 import NextAuth from 'next-auth';
 import Google from 'next-auth/providers/google';
+import Apple from 'next-auth/providers/apple';
+import { appleConfigured, appleClientSecret, encryptAppleToken } from './apple-auth';
 import { PrismaAdapter } from '@auth/prisma-adapter';
 import type { Adapter } from 'next-auth/adapters';
 import { headers } from 'next/headers';
@@ -12,9 +14,21 @@ export const hashSession = (token: string) => createHash('sha256').update(token)
 
 const adapter: Adapter = {
   ...PrismaAdapter(database),
-  // Identity is all we need. Never persist Google's access, refresh or ID tokens.
-  async linkAccount({ userId, provider, providerAccountId, type }) {
-    await database.account.create({ data: { userId, provider, providerAccountId, type } });
+  // Google tokens are discarded. Apple refresh tokens are encrypted solely for revocation.
+  async linkAccount({ userId, provider, providerAccountId, type, refresh_token }) {
+    if (provider === 'apple' && !refresh_token) throw new Error('apple_revocation_token_missing');
+    await database.account.create({
+      data: {
+        userId,
+        provider,
+        providerAccountId,
+        type,
+        encryptedAppleRefreshToken:
+          provider === 'apple'
+            ? encryptAppleToken(refresh_token!, userId, providerAccountId)
+            : null,
+      },
+    });
   },
   async createSession(data) {
     const agent = (await headers()).get('user-agent') || '';
@@ -41,6 +55,7 @@ const adapter: Adapter = {
         ...data,
         sessionToken: hashSession(data.sessionToken),
         device: `${browser} · ${platform}`,
+        kind: 'web',
       },
     });
     return { ...session, sessionToken: data.sessionToken };
@@ -50,13 +65,13 @@ const adapter: Adapter = {
       where: { sessionToken: hashSession(token) },
       include: { user: true },
     });
-    if (!record) return null;
+    if (!record || record.kind !== 'web') return null;
     const { user, ...session } = record;
     return { user, session: { ...session, sessionToken: token } };
   },
   async updateSession({ sessionToken, expires }) {
     const record = await database.session.updateMany({
-      where: { sessionToken: hashSession(sessionToken) },
+      where: { sessionToken: hashSession(sessionToken), kind: 'web' },
       data: { expires },
     });
     if (!record.count) return null;
@@ -66,11 +81,22 @@ const adapter: Adapter = {
     return session ? { ...session, sessionToken } : null;
   },
   async deleteSession(token) {
-    await database.session.deleteMany({ where: { sessionToken: hashSession(token) } });
+    const sessionToken = hashSession(token);
+    const record = await database.session.findFirst({
+      where: { sessionToken, kind: 'web' },
+      select: { userId: true },
+    });
+    if (!record) return;
+    await database.$transaction(async (tx) => {
+      // Use the same account lock as mobile authorization/exchange. Deleting the
+      // browser session also cascades every unexchanged grant issued by it.
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${record.userId} FOR UPDATE`;
+      await tx.session.deleteMany({ where: { sessionToken, userId: record.userId, kind: 'web' } });
+    });
   },
 };
 
-const nextAuth = NextAuth({
+const nextAuth = NextAuth(() => ({
   adapter,
   trustHost: true, // src/proxy.ts validates Host and strips forwarded host headers.
   secret: process.env.AUTH_SECRET,
@@ -81,12 +107,33 @@ const nextAuth = NextAuth({
   },
   useSecureCookies: secureCookies,
   cookies: {
+    // Apple returns a cross-site form POST. Only OAuth correlation cookies need SameSite=None.
+    ...(secureCookies
+      ? Object.fromEntries(
+          ['state', 'nonce', 'callbackUrl'].map((name) => [
+            name,
+            {
+              name: `__Secure-ai-read.oauth.${name}`,
+              options: {
+                httpOnly: true,
+                sameSite: 'none' as const,
+                secure: true,
+                path: '/',
+                maxAge: 900,
+              },
+            },
+          ]),
+        )
+      : {}),
     sessionToken: {
       name: sessionCookieName,
       options: { httpOnly: true, sameSite: 'lax', path: '/', secure: secureCookies },
     },
   },
   providers: [
+    ...(appleConfigured()
+      ? [Apple({ clientId: process.env.AUTH_APPLE_ID, clientSecret: appleClientSecret() })]
+      : []),
     Google({
       clientId: process.env.AUTH_GOOGLE_ID,
       clientSecret: process.env.AUTH_GOOGLE_SECRET,
@@ -96,9 +143,32 @@ const nextAuth = NextAuth({
   ],
   session: { strategy: 'database', maxAge: 30 * 24 * 60 * 60, updateAge: 24 * 60 * 60 },
   pages: { signIn: '/login', error: '/login' },
+  events: {
+    async signIn({ user, account }) {
+      if (user.id && account?.provider === 'apple' && account.refresh_token) {
+        await database.account.updateMany({
+          where: {
+            userId: user.id,
+            provider: 'apple',
+            providerAccountId: account.providerAccountId,
+          },
+          data: {
+            encryptedAppleRefreshToken: encryptAppleToken(
+              account.refresh_token,
+              user.id,
+              account.providerAccountId,
+            ),
+          },
+        });
+      }
+    },
+  },
   callbacks: {
     signIn({ account, profile }) {
-      return account?.provider === 'google' && profile?.email_verified === true;
+      return (
+        (account?.provider === 'google' && profile?.email_verified === true) ||
+        (account?.provider === 'apple' && String(profile?.email_verified) === 'true')
+      );
     },
     session({ session, user }) {
       session.user.id = user.id;
@@ -113,7 +183,7 @@ const nextAuth = NextAuth({
       }
     },
   },
-});
+}));
 
 export const handlers = nextAuth.handlers;
 export async function auth() {
