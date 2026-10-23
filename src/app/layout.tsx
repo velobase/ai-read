@@ -14,7 +14,7 @@ import { I18nProvider } from '@/lib/i18n/provider';
 import { serverI18n } from '@/lib/i18n/server';
 import { createTranslator } from '@/lib/i18n/messages';
 import { directionFor } from '@/lib/i18n/config';
-import { TranslationRuntime } from '@/components/reader/translation-runtime';
+import { Observability } from '@/components/observability';
 
 export async function generateMetadata(): Promise<Metadata> {
   const { locale, messages } = await serverI18n();
@@ -40,9 +40,11 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   return (
     <html lang={locale} dir={directionFor(locale)}>
       <body>
+        <Suspense fallback={null}>
+          <Observability />
+        </Suspense>
         <I18nProvider initialLocale={locale} initialPreference={preference} messages={messages}>
           <IdentityProvider>
-            <TranslationRuntime />
             <SyncProvider>
               <LibraryProvider>
                 <Suspense fallback={<div className="min-h-dvh bg-[#f5f5f7]" />}>

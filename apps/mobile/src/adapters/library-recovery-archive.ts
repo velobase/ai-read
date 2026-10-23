@@ -22,7 +22,7 @@ import {
   translationDraftScopeKey,
   validateTranslationDraft,
   type TranslationDraft,
-} from './translation-draft-archive';
+} from './translation-drafts';
 
 const MAX_ARCHIVE_BYTES = 50 * 1024 * 1024;
 const archiveBrand = Symbol('ValidatedLibraryRecoveryArchive');

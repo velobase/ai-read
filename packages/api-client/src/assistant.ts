@@ -13,6 +13,16 @@ export type ReadingQuestion = {
   sources: ReadingSource[];
   history: { role: 'user' | 'assistant'; content: string }[];
 };
+export type ReadingTranslation = {
+  title: string;
+  bookLanguage: string;
+  language: string;
+  target: string;
+  /** Public translation provider/model/prompt identity captured when a run starts. */
+  translationContextKey?: string;
+  sources: ReadingSource[];
+};
+
 /** Pure SSE parsing shared by hosts; transport and UTF-8 decoding belong to adapters. */
 export class CompletionStream {
   private buffer = '';
@@ -50,9 +60,9 @@ export class CompletionStream {
     }
     const body = JSON.parse(data);
     if (body.error)
-      throw new Error(
-        typeof body.error.message === 'string' ? body.error.message.slice(0, 500) : 'model_error',
-      );
+      throw new Error(typeof body.error.message === 'string' ? body.error.message : 'model_error', {
+        cause: body.error,
+      });
     const choice = body.choices?.[0];
     if (['length', 'content_filter'].includes(choice?.finish_reason))
       throw new Error('incomplete_response');

@@ -32,6 +32,10 @@ import {
 } from '../adapters/book-references';
 import { bookImages, useBookImageFiles, type BookImageReference } from '../adapters/book-media';
 import { BookImage, bookImageSize } from './book-image';
+import {
+  TranslationStatus,
+  type TranslationStatus as TranslationStatusKind,
+} from './translation-status';
 
 type Source = 'original' | 'translation';
 type Run = {
@@ -42,6 +46,7 @@ type Run = {
   style: TextStyle;
   lineHeight: number;
   image?: BookImageReference;
+  placeholder?: boolean;
 };
 type Line = { text: string; start: number; end: number };
 type Measurements = Map<string, { text: string; lines: Line[] }>;
@@ -55,6 +60,10 @@ type Props = {
   translationKeys: Record<string, string>;
   readingMode: 'original' | 'bilingual' | 'translation';
   readingLanguage?: string;
+  translationStatus: TranslationStatusKind;
+  retryTranslation: () => void;
+  onVisibleParagraphs: (ids: string[]) => void;
+  onInteractionChange: (active: boolean) => void;
   anchor: Position;
   startAtEnd?: boolean;
   notes: Note[];
@@ -130,6 +139,10 @@ function PageLayout({
   translationKeys,
   readingMode,
   readingLanguage,
+  translationStatus,
+  retryTranslation,
+  onVisibleParagraphs,
+  onInteractionChange,
   anchor,
   startAtEnd,
   notes,
@@ -152,11 +165,9 @@ function PageLayout({
   const pdf = isPdfBook(book);
   const horizontal = width > 700 ? Math.max(32, (width - 700) / 2) : 26;
   const textWidth = width - horizontal * 2;
-  // Keep this space even on fully translated pages: readiness labels must not
-  // become book text or change the page capacity when a missing passage appears.
-  const statusHeight = readingMode === 'translation' ? 40 : 0;
-  const pageHeight = Math.max(1, height - statusHeight);
-  const capacity = Math.max(80, pageHeight - 40);
+  const pageHeight = Math.max(1, height);
+  // Leave room for a local status when an untranslated paragraph spans a whole page.
+  const capacity = Math.max(80, pageHeight - 40 - (readingMode === 'bilingual' ? 44 : 0));
   const list = useRef<FlatList<Page>>(null);
   const [, setMeasurementRevision] = useState(0);
   const readyCallback = useRef(onReadyChange);
@@ -177,6 +188,8 @@ function PageLayout({
     onImage,
     onReference,
     onReferences,
+    onVisibleParagraphs,
+    onInteractionChange,
   });
   callbacks.current = {
     onPosition,
@@ -187,6 +200,8 @@ function PageLayout({
     onImage,
     onReference,
     onReferences,
+    onVisibleParagraphs,
+    onInteractionChange,
   };
   const references = useMemo(() => referencesByParagraph(book), [book]);
   const images = useMemo(
@@ -220,7 +235,11 @@ function PageLayout({
     const first = chapter.paragraphs[0];
     // PDF chapters are physical pages, so their synthetic labels belong in the
     // reader chrome. Keep real source headings/IDs for reading and annotations.
-    if (!pdf && (first?.kind !== 'heading' || first.text.trim() !== chapter.title.trim()))
+    if (
+      readingMode !== 'translation' &&
+      !pdf &&
+      (first?.kind !== 'heading' || first.text.trim() !== chapter.title.trim())
+    )
       items.push({
         key: 'chapter-heading',
         text: chapter.title,
@@ -243,7 +262,7 @@ function PageLayout({
       };
       addImages('before');
       const translated = translations[paragraph.id];
-      if (readingMode !== 'translation' || !translated) {
+      if (readingMode !== 'translation') {
         const fontSize = prefs.fontSize + (paragraph.kind === 'heading' ? 3 : 0);
         const style: TextStyle = {
           ...body,
@@ -279,6 +298,16 @@ function PageLayout({
           },
         });
       }
+      if (readingMode !== 'original' && paragraph.text.trim() && !translated)
+        items.push({
+          key: paragraph.id + ':pending',
+          paragraph,
+          source: 'original',
+          text: t('translationPending'),
+          placeholder: true,
+          lineHeight: 44,
+          style: { fontSize: 13, lineHeight: 44 },
+        });
       addImages('after');
     }
     return items;
@@ -292,6 +321,7 @@ function PageLayout({
     prefs.serif,
     readingMode,
     imageGroups,
+    t,
   ]);
   const measurementRuns = runs.filter(
     (run) => !run.image && measured.current.get(run.key)?.text !== run.text,
@@ -321,6 +351,34 @@ function PageLayout({
     let used = 0;
     const commit = () => {
       if (fragments.length) {
+        const missing =
+          readingMode === 'bilingual' &&
+          fragments.find(
+            ({ run }) =>
+              !run.image &&
+              !run.placeholder &&
+              run.paragraph?.text.trim() &&
+              !translations[run.paragraph.id],
+          );
+        if (missing && !fragments.some(({ run }) => run.placeholder)) {
+          const run: Run = {
+            key: missing.run.paragraph!.id + ':pending-page',
+            paragraph: missing.run.paragraph,
+            source: 'original',
+            text: t('translationPending'),
+            placeholder: true,
+            lineHeight: 44,
+            style: { fontSize: 13, lineHeight: 44 },
+          };
+          fragments.push({
+            run,
+            text: run.text,
+            start: 0,
+            end: run.text.length,
+            height: 44,
+            gap: 0,
+          });
+        }
         result.push({ fragments });
         fragments = [];
         used = 0;
@@ -423,12 +481,12 @@ function PageLayout({
     }
     commit();
     return result;
-  }, [ready, runs, capacity, textWidth, imageGroups]);
+  }, [ready, runs, capacity, textWidth, imageGroups, readingMode, translations, t]);
   const visibleReferences = useMemo(() => {
     const values = new Map<string, ReadingReference>();
     for (const fragment of pages[pageIndex]?.fragments || []) {
       const paragraph = fragment.run.paragraph;
-      if (!paragraph || fragment.run.image) continue;
+      if (!paragraph || fragment.run.image || fragment.run.placeholder) continue;
       for (const link of references.get(paragraph.id) || []) {
         if (
           fragment.run.source === 'original' &&
@@ -462,6 +520,13 @@ function PageLayout({
     if (!page) return;
     setPageIndex(index);
     callbacks.current.onPage(index + 1, pages.length);
+    callbacks.current.onVisibleParagraphs([
+      ...new Set(
+        page.fragments.flatMap((fragment) =>
+          fragment.run.paragraph ? [fragment.run.paragraph.id] : [],
+        ),
+      ),
+    ]);
     // UIKit/FlatList may report the same page again after restoration or an effect change.
     // Only an actual page turn should replace an exact search/note/citation anchor.
     if (!exact && publishedPage.current === index) return;
@@ -545,13 +610,16 @@ function PageLayout({
     return () => cancelAnimationFrame(frame);
   }, [pages, width, imageFiles.ready]);
   function turn(direction: -1 | 1) {
+    callbacks.current.onInteractionChange(true);
     const target = pageIndex + direction;
     if (target < 0 || target >= pages.length) {
+      callbacks.current.onInteractionChange(false);
       callbacks.current.onBoundary(direction);
       return;
     }
     list.current?.scrollToIndex({ index: target, animated: prefs.pageEffect !== 'none' });
     publish(target);
+    if (prefs.pageEffect === 'none') callbacks.current.onInteractionChange(false);
   }
   function tap(x: number) {
     if (x < width * 0.22) turn(book.pageDirection === 'rtl' ? 1 : -1);
@@ -585,7 +653,13 @@ function PageLayout({
                   },
                 }
               : {}),
-            text: fragment.text,
+            text: fragment.run.placeholder
+              ? page.fragments.find((item) => item.run.placeholder) === fragment ||
+                readingMode !== 'translation'
+                ? ''
+                : t('translationPending')
+              : fragment.text,
+            placeholder: fragment.run.placeholder || false,
             paragraph: fragment.run.paragraph?.id,
             source: fragment.run.source,
             start: fragment.start,
@@ -602,7 +676,7 @@ function PageLayout({
                 ? colors.muted
                 : colors.ink,
             highlights:
-              fragment.run.paragraph && !fragment.run.image
+              fragment.run.paragraph && !fragment.run.image && !fragment.run.placeholder
                 ? passageRanges(
                     notes,
                     fragment.run.paragraph.id,
@@ -620,7 +694,8 @@ function PageLayout({
               nativeReaderSupportsReferences &&
               fragment.run.source === 'original' &&
               fragment.run.paragraph &&
-              !fragment.run.image
+              !fragment.run.image &&
+              !fragment.run.placeholder
                 ? (references.get(fragment.run.paragraph.id) || [])
                     .map((link) => ({
                       id: link.id,
@@ -651,13 +726,15 @@ function PageLayout({
   const chapterIndex = book.chapters.findIndex((item) => item.id === chapter.id);
   const contentReady = ready && imageFiles.ready;
   const needsNativeUpdate = !!NativePageView && !!images.length && !nativeReaderSupportsImages;
-  const hasMissingTranslation =
-    readingMode === 'translation' &&
-    contentReady &&
-    pages[pageIndex]?.fragments.some(
-      ({ run }) =>
-        !run.image && run.paragraph && run.source === 'original' && !translations[run.paragraph.id],
-    );
+  const pendingIndex =
+    pages[pageIndex]?.fragments.findIndex((fragment) => fragment.run.placeholder) ?? -1;
+  const pendingTop =
+    pendingIndex < 0
+      ? 0
+      : 16 +
+        pages[pageIndex].fragments
+          .slice(0, pendingIndex)
+          .reduce((height, fragment) => height + fragment.height + fragment.gap, 0);
   useEffect(() => {
     readyCallback.current?.(contentReady && !needsNativeUpdate && pages.length > 0);
     return () => readyCallback.current?.(false);
@@ -720,6 +797,9 @@ function PageLayout({
           hasPrevious={chapterIndex > 0}
           hasNext={chapterIndex < book.chapters.length - 1}
           onPageChange={({ nativeEvent }) => publish(nativeEvent.index)}
+          onInteractionChange={({ nativeEvent }) =>
+            callbacks.current.onInteractionChange(nativeEvent.active)
+          }
           onCenterTap={() => callbacks.current.onTap()}
           onBoundary={({ nativeEvent }) => callbacks.current.onBoundary(nativeEvent.direction)}
           onImagePress={({ nativeEvent }) => {
@@ -749,13 +829,14 @@ function PageLayout({
             : {})}
           onSelect={({ nativeEvent }) => {
             const paragraph = chapter.paragraphs.find((item) => item.id === nativeEvent.paragraph);
-            if (!paragraph) return;
+            if (!paragraph || (readingMode === 'translation' && !translations[paragraph.id]))
+              return;
             callbacks.current.onSelect({
               paragraph,
               source: nativeEvent.source,
               text:
                 nativeEvent.source === 'translation'
-                  ? translations[paragraph.id] || paragraph.text
+                  ? translations[paragraph.id] || ''
                   : paragraph.text,
               start: nativeEvent.start,
               end: nativeEvent.end,
@@ -780,20 +861,24 @@ function PageLayout({
           windowSize={5}
           keyExtractor={(_, i) => String(i)}
           getItemLayout={(_, index) => ({ length: width, offset: width * index, index })}
+          onScrollBeginDrag={() => callbacks.current.onInteractionChange(true)}
+          onMomentumScrollBegin={() => callbacks.current.onInteractionChange(true)}
           onScrollEndDrag={(event) => {
+            callbacks.current.onInteractionChange(false);
             const offset = event.nativeEvent.contentOffset.x;
             if (offset < -45) callbacks.current.onBoundary(-1);
             else if (offset > Math.max(0, pages.length - 1) * width + 45)
               callbacks.current.onBoundary(1);
           }}
-          onMomentumScrollEnd={(event) =>
+          onMomentumScrollEnd={(event) => {
             publish(
               Math.max(
                 0,
                 Math.min(pages.length - 1, Math.round(event.nativeEvent.contentOffset.x / width)),
               ),
-            )
-          }
+            );
+            callbacks.current.onInteractionChange(false);
+          }}
           renderItem={({ item }) => (
             <Pressable
               accessible={false}
@@ -817,6 +902,19 @@ function PageLayout({
                       height={fragment.height}
                       open={(image) => callbacks.current.onImage(image)}
                     />
+                  </View>
+                ) : fragment.run.placeholder ? (
+                  <View
+                    key={fragment.run.key + ':' + index}
+                    style={{ height: fragment.height, marginBottom: fragment.gap }}
+                  >
+                    {item.fragments.find((part) => part.run.placeholder) === fragment ? (
+                      <TranslationStatus status={translationStatus} retry={retryTranslation} />
+                    ) : readingMode === 'translation' ? (
+                      <Text style={{ color: colors.muted, fontSize: 13, lineHeight: 44 }}>
+                        {t('translationPending')}
+                      </Text>
+                    ) : null}
                   </View>
                 ) : (
                   <Pressable
@@ -907,23 +1005,11 @@ function PageLayout({
           )}
         />
       )}
-      {statusHeight > 0 && (
+      {contentReady && NativePageView && pendingIndex >= 0 && (
         <View
-          style={{
-            height: statusHeight,
-            justifyContent: 'center',
-            paddingHorizontal: horizontal,
-          }}
+          style={{ position: 'absolute', top: pendingTop, left: horizontal, right: horizontal }}
         >
-          {hasMissingTranslation && (
-            <Text
-              accessibilityLiveRegion="polite"
-              numberOfLines={2}
-              style={{ color: colors.muted, fontSize: 11, lineHeight: 14 }}
-            >
-              {t('translationMissing')}
-            </Text>
-          )}
+          <TranslationStatus status={translationStatus} retry={retryTranslation} />
         </View>
       )}
     </View>

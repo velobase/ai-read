@@ -13,3 +13,5 @@ gha-creds-*.json
 work/
 
 /src/generated/prisma/
+
+/public/pdfjs/

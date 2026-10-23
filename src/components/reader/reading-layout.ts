@@ -8,6 +8,25 @@ export type ReadingAnchor = Pick<
   visualOffset?: number;
 };
 
+export type PendingContentAnchor = { scope: string; anchor: ReadingAnchor };
+
+export function hasReadableTranslation(root: HTMLElement, paragraph: string) {
+  const passage = Array.from(root.querySelectorAll<HTMLElement>('[data-paragraph]')).find(
+    (node) => node.dataset.paragraph === paragraph,
+  );
+  return Boolean(passage?.querySelector('[data-note-source="translation"]')?.textContent?.trim());
+}
+
+export function readyContentAnchor(
+  root: HTMLElement,
+  pending: PendingContentAnchor | null,
+  scope: string,
+) {
+  return pending?.scope === scope && hasReadableTranslation(root, pending.anchor.paragraph)
+    ? pending.anchor
+    : null;
+}
+
 const restoredLocations = new WeakMap<
   HTMLElement,
   {
@@ -18,6 +37,10 @@ const restoredLocations = new WeakMap<
     scroll: number;
   }
 >();
+
+export function forgetReadingAnchor(root: HTMLElement) {
+  restoredLocations.delete(root);
+}
 
 export const isPaged = (root: HTMLElement) =>
   root.closest('.reading-app')?.getAttribute('data-navigation') === 'paged';
@@ -90,6 +113,29 @@ export function readReadingAnchor(root: HTMLElement): ReadingAnchor | null {
   const bounds = area.getBoundingClientRect();
   const top = bounds.top + (paged ? 0 : readingTop(root));
   const content = frame || root;
+  const firstPassage = Array.from(content.querySelectorAll<HTMLElement>('[data-paragraph]')).find(
+    (passage) =>
+      Array.from(passage.getClientRects()).some(
+        (rect) =>
+          rect.bottom > top + 1 &&
+          rect.top < bounds.bottom &&
+          rect.right > bounds.left + 1 &&
+          rect.left < bounds.right - 1,
+      ),
+  );
+  // A missing translation is still a reading location. Do not jump past its
+  // placeholder to the first available paragraph further down the screen.
+  if (firstPassage && !firstPassage.querySelector('[data-note-source]')) {
+    return {
+      paragraph: firstPassage.dataset.paragraph!,
+      chapter: Number(
+        firstPassage.closest<HTMLElement>('[data-chapter-index]')?.dataset.chapterIndex || 0,
+      ),
+      offset: 0,
+      textSource: 'translation',
+      visualOffset: firstPassage.getBoundingClientRect().top - top,
+    };
+  }
   for (const element of content.querySelectorAll<HTMLElement>('[data-note-source]')) {
     const passage = element.closest<HTMLElement>('[data-paragraph]');
     if (!passage) continue;
@@ -147,8 +193,9 @@ export function restoreReadingAnchor(root: HTMLElement, anchor: ReadingAnchor) {
   if (!passage) return;
   const source = anchor.textSource || 'original';
   const exact = passage.querySelector<HTMLElement>(`[data-note-source="${source}"]`);
-  const element = exact || passage.querySelector<HTMLElement>('[data-note-source]') || passage;
-  const text = element.textContent || '';
+  const element = exact || passage.querySelector<HTMLElement>('[data-note-source]');
+  // Status messages and skeletons are UI, never source text for an anchor.
+  const text = element?.textContent || '';
   let offset = exact ? (anchor.textOffset ?? Math.floor((anchor.offset || 0) * text.length)) : 0;
   // Translations can be revised. A stale character index must not masquerade as alignment.
   if (
@@ -158,7 +205,9 @@ export function restoreReadingAnchor(root: HTMLElement, anchor: ReadingAnchor) {
     const found = text.indexOf(anchor.textQuote);
     offset = found >= 0 ? found : 0;
   }
-  const rect = textRect(element, Math.max(0, Math.min(text.length - 1, offset)));
+  const rect = element
+    ? textRect(element, Math.max(0, Math.min(text.length - 1, offset)))
+    : passage.getBoundingClientRect();
   const frame = passage.closest<HTMLElement>('[data-chapter-index]');
   if (isPaged(root) && frame) {
     const viewport = frame.querySelector<HTMLElement>('.page-viewport')!;
@@ -173,7 +222,7 @@ export function restoreReadingAnchor(root: HTMLElement, anchor: ReadingAnchor) {
   } else {
     const first = frame?.querySelector('[data-paragraph]') === passage;
     const y =
-      first && offset === 0
+      first && offset === 0 && anchor.visualOffset === undefined
         ? frame!.getBoundingClientRect().top
         : rect.top - (anchor.visualOffset ?? 0);
     root.scrollTo({
@@ -181,19 +230,21 @@ export function restoreReadingAnchor(root: HTMLElement, anchor: ReadingAnchor) {
       behavior: 'instant',
     });
   }
-  const sourceNow = element.dataset.noteSource === 'translation' ? 'translation' : 'original';
+  const sourceNow = element?.dataset.noteSource === 'translation' ? 'translation' : 'original';
   restoredLocations.set(root, {
     paged: isPaged(root),
     page: frame ? pageIndex(frame) : 0,
     chapter: frame?.dataset.chapterIndex || '0',
     scroll: root.scrollTop,
-    anchor: {
-      ...anchor,
-      chapter: Number(frame?.dataset.chapterIndex || 0),
-      textOffset: offset,
-      textSource: sourceNow,
-      textQuote: text.slice(offset, offset + 32),
-      offset: sourceNow === 'original' ? offset / Math.max(1, text.length) : 0,
-    },
+    anchor: !element
+      ? anchor
+      : {
+          ...anchor,
+          chapter: Number(frame?.dataset.chapterIndex || 0),
+          textOffset: offset,
+          textSource: sourceNow,
+          textQuote: text.slice(offset, offset + 32),
+          offset: sourceNow === 'original' ? offset / Math.max(1, text.length) : 0,
+        },
   });
 }

@@ -4,7 +4,7 @@ import {
   type MobileLibraryCapabilities,
 } from '../../../../../../packages/api-client/src';
 import { observedRoute } from '@/lib/server/observability';
-import { mobileAI, mobileAIContextKey } from '@/lib/server/mobile-ai';
+import { mobileAI, mobileAIContextKey, mobileTranslationContextKey } from '@/lib/server/mobile-ai';
 import { nativeAuthConfigured } from '@/lib/server/auth-config';
 import { mobileAuthFailure, requireMobileSession } from '@/lib/server/mobile-auth';
 
@@ -29,6 +29,7 @@ export const GET = observedRoute('api.config', async (request: Request) => {
         ? {
             aiModel: config.model,
             aiContextKey: mobileAIContextKey(config),
+            translationContextKey: mobileTranslationContextKey(config),
           }
         : {}),
     };

@@ -6,17 +6,22 @@ import { useI18n } from '@/lib/i18n/provider';
 
 import Link from 'next/link';
 import { ArrowRight, BookOpen, ChevronRight, NotebookPen } from 'lucide-react';
-import { catalog, categories } from '@/lib/catalog';
 import { Storefront } from './storefront';
 import { useLibrary } from './library-provider';
-import { BookCard, BookCover, LibraryShell, SearchBar } from './library-ui';
+import { BookCover, LibraryShell, SearchBar } from './library-ui';
+import { readingProgress } from '@/lib/reading-progress';
 
 export function HomePage({ discover = false }: { discover?: boolean }) {
-  const { t, text: localize, locale } = useI18n();
-  const { books, notes, state, readBook, openImport } = useLibrary();
+  const { t, locale } = useI18n();
+  const { books, notes, state, positions, readBook, openImport } = useLibrary();
   const recent = [...books].sort(
     (a, b) => (state.books[b.id]?.lastOpenedAt || 0) - (state.books[a.id]?.lastOpenedAt || 0),
   );
+  const continuing = recent.find(
+    (book) => positions[book.id] && state.books[book.id]?.status !== 'finished',
+  );
+  const currentPosition = continuing ? positions[continuing.id] : undefined;
+  const progress = continuing ? readingProgress(continuing.chapters, currentPosition) : 0;
   return (
     <LibraryShell>
       <section className="library-home-hero">
@@ -46,13 +51,39 @@ export function HomePage({ discover = false }: { discover?: boolean }) {
         </div>
       </section>
       <main className="library-container home-content">
+        {!discover && continuing && (
+          <section className="home-continue" aria-label={t('继续阅读')}>
+            <BookCover book={continuing} />
+            <div className="home-continue-content">
+              <span className="home-continue-eyebrow">{t('继续阅读')}</span>
+              <h2>{continuing.title}</h2>
+              <p>{continuing.chapters[currentPosition?.chapter || 0]?.title}</p>
+              <div className="home-continue-progress">
+                <span aria-hidden="true">
+                  <i style={{ width: `${progress * 100}%` }} />
+                </span>
+                <b>
+                  {progress.toLocaleString(locale, { style: 'percent', maximumFractionDigits: 0 })}
+                </b>
+              </div>
+            </div>
+            <button
+              className="home-continue-button"
+              onClick={() => void readBook(continuing)}
+              aria-label={t('阅读《{value0}》', { value0: continuing.title })}
+            >
+              <BookOpen size={18} />
+              <span>{t('继续阅读')}</span>
+              <ArrowRight size={16} />
+            </button>
+          </section>
+        )}
         {!discover && (
           <section className="home-recent-strip" aria-label={t('最近阅读')}>
-            <Link href="/library?filter=reading" className="reading-summary-card">
+            <Link href="/library" className="reading-summary-card">
               <span className="text-xs text-[#a18b61]">{t('我的阅读')}</span>
               <strong>
-                {books.length.toLocaleString(locale)}{' '}
-                <small>{books.length === 1 && !locale.startsWith('zh') ? 'Book' : t('本书')}</small>
+                {books.length.toLocaleString(locale)} <small>{t('本书')}</small>
               </strong>
               <div className="flex gap-1.5" aria-hidden="true">
                 {Array.from({ length: 7 }, (_, i) => (

@@ -1,5 +1,11 @@
 'use client';
 
+import dynamic from 'next/dynamic';
+const PdfImportDialog = dynamic(
+  () => import('@/components/pdf/pdf-import-dialog').then((m) => m.PdfImportDialog),
+  { ssr: false },
+);
+
 import { useI18n } from '@/lib/i18n/provider';
 import { localeStorageKey } from '@/lib/i18n/config';
 
@@ -15,7 +21,7 @@ import {
 import { usePathname, useRouter } from 'next/navigation';
 import { catalog } from '@/lib/catalog';
 import { storage } from '@/lib/storage';
-import { importBook } from '@/lib/import';
+import { measureClient } from '@/lib/observability/client';
 import {
   addLibraryGroup,
   defaultProfile,
@@ -26,17 +32,19 @@ import {
   type LibraryState,
   type ReaderProfile,
 } from '@/lib/library-state';
-import type { Book, Note, Position } from '@/lib/types';
+import type { Book, Bookmark, Note, Position } from '@/lib/types';
 import { Modal } from '@/components/reader/reader-dialogs';
 import { Button } from '@/components/ui/button';
 import { FileUp, LoaderCircle, X } from 'lucide-react';
 import { useIdentity } from '@/components/auth/identity-provider';
 import { storageKey } from '@/lib/storage-scope';
+import type { TranslationSearchTarget } from '@/lib/translation-search';
 
 type LibraryContextValue = {
   books: Book[];
   allBooks: Book[];
   notes: Note[];
+  bookmarks: Bookmark[];
   positions: Record<string, Position | undefined>;
   state: LibraryState;
   profile: ReaderProfile;
@@ -46,7 +54,14 @@ type LibraryContextValue = {
   notify: (message: string) => void;
   openImport: () => void;
   addBook: (book: Book) => Promise<void>;
-  readBook: (book: Book, paragraph?: string) => Promise<void>;
+  readBook: (
+    book: Book,
+    paragraph?: string,
+    noteId?: string,
+    textOffset?: number,
+    translationTarget?: TranslationSearchTarget,
+    isCurrent?: () => boolean,
+  ) => Promise<void>;
   updateBooks: (ids: string[], patch: BookState) => void;
   createGroup: (name: string) => void;
 };
@@ -58,6 +73,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [allBooks, setBooks] = useState<Book[]>([]);
+  const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [positions, setPositions] = useState<Record<string, Position | undefined>>({});
   const [state, setState] = useState<LibraryState>({ books: {}, groups: [] });
@@ -66,29 +82,31 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [importOpen, setImportOpen] = useState(false);
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const generation = useRef(0);
   const refresh = useCallback(async () => {
     const token = ++generation.current;
+    const measured = measureClient('library_load');
     try {
-      const saved = await storage.books();
-      const books = [catalog[0], ...saved.filter((b) => b.id !== catalog[0].id)];
-      const data = await Promise.all(
-        books.map(async (book) => ({
-          id: book.id,
-          notes: await storage.notes(book.id),
-          position: await storage.position(book.id),
-        })),
-      );
+      const data = await storage.librarySnapshot();
+      const books = [
+        data.books.find((book) => book.id === catalog[0].id) || catalog[0],
+        ...data.books.filter((book) => book.id !== catalog[0].id),
+      ];
       if (token !== generation.current) return;
+      const bookIds = new Set(books.map((book) => book.id));
       setBooks(books);
-      setNotes(data.flatMap((d) => d.notes));
-      setPositions(Object.fromEntries(data.map((d) => [d.id, d.position])));
+      setBookmarks(data.bookmarks.filter((bookmark) => bookIds.has(bookmark.bookId)));
+      setNotes(data.notes.filter((note) => bookIds.has(note.bookId)));
+      setPositions(data.positions);
       setState(loadLibraryState());
       setProfile(loadProfile());
       setError('');
+      measured('ok', { count: books.length });
     } catch (error) {
+      measured('error', { errorKind: 'storage' });
       if (token === generation.current)
         setError(error instanceof Error ? error.message : t('无法加载书架。'));
     } finally {
@@ -100,8 +118,14 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     void refresh();
   }, [pathname, refresh]);
   useEffect(() => {
+    let scheduled: ReturnType<typeof setTimeout> | undefined;
     const update = () => {
-      void refresh();
+      // Focus, visibility and cross-tab sync often fire together.
+      if (scheduled) clearTimeout(scheduled);
+      scheduled = setTimeout(() => {
+        scheduled = undefined;
+        void refresh();
+      }, 80);
     };
     const visible = () => {
       if (document.visibilityState === 'visible') update();
@@ -114,6 +138,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     window.addEventListener('focus', update);
     document.addEventListener('visibilitychange', visible);
     return () => {
+      if (scheduled) clearTimeout(scheduled);
       window.removeEventListener('storage', storageChanged);
       window.removeEventListener('ai-read-library-change', update);
       window.removeEventListener('focus', update);
@@ -134,13 +159,30 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       setNotice(t('书架设置保存失败，请检查浏览器存储空间。'));
     }
   };
-  const addBook = async (book: Book) => {
-    if (!allBooks.some((b) => b.id === book.id))
-      await storage.saveBook({ ...book, importedAt: Date.now() });
+  const addBook = async (book: Book, originalPdf?: File) => {
+    const existing = allBooks.find((b) => b.id === book.id);
+    if (
+      originalPdf ||
+      !existing ||
+      (book.toc?.length && !existing.toc?.length) ||
+      (book.cover && !existing.cover) ||
+      (book.media && book.media.revision !== existing.media?.revision) ||
+      (book.references && book.references.revision !== existing.references?.revision) ||
+      (book.sourceFormat && !existing.sourceFormat)
+    )
+      await storage.saveBook({ ...book, importedAt: Date.now() }, originalPdf);
     setState(updateLibraryBooks([book.id], { hidden: false }));
     await refresh();
   };
-  const readBook = async (book: Book, paragraph?: string) => {
+  const readBook = async (
+    book: Book,
+    paragraph?: string,
+    noteId?: string,
+    textOffset?: number,
+    translationTarget?: TranslationSearchTarget,
+    isCurrent?: () => boolean,
+  ) => {
+    const measured = measureClient('book_open');
     const origin = window.location.pathname + window.location.search;
     try {
       sessionStorage.setItem(storageKey(`ai-read-return:${origin}`), String(window.scrollY));
@@ -149,6 +191,12 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     }
     try {
       await addBook(book);
+      // Search can change or close while the local book refresh is pending.
+      // A completed refresh must not pull the user back to an obsolete result.
+      if (isCurrent && !isCurrent()) {
+        measured('cancelled');
+        return;
+      }
       const current = loadLibraryState().books[book.id];
       updateBooks([book.id], {
         lastOpenedAt: Date.now(),
@@ -158,28 +206,75 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         from: origin,
       });
       if (paragraph) params.set('at', paragraph);
+      if (noteId) params.set('note', noteId);
+      const target = paragraph
+        ? book.chapters.flatMap((chapter) => chapter.paragraphs).find((p) => p.id === paragraph)
+        : undefined;
+      if (translationTarget && !noteId && target) {
+        if (
+          typeof textOffset !== 'number' ||
+          !Number.isSafeInteger(textOffset) ||
+          textOffset < 0 ||
+          !Number.isSafeInteger(translationTarget.sourceEnd) ||
+          translationTarget.sourceEnd <= textOffset ||
+          translationTarget.sourceEnd > 100000 ||
+          !/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(translationTarget.language) ||
+          !/^[\w.:-]{1,200}$/.test(translationTarget.translationKey) ||
+          !translationTarget.translationKey.startsWith(
+            `${translationTarget.language}:${target.id}:`,
+          ) ||
+          !/^[a-f0-9]{64}$/.test(translationTarget.textHash)
+        )
+          throw new Error(t('打开失败，请重试。'));
+        params.set('source', 'translation');
+        params.set('lang', translationTarget.language);
+        params.set('translation', translationTarget.translationKey);
+        params.set('textHash', translationTarget.textHash);
+        params.set('offset', String(textOffset));
+        params.set('end', String(translationTarget.sourceEnd));
+      } else if (
+        !noteId &&
+        target &&
+        typeof textOffset === 'number' &&
+        Number.isSafeInteger(textOffset) &&
+        textOffset >= 0 &&
+        textOffset < target.text.length
+      )
+        params.set('offset', String(textOffset));
       router.push(`/read/${encodeURIComponent(book.id)}?${params}`);
+      measured();
     } catch (error) {
+      measured('error', { errorKind: 'storage' });
       setNotice(error instanceof Error ? error.message : t('打开失败，请重试。'));
     }
   };
   const importFile = async (file?: File) => {
     if (!file || importing) return;
+    if (/\.pdf$/i.test(file.name)) {
+      setImportOpen(false);
+      setPdfFile(file);
+      if (input.current) input.current.value = '';
+      return;
+    }
     setImporting(true);
+    const measured = measureClient('book_import', {
+      format: file.name.toLowerCase().endsWith('.epub') ? 'epub' : 'txt',
+    });
     try {
+      const { importBook } = await import('@/lib/import');
       const book = await importBook(file, {
         unknownAuthor: t('未知作者'),
         section: (number) => t('第 {number} 节', { number }),
         chapter: (number) => t('第 {number} 章', { number }),
       });
       const existing = allBooks.find((b) => b.id === book.id);
-      if (existing && !existing.cover && book.cover)
-        await storage.saveBook({ ...existing, cover: book.cover });
-      await addBook(existing || book);
+      await addBook(book);
       setImportOpen(false);
       setNotice(existing ? t('这本书已在书架，原有笔记和进度已保留。') : t('已导入书架。'));
       router.push(`/books/${book.id}`);
+      measured('ok', { count: book.chapters.length });
     } catch (error) {
+      measured('error');
       setNotice(error instanceof Error ? error.message : t('导入失败。'));
     } finally {
       setImporting(false);
@@ -190,6 +285,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     allBooks,
     books: allBooks.filter((b) => !state.books[b.id]?.hidden),
     notes,
+    bookmarks,
     positions,
     state,
     profile: user ? { name: user.name, bio: user.bio, color: user.color } : profile,
@@ -215,9 +311,9 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       <input
         ref={input}
         type="file"
-        accept=".epub,.txt"
+        accept=".epub,.txt,.pdf"
         className="hidden"
-        aria-label={t('导入 EPUB 或 TXT')}
+        aria-label={t('导入 EPUB、TXT 或 PDF')}
         onChange={(e) => void importFile(e.target.files?.[0])}
       />
       {importOpen && (
@@ -245,14 +341,36 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
                 {importing ? t('正在整理书籍…') : t('从文件导入')}
               </strong>
               <span className="mt-1 block text-xs text-muted-foreground">
-                {t('EPUB / UTF-8 TXT · 最大 30 MB')}
+                {t('EPUB / UTF-8 TXT / PDF · 最大 30 MB')}
               </span>
             </span>
           </button>
+          <p className="mt-4 text-xs leading-6 text-muted-foreground">
+            {t('阅读包与同步可携带已解析的插图；复杂版面、行内图片和原始文件仍需保留原书。')}
+          </p>
           <p className="mt-5 text-xs leading-6 text-muted-foreground">
             {t('本机数据已保存。登录后可跨设备同步。')}
           </p>
         </Modal>
+      )}
+      {pdfFile && (
+        <PdfImportDialog
+          file={pdfFile}
+          close={() => setPdfFile(null)}
+          save={async (book) => {
+            const finish = measureClient('book_import', { format: 'pdf' });
+            try {
+              await addBook(book, pdfFile);
+              setPdfFile(null);
+              setNotice(t('已导入书架。'));
+              router.push(`/books/${encodeURIComponent(book.id)}`);
+              finish('ok', { count: book.chapters.length });
+            } catch (error) {
+              finish('error', { errorKind: 'storage' });
+              throw error;
+            }
+          }}
+        />
       )}
       {notice && (
         <div

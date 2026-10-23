@@ -6,14 +6,16 @@ A local-first, self-hostable ebook reader with bilingual reading and source-grou
 
 [简体中文](README.zh-CN.md) · [Architecture](docs/architecture.md) · [Contributing](CONTRIBUTING.md)
 
-> **v0.1.0 alpha.** The core implementation is available. TypeScript and production build checks have passed. Runtime reading flows and live AI-provider integration have not yet been verified. Do not treat citation presence as proof that an answer is correct.
+> **v0.1.0 alpha.** TypeScript and production build checks have passed. Targeted local reading and AI flows are recorded in [verification notes](docs/mobile-verification.md); these are not comprehensive platform or provider coverage. Do not treat citation presence as proof that an answer is correct.
 
 ## What it does
 
-- Import DRM-free EPUB or UTF-8 TXT into a browser-local library.
-- Switch between original, bilingual, and translation-only reading in reading settings; original is the default for new users, and existing choices are remembered.
-- Prepare complete chapters, prefetch the next chapter, or prepare an entire book. Saved editions support pause/resume and remain readable when model settings change.
-- Translate a passage or a chapter using your own OpenAI-compatible model service.
+- Import DRM-free EPUB, UTF-8 TXT or text-based PDF into a browser-local library.
+- Keep supported JPEG/PNG block illustrations from EPUBs beside the original or translated text, and open them for zooming. See [illustrations and their limits](docs/epub-images.md).
+- Preview EPUB footnotes, follow internal links and return to the reading location. Supplementary notes stay separate from chapter text. See [EPUB references](docs/epub-references.md).
+- Choose original, bilingual or translation-only reading in Reading language. Changes apply immediately and the mode and target language are remembered per book; new users start with the original.
+- Read saved translations immediately and fill missing nearby paragraphs automatically. Bilingual reading keeps the original visible; translation-only reading uses placeholders while text arrives.
+- Translate through the existing OpenAI-compatible connection. Original mode and leaving the reader stop further translation demand.
 - Ask questions in your preferred language, with streamed answers and clickable paragraph references.
 - Limit context to the current chapter, all chapters up to the furthest opened chapter, or the whole book.
 - Use query expansion and local lexical retrieval when a book exceeds the context budget.
@@ -24,11 +26,13 @@ A local-first, self-hostable ebook reader with bilingual reading and source-grou
 
 The interface is available in 10 languages: English, Simplified Chinese, Traditional Chinese, Japanese, Korean, Spanish, French, German, Portuguese, and Arabic. Choose **Settings → Interface language**, or use the language menu on the login screen and desktop header. Browser language detection, persistent preferences, localized dates/counts and right-to-left interface direction are included.
 
-Translation and AI answers have **65 target-language choices**, configured separately under Reading language or Reading preferences. Changing the interface language does not translate books, change notes or replace the translation target. Actual translation quality depends on the connected model; selecting a language does not itself call a model.
+Translation and AI answers have **65 target-language choices**, configured separately under Reading language or Reading preferences. Changing the interface language does not translate books, change notes or replace the translation target. Actual translation quality depends on the connected model. In bilingual or translation-only reading, choosing a target language can automatically request missing nearby translations.
+
+Book details also let you correct the original language, including PDF/TXT imports without language metadata. File default restores the imported declaration; equivalent original and target languages can be read immediately. Existing text, notes and translations remain saved. See [source-language settings](docs/source-language.md).
 
 ## Quick start
 
-Requires Node.js **22.12+** and npm.
+Requires Node.js **22.15+** and npm.
 
 ```sh
 git clone https://github.com/velobase/ai-read.git
@@ -77,7 +81,7 @@ PORT=4173
 
 Restart the server after changing `.env`. The server key is never returned to the browser and is only used with its configured endpoint. Choosing a different endpoint in the UI requires a separate key if that endpoint needs one.
 
-Both AI settings screens also offer editable translation prompts with Natural, Academic and Close-to-source starting points. Use `{{to}}` and `{{from}}` for language variables; source text and adjacent context are supplied automatically. New editions snapshot the current prompt; existing editions keep their style until you explicitly retranslate and switch. See [prompt behavior](docs/translation-prompts.md).
+Both AI settings screens also offer editable translation prompts with Natural, Academic and Close-to-source starting points. Use `{{to}}` and `{{from}}` for language variables; source text and adjacent context are supplied automatically. New requests use the current prompt; existing saved translations remain unchanged. See [prompt behavior](docs/translation-prompts.md).
 
 For a locally running Ollama service with an installed model:
 
@@ -87,32 +91,40 @@ AI_MODEL=your-installed-model
 AI_API_KEY=
 ```
 
-No API key, credits, hosted AI subscription, or model weights are bundled. Requests may incur costs with your provider. Bilingual and translation-only modes prepare the current and next chapters and publish complete chapters after structural validation. Book details and the reader’s Translation panel support whole-book preparation, pause/resume, and new editions. Reading the original, navigating away, or hiding the page does not cancel a started task. Account jobs continue on the server; local jobs pause when the browser closes and resume from saved checkpoints. You can read original text while preparing. See [persistent book translations](docs/chapter-translations.md).
+No API key, credits, hosted AI subscription, or model weights are bundled. Requests may incur costs with your provider. Bilingual and translation-only reading reuse saved text, then translate the current passage and a small nearby lookahead. Completed paragraphs are saved automatically. Switching to original text, leaving the reader or hiding the page stops unneeded work; reopening an active translated reading context can resume missing passages from compatible saved chunks. There is no whole-book preparation or background translation task. Existing saved editions and note keys remain readable. See [translation while reading](docs/chapter-translations.md).
 
-Questions follow the current reading position unless an explicit selection takes priority. Background translation and chat run independently. A long-context question may issue an additional query-expansion request. Answer generation can be stopped at any time.
+Questions follow the current reading position unless an explicit selection takes priority. Reading translation and chat run independently. A long-context question may issue an additional query-expansion request. Answer generation can be stopped at any time.
 
 ## Data and privacy
 
-Books are parsed in the browser. The raw EPUB/TXT file is not uploaded. Extracted text, reading positions, notes, translations, and chat history are saved in IndexedDB. Signed-in accounts also synchronize parsed text and covers, shelf state, positions, notes, completed chat turns, translations, and reading preferences to the deployment’s PostgreSQL database. Guest data stays local until explicitly copied to an account. Preferences (excluding keys) are stored in localStorage. Fonts are bundled locally; there is no analytics integration.
+Books are parsed in the browser. The raw EPUB/TXT/PDF file is not uploaded. Extracted text, supported EPUB illustrations, reading positions, notes, translations, and chat history are saved in IndexedDB. Signed-in accounts also synchronize parsed text, covers and supported illustrations, shelf state, positions, notes, completed chat turns, translations, and reading preferences to the deployment’s PostgreSQL database. Guest data stays local until explicitly copied to an account. Preferences (excluding keys) are stored in localStorage. Fonts are bundled locally. Optional anonymous PostHog analytics require deployment configuration and a browser opt-in under Settings → Diagnostics & privacy; analytics is off by default. Session diagnostics stay in memory. Server logs and metrics contain operation names, durations and status classifications, never reading content or credentials. See [observability](docs/observability.md).
 
-Using AI sends the selected text, relevant source passages, book title, question, and eligible recent conversation to your selected provider through the local proxy. The provider's own data policies apply. An entire short book may fit in the selected context; larger books use excerpts. The AI proxy does not log request bodies or credentials; completed conversations and translations are persisted by account sync.
+Using AI sends the selected text, relevant source passages, book title, question, and eligible recent conversation to your selected provider through the local proxy. Context remains text-only: retaining an illustration does not send its pixels to the model or translate text inside the image. The provider's own data policies apply. An entire short book may fit in the selected context; larger books use excerpts. The AI proxy does not log request bodies or credentials; completed conversations and translations are persisted by account sync.
 
-Clearing browser data deletes the local library. Keep original files and use **Me → Data & backup** to export parsed books, local covers, notes, and reading positions. Restore preserves existing books/positions and merges new note IDs. API keys, AI conversations, translation caches, and original EPUB files are excluded. Account provider settings are stored separately in PostgreSQL with encrypted keys, and are excluded from browser exports. The server never returns saved keys to the browser. Interface language remains device-local.
+Clearing browser data deletes the local library. Keep original files and use **Me → Data & backup** to export parsed books, local covers, supported EPUB illustrations, notes, and reading positions. Restore preserves existing text and positions, merges new note IDs, and can add compatible missing illustrations. The standard backup excludes API keys, AI conversations and translation caches; [portable reading packs](docs/mobile.md#move-reading-between-web-and-ios) also carry translations already saved on the device. Neither format includes raw EPUB/TXT/PDF files. Retained original PDFs are stored separately for the local page viewer and are excluded from account sync and exports. Account provider settings are stored separately in PostgreSQL with encrypted keys, and are excluded from browser exports. The server never returns saved keys to the browser. Interface language remains device-local.
 
 Sync runs after edits, on focus/reconnect, and periodically while the page is visible. An already open page can read local books and save edits offline; offline PWA startup is not implemented. Position is a chapter/paragraph anchor with an approximate fraction within the paragraph. Percentages use original-text length and can decrease when rereading; “finished” is a manual shelf status. Remote progress never moves an active reader. Stale offline progress yields to the cloud version, with a local recovery export; conflicting note edits keep a separate copy. Sync needs PostgreSQL, not Redis. Devices must use the same deployment and account.
 
 ## Current boundaries
 
-- Reflowed **text** reading with optional local EPUB covers: inline images, tables as visual layouts, formulas, inline styling, footnote navigation, and embedded content are not preserved.
+- Reflowed text with EPUB covers and supported JPEG/PNG block illustrations. An image containing a table or formula remains a viewable image; text-based tables, formulas and complex page layouts are not reconstructed. Mixed inline images, SVG and image-only chapters without a text anchor are counted as unconverted. Inline styling remains unsupported. Local footnotes and internal links use a separate bounded reference sidecar. See [EPUB illustrations](docs/epub-images.md) and [references](docs/epub-references.md).
 - Separate home, bookshelf, book details, categories, collections, search, notes, profile, and settings routes. Guest profiles stay local; signed-in account profiles are stored in PostgreSQL.
-- No PDF, scanned books, DRM removal, audiobooks, glossary management, or manual translation editing.
+- PDF has a dedicated local parser with page-range selection, password handling, conversion preview and original-page references. Web reads the text layer; the iOS app also offers on-device OCR for scanned pages. The local original-page viewer preserves source graphics and formulas and returns to the corresponding text chapter. Raw PDFs are not included in sync or reading packs. See [PDF parsing](docs/pdf-import.md).
+- DRM removal, audiobook catalogs, glossary management, and manual translation editing are not implemented. The native app can read text aloud with system voices.
 - EPUB: up to 30 MB compressed; 4 MB per extracted text entry; 20 MB extracted text total. UTF-8 TXT: up to 30 MB, divided into 60-paragraph sections.
+- Illustration limits: 4 MiB per asset, 12 MiB per book and 24 MiB of image bytes across a validated backup/reading pack; encoded JSON is larger. Export large libraries as separate books. Media supplements do not change paragraph IDs, text anchors or translation source hashes.
 - EPUB chapter order follows the package spine. Files must contain valid XHTML text. Image-only and fixed-layout material may not import usefully.
 - Context retrieval is lexical, with model-generated multilingual terms. It is **not** an exhaustive semantic index or guaranteed whole-book reasoning.
 - “Up to furthest chapter” includes all text in any earlier chapter, even if not read. Progress controls reduce supplied spoilers; model prior knowledge may still leak them.
 - Only source IDs included in the current request become clickable citations. This verifies the reference exists, not that the cited passage entails the model's claim.
-- Each edition freezes its source, target language, model, and prompt. Settings changes leave existing editions intact; explicit retranslation creates a new version. A bounded generated glossary helps consistency; manual translation editing is not implemented.
+- Settings changes affect missing translations and leave saved text and annotation keys intact. Historical complete editions remain readable. Manual translation editing and glossary management are not implemented.
 - The selected passage and chat panel are text based; Markdown formatting is intentionally limited, and model-generated HTML is never rendered.
+
+## Native iOS preview
+
+The native assistant offers chapter/read/book scope, device-local conversation history, source-return navigation and per-answer Markdown export. Native reading uses the same Original / Bilingual / Translation only flow as Web, with automatic nearby translation, saved paragraph chunks and per-book language choices. Returning to an active translated reader may resume missing passages. See [native assistant](docs/native-assistant.md) and [native translation while reading](docs/native-translation.md).
+
+`apps/mobile` contains the Expo / React Native app with SQLite storage, native PDFKit / Vision import and UIKit page transitions. It supports local reading, notes, search and portable reading packs between web and iOS, including supported EPUB illustrations. A real EPUB's table caption, image fit and return position were checked in the local simulator; pinch gestures and all layouts remain unverified. Native [account connection](docs/mobile-accounts.md) uses the system browser and Keychain for existing Web accounts and their AI settings. The phone library remains device-local; cloud library sync is not enabled. Local account-disabled services remain supported. Simulator checks reached Google sign-in and verified both cancellation paths; full sign-in and authenticated AI remain unverified. See [setup and architecture](docs/mobile.md), [observed simulator checks](docs/mobile-verification.md), and the [2026-10-23 iteration handoff](docs/iteration-2026-10-23.md).
 
 ## Development
 
@@ -121,7 +133,7 @@ npm run typecheck
 npm run build
 ```
 
-`typecheck` generates Next.js route types before checking TypeScript; `build` produces `.next/`. These commands perform static compilation and bundling, not runtime or integration validation. There is no automated test suite in this initial release.
+`typecheck` generates Next.js route types before checking TypeScript; `build` produces `.next/`. These commands perform static compilation and bundling, not runtime or integration validation. This iteration used a few explicitly authorized focused checks and manual simulator flows; there is no comprehensive automated test suite. Follow the repository's testing preference before running additional checks.
 
 See [architecture and roadmap](docs/architecture.md) for implementation details and next steps.
 

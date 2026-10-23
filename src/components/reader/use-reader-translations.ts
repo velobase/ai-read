@@ -2,7 +2,13 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { Book, Paragraph, Settings } from '@/lib/types';
-import { readReadingAnchor, restoreReadingAnchor, type ReadingAnchor } from './reading-layout';
+import {
+  readReadingAnchor,
+  readyContentAnchor,
+  restoreReadingAnchor,
+  type PendingContentAnchor,
+  type ReadingAnchor,
+} from './reading-layout';
 
 export function useReaderTranslations({
   book,
@@ -13,8 +19,11 @@ export function useReaderTranslations({
   version,
   getTranslation,
   getKey,
-  preparationAnchor,
+  fallbackAnchor,
+  contentScope,
+  pendingContentAnchor,
   root,
+  surfaceReady,
 }: {
   book: Book;
   settings: Settings;
@@ -24,25 +33,38 @@ export function useReaderTranslations({
   version: string;
   getTranslation: (paragraph: Paragraph) => string;
   getKey: (paragraph: Paragraph) => string;
-  preparationAnchor: ReadingAnchor;
+  fallbackAnchor: ReadingAnchor;
+  contentScope: string;
+  pendingContentAnchor: RefObject<PendingContentAnchor | null>;
   root: RefObject<HTMLElement | null>;
+  surfaceReady: boolean;
 }) {
   const cache = useMemo(
     () => new Map<string, Record<string, { text: string; key: string }>>(),
-    [book.id, settings.language, settings.readingMode, settings.navigationMode, version],
+    [book.id, settings.language, settings.readingMode, settings.navigationMode],
   );
-  const visited = useMemo(() => new Set<string>(), [cache]);
   const latest = useRef({
     book,
     settings,
     getTranslation,
     getKey,
     chapterIndex,
-    preparationAnchor,
+    fallbackAnchor,
+    contentScope,
   });
-  latest.current = { book, settings, getTranslation, getKey, chapterIndex, preparationAnchor };
+  latest.current = {
+    book,
+    settings,
+    getTranslation,
+    getKey,
+    chapterIndex,
+    fallbackAnchor,
+    contentScope,
+  };
   const [revision, setRevision] = useState(0);
   const anchor = useRef<ReadingAnchor | null>(null);
+  const pressed = useRef(false);
+  const pending = pendingContentAnchor.current;
   const snapshot = (index: number) =>
     Object.fromEntries(
       book.chapters[index].paragraphs.map((p) => [
@@ -51,24 +73,39 @@ export function useReaderTranslations({
       ]),
     );
   const chapter = book.chapters[chapterIndex];
-  // A chapter version lives through adjacent forward/back navigation.
+  // Cache rendered paragraphs until an idle moment allows an anchored layout update.
   if (!cache.has(chapter.id)) cache.set(chapter.id, snapshot(chapterIndex));
-  visited.add(chapter.id);
   useLayoutEffect(() => {
-    if (anchor.current && root.current) {
-      restoreReadingAnchor(root.current, anchor.current);
-      root.current.dispatchEvent(new Event('reader-location'));
-      anchor.current = null;
-    }
-  }, [revision, root]);
+    const element = root.current;
+    if (!surfaceReady || !element) return;
+    const waiting = pendingContentAnchor.current;
+    const resolved = readyContentAnchor(element, waiting, contentScope);
+    const captured = resolved || anchor.current;
+    anchor.current = null;
+    if (!captured) return;
+    // Navigation also restores during layout. Finish after those layout effects
+    // so a stale placeholder position cannot overwrite the recovered text offset.
+    const frame = requestAnimationFrame(() => {
+      if (waiting && pendingContentAnchor.current !== waiting) return;
+      if (
+        pressed.current ||
+        element.dataset.turning === 'true' ||
+        window.getSelection()?.toString().trim()
+      )
+        return;
+      restoreReadingAnchor(element, captured);
+      if (resolved && pendingContentAnchor.current === waiting) pendingContentAnchor.current = null;
+      element.dispatchEvent(new Event('reader-location'));
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [revision, cache, pending, contentScope, pendingContentAnchor, root, surfaceReady]);
   useEffect(() => {
     const element = root.current;
-    if (!element) return;
+    if (!surfaceReady || !element) return;
     let timer: ReturnType<typeof setTimeout>;
-    let pressed = false;
     const publish = () => {
       if (
-        pressed ||
+        pressed.current ||
         element.dataset.turning === 'true' ||
         window.getSelection()?.toString().trim()
       ) {
@@ -77,16 +114,12 @@ export function useReaderTranslations({
       }
       const current = latest.current;
       let changed = false;
-      anchor.current = readReadingAnchor(element);
+      const waiting = pendingContentAnchor.current;
+      anchor.current =
+        (waiting?.scope === current.contentScope ? waiting.anchor : null) ||
+        readReadingAnchor(element) ||
+        current.fallbackAnchor;
       for (const [id, old] of cache) {
-        // A preparation page can be replaced atomically as soon as the entire
-        // chapter is ready. An already-read version stays stable while paging.
-        if (
-          current.settings.navigationMode === 'paged' &&
-          visited.has(id) &&
-          Object.values(old).some((p) => p.text)
-        )
-          continue;
         const nextChapter = current.book.chapters.find((c) => c.id === id);
         if (!nextChapter) continue;
         const next = Object.fromEntries(
@@ -95,23 +128,18 @@ export function useReaderTranslations({
             { text: current.getTranslation(p), key: current.getKey(p) },
           ]),
         );
-        if (!Object.values(next).every((p) => p.text)) continue;
+        if (!Object.values(next).some((p) => p.text)) continue;
         if (
           Object.keys(next).some(
             (id) => next[id].text !== old[id]?.text || next[id].key !== old[id]?.key,
           )
         ) {
-          if (
-            current.settings.readingMode !== 'original' &&
-            id === current.book.chapters[current.chapterIndex].id &&
-            !Object.values(old).some((p) => p.text)
-          )
-            anchor.current = current.preparationAnchor;
           cache.set(id, next);
           changed = true;
         }
       }
-      if (changed) setRevision((value) => value + 1);
+      if (changed || readyContentAnchor(element, waiting, current.contentScope))
+        setRevision((value) => value + 1);
       else anchor.current = null;
     };
     const schedule = () => {
@@ -119,11 +147,11 @@ export function useReaderTranslations({
       timer = setTimeout(publish, 400);
     };
     const down = () => {
-      pressed = true;
+      pressed.current = true;
       clearTimeout(timer);
     };
     const up = () => {
-      pressed = false;
+      pressed.current = false;
       schedule();
     };
     element.addEventListener('scroll', schedule, { passive: true });
@@ -138,14 +166,19 @@ export function useReaderTranslations({
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', up);
     };
-  }, [translations, contentRevision, cache, visited, root, chapterIndex, settings.navigationMode]);
+  }, [
+    translations,
+    contentRevision,
+    version,
+    cache,
+    root,
+    surfaceReady,
+    chapterIndex,
+    settings.navigationMode,
+    pendingContentAnchor,
+  ]);
   return {
     revision,
-    pending:
-      settings.readingMode !== 'original' &&
-      chapter.paragraphs.some(
-        (p) => getTranslation(p) && getTranslation(p) !== cache.get(chapter.id)?.[p.id]?.text,
-      ),
     read(index: number, paragraph: Paragraph) {
       const chapter = book.chapters[index];
       if (!cache.has(chapter.id)) cache.set(chapter.id, snapshot(index));
@@ -155,12 +188,6 @@ export function useReaderTranslations({
       const chapter = book.chapters[index];
       if (!cache.has(chapter.id)) cache.set(chapter.id, snapshot(index));
       return cache.get(chapter.id)?.[paragraph.id]?.key || '';
-    },
-    apply() {
-      if (!root.current || root.current.dataset.turning === 'true') return;
-      anchor.current = readReadingAnchor(root.current);
-      cache.set(chapter.id, snapshot(chapterIndex));
-      setRevision((value) => value + 1);
     },
   };
 }

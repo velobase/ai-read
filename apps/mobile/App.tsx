@@ -20,14 +20,7 @@ import {
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import {
-  catalog,
-  effectiveBookLanguage,
-  resolveSavedPassage,
-  safeReadingQuote,
-  sameReadingLanguage,
-  type Book,
-} from '@bypage/reading-core';
+import { catalog, resolveSavedPassage, safeReadingQuote, type Book } from '@bypage/reading-core';
 import {
   HomeScreen,
   ProfileScreen,
@@ -80,7 +73,8 @@ import {
 import { AccountScreen } from './src/screens/account-screen';
 import { SearchScreen, type SearchRoute } from './src/screens/search-screen';
 import { initializeAccount, refreshAccount } from './src/adapters/account';
-import { apiOrigin } from './src/adapters/server-origin';
+import { readBookReadingPreferences } from './src/adapters/book-reading-preferences';
+import { invalidateReadingTranslationBook } from './src/adapters/translation-queue';
 import { PdfImportSheet } from './src/components/pdf-import-sheet';
 import { discardPdf } from './src/adapters/pdf';
 import { useSheetPresentation } from './src/components/use-sheet-presentation';
@@ -362,6 +356,11 @@ function Main() {
             }
           }
           if (!book) throw new Error('missing_book');
+          const readingPreferences = await readBookReadingPreferences(
+            library.handle,
+            id,
+            preferences,
+          );
           let position = await getPosition(library.handle, id);
           const display = await getTranslationDisplay(library.handle, id);
           const translations = display.texts;
@@ -388,7 +387,7 @@ function Main() {
                   : undefined;
               const source = saved?.source || target?.anchor?.source || 'original';
               const textOffset = saved?.start ?? target?.anchor?.start ?? 0;
-              const language = saved?.language || preferences.language;
+              const language = saved?.language || readingPreferences.language;
               const text = source === 'translation' ? exact?.text : passage.text;
               if (saved?.source === 'translation' && exact)
                 revealTranslation = {
@@ -414,38 +413,29 @@ function Main() {
                   mode: saved?.fallback
                     ? 'original'
                     : source === 'translation'
-                      ? preferences.mode === 'translation'
+                      ? readingPreferences.mode === 'translation'
                         ? 'translation'
                         : 'bilingual'
-                      : preferences.mode === 'translation'
+                      : readingPreferences.mode === 'translation'
                         ? 'bilingual'
-                        : preferences.mode,
+                        : readingPreferences.mode,
                 };
             }
           }
-          // Keep the existing convenient saved-language choice local to this book.
-          if (
-            !readingOverride &&
-            !target &&
-            Object.keys(translations).length &&
-            !translations[preferences.language] &&
-            !sameReadingLanguage(effectiveBookLanguage(book), preferences.language)
-          )
-            readingOverride = { language: Object.keys(translations)[0], mode: preferences.mode };
           return {
             library,
             book,
             position,
             translations,
             translationKeys: display.keys,
+            readingPreferences,
             revealTranslation,
             notes: await listNotes(library.handle, id, 100000),
             readingOverride,
             notice,
           };
         });
-        // Finish loading the reader before mounting the detail page's translation
-        // panel: both paths may migrate the newly added book in a write transaction.
+        // Refresh the shelf after importing a catalog book before opening its reader.
         if (addedToLibrary) await refresh();
         if (library.isCurrent() && sequence === openSequence.current) {
           setReaderTools(false);
@@ -781,6 +771,7 @@ function Main() {
             open={(paragraph) => void open(detail.id, paragraph)}
             updateSourceLanguage={async (language) => {
               library.assertCurrent();
+              invalidateReadingTranslationBook(library.handle, detail.id);
               const updated = await setBookSourceLanguage(library.handle, detail.id, language);
               library.assertCurrent();
               setDetail((current) => (current?.id === updated.id ? updated : current));
@@ -1336,6 +1327,7 @@ function Main() {
                       onPress: () => {
                         if (!library.isCurrent()) return;
                         setBusy(true);
+                        invalidateReadingTranslationBook(library.handle, target.id);
                         void removeBook(library.handle, target.id)
                           .then(async () => {
                             await refresh();

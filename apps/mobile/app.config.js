@@ -29,7 +29,7 @@ module.exports = {
   slug: 'bypage-reader',
   owner: 'attune-dating-team',
   icon: './assets/icon.png',
-  version: '1.0.4',
+  version: '1.0.5',
   locales: {
     en: { CFBundleDisplayName: 'LeafRead' },
     'zh-Hans': { CFBundleDisplayName: '叶子阅读' },

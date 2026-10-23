@@ -5,7 +5,8 @@ import { readingProgress } from '@/lib/reading-progress';
 import { useI18n } from '@/lib/i18n/provider';
 import { ContentLanguageLabel } from '@/components/library/language-menu';
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { readingChapterNavigation, isPdfBook } from '../../../packages/reading-core/src';
 import { Check, Moon, Sun, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
@@ -18,7 +19,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { languages, type Chapter, type Settings } from '@/lib/types';
+import { languages, type Book, type Settings } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { ReadingModePicker } from './reading-navigation';
 
@@ -28,6 +29,7 @@ export function ReadingPanel({
   title,
   compact = false,
   autoFocusSelector,
+  scrollCurrent = true,
   children,
 }: {
   open: boolean;
@@ -35,6 +37,7 @@ export function ReadingPanel({
   title: string;
   compact?: boolean;
   autoFocusSelector?: string;
+  scrollCurrent?: boolean;
   children: ReactNode;
 }) {
   const { t } = useI18n();
@@ -98,9 +101,10 @@ export function ReadingPanel({
             ? content.current?.querySelector<HTMLElement>(autoFocusSelector)
             : content.current?.querySelector<HTMLElement>('[data-panel-title]');
           target?.focus({ preventScroll: true });
-          content.current
-            ?.querySelector('[aria-current="location"]')
-            ?.scrollIntoView({ block: 'nearest' });
+          if (scrollCurrent)
+            content.current
+              ?.querySelector('[aria-current="location"]')
+              ?.scrollIntoView({ block: 'nearest' });
         }}
       >
         <button
@@ -152,7 +156,7 @@ export function ReadingPanel({
   );
 }
 
-export function ReadingAppearance({
+export function ReadingNavigationSettings({
   settings,
   update,
 }: {
@@ -161,7 +165,7 @@ export function ReadingAppearance({
 }) {
   const { t } = useI18n();
   return (
-    <div className="overflow-y-auto px-7 pb-7 text-sm">
+    <div>
       <ReadingModePicker
         mode={settings.navigationMode}
         onChange={(navigationMode) => update({ navigationMode })}
@@ -181,6 +185,7 @@ export function ReadingAppearance({
             ).map(([value, label]) => (
               <button
                 key={value}
+                type="button"
                 aria-pressed={settings.pageEffect === value}
                 onClick={() => update({ pageEffect: value })}
               >
@@ -195,6 +200,7 @@ export function ReadingAppearance({
             ).map(([value, label]) => (
               <button
                 key={value}
+                type="button"
                 aria-pressed={settings.scrollFlow === value}
                 onClick={() => update({ scrollFlow: value })}
               >
@@ -202,6 +208,21 @@ export function ReadingAppearance({
               </button>
             ))}
       </div>
+    </div>
+  );
+}
+
+export function ReadingAppearance({
+  settings,
+  update,
+}: {
+  settings: Settings;
+  update: (patch: Partial<Settings>) => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="overflow-y-auto px-7 pb-7 text-sm">
+      <ReadingNavigationSettings settings={settings} update={update} />
       <div className="mb-4 flex items-center gap-5 md:mb-6">
         <span className="text-sm text-muted-foreground" aria-hidden="true">
           A
@@ -351,13 +372,11 @@ export function ReadingAppearance({
 export function ReadingLanguage({
   settings,
   update,
-  openSettings,
 }: {
   settings: Settings;
   update: (patch: Partial<Settings>) => void;
-  openSettings: () => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   return (
     <div className="overflow-y-auto px-7 pb-7 text-sm">
       <ToggleGroup
@@ -373,7 +392,7 @@ export function ReadingLanguage({
           [
             ['original', t('原文')],
             ['bilingual', t('双语')],
-            ['translation', t('译文')],
+            ['translation', locale.startsWith('zh') ? '仅译文' : 'Translation only'],
           ] as const
         ).map(([value, label]) => (
           <ToggleGroupItem key={value} value={value} className="h-11 rounded-full text-sm">
@@ -383,10 +402,14 @@ export function ReadingLanguage({
       </ToggleGroup>
       <p className="my-5 min-h-12 text-xs leading-6 text-muted-foreground">
         {settings.readingMode === 'original'
-          ? t('只显示原文；已开始的准备任务可在“译本”中暂停。')
+          ? locale.startsWith('zh')
+            ? '阅读书籍原文。'
+            : 'Read in the book’s original language.'
           : settings.readingMode === 'bilingual'
             ? t('原文在上，译文在下，逐段对照阅读。')
-            : t('完整章节准备好后显示译文；等待时可以先读原文。')}
+            : locale.startsWith('zh')
+              ? '只显示译文，尚未翻译的位置会在阅读时自动补齐。'
+              : 'Read only the translation. Missing passages translate as you read.'}
       </p>
       <label className="mb-3 block text-xs text-muted-foreground">{t('翻译语言')}</label>
       <Select value={settings.language} onValueChange={(language) => update({ language })}>
@@ -402,27 +425,31 @@ export function ReadingLanguage({
         </SelectContent>
       </Select>
       <p className="mt-4 text-xs leading-6 text-muted-foreground">
-        {t('双语和译文按章节准备并保存在本机，也可以提前准备整本。')}
+        {locale.startsWith('zh')
+          ? '选择后立即生效，并记住这本书的阅读语言。'
+          : 'Changes apply immediately and are remembered for this book.'}
       </p>
-      <Button variant="link" className="mt-4 h-auto p-0 text-xs font-normal" onClick={openSettings}>
-        {t('翻译与 AI 连接设置')}
-      </Button>
     </div>
   );
 }
 
 export function ReadingProgress({
-  chapters,
+  book,
   paragraph,
   navigate,
 }: {
-  chapters: Chapter[];
+  book: Book;
   paragraph: string;
   navigate: (id: string) => void;
 }) {
   const { t } = useI18n();
-  const passages = chapters.flatMap((chapter) =>
-    chapter.paragraphs.map((passage) => ({ ...passage, chapter: chapter.title })),
+  const { chapters } = book;
+  const passages = useMemo(
+    () =>
+      chapters.flatMap((chapter, chapterIndex) =>
+        chapter.paragraphs.map((passage) => ({ ...passage, chapterIndex })),
+      ),
+    [chapters],
   );
   const [cursor, setCursor] = useState(
     Math.max(
@@ -431,9 +458,18 @@ export function ReadingProgress({
     ),
   );
   const current = passages[cursor];
+  const chapterNavigation = readingChapterNavigation(book, {
+    chapter: current?.chapterIndex ?? 0,
+    paragraph: current?.id || '',
+  });
+  const pdf = isPdfBook(book);
+  const page = chapters[current?.chapterIndex ?? 0]?.sourcePage;
   return (
     <div className="px-7 pb-8">
-      <p className="mb-2 text-sm leading-7">{current?.chapter}</p>
+      <p className="mb-2 text-sm leading-7">{chapterNavigation.current?.title}</p>
+      {pdf && page && (
+        <p className="mb-3 text-xs text-muted-foreground">{t('PDF 第 {n} 页', { n: page })}</p>
+      )}
       <p className="mb-6 line-clamp-2 min-h-12 text-xs leading-6 text-muted-foreground">
         {current?.text}
       </p>
@@ -458,6 +494,28 @@ export function ReadingProgress({
           )}
           %
         </span>
+      </div>
+      <div className="mt-6 grid grid-cols-2 gap-3">
+        {(['previous', 'next'] as const).map((direction) => {
+          const target = chapterNavigation[direction];
+          const pageTarget =
+            target?.kind === 'page' || (!target && chapterNavigation.current?.kind === 'page');
+          const label =
+            direction === 'previous'
+              ? t(pageTarget ? '上一原页' : '上一章')
+              : t(pageTarget ? '下一原页' : '下一章');
+          return (
+            <Button
+              key={direction}
+              variant="outline"
+              disabled={!target}
+              title={target?.title}
+              onClick={() => target && navigate(target.paragraphId)}
+            >
+              {label}
+            </Button>
+          );
+        })}
       </div>
     </div>
   );

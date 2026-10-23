@@ -3,7 +3,10 @@ export const localStores = [
   'books',
   'positions',
   'notes',
+  'bookmarks',
   'translations',
+  'translation-versions',
+  'translation-selections',
   'chats',
   'glossaries',
   'sync',
@@ -12,11 +15,13 @@ export const localStores = [
   'translation-manifests',
   'chapter-translations',
   'translation-jobs',
+  // Device-local originals are deliberately excluded from sync and reading backups.
+  'pdf-originals',
 ];
 let connection: Promise<IDBDatabase> | undefined;
 export function localDatabase() {
   return (connection ??= new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open(libraryDatabaseName(), 3);
+    const request = indexedDB.open(libraryDatabaseName(), 6);
     request.onupgradeneeded = () => {
       for (const name of localStores)
         if (!request.result.objectStoreNames.contains(name)) request.result.createObjectStore(name);

@@ -2,24 +2,11 @@
 
 import { useI18n } from '@/lib/i18n/provider';
 import { TranslationPromptEditor } from './translation-prompt-editor';
-import { ContentLanguageLabel } from '@/components/library/language-menu';
-
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { useEffect, useState, type ReactNode } from 'react';
-import { readAIConnection, applyAIConnection } from '@/lib/ai-connection';
-import { ArrowUpRight, Settings2, KeyRound, Globe2 } from 'lucide-react';
+import { Fragment, useState, type ReactNode } from 'react';
 import type { Settings } from '@/lib/types';
-import { languages } from '@/lib/types';
 
 export function Modal({
   title,
@@ -77,7 +64,7 @@ export function SettingsModal({
   settings: Settings;
   hasServerKey: boolean;
   accountMode?: boolean;
-  onSave: (settings: Settings, clearKey: boolean) => Promise<void>;
+  onSave: (settings: Settings) => Promise<void>;
   close: () => void;
 }) {
   const { locale, t } = useI18n(),
@@ -110,7 +97,7 @@ export function SettingsModal({
           setSaving(true);
           setError('');
           try {
-            await onSave(draft, false);
+            await onSave(draft);
             close();
           } catch (error) {
             console.error('ai.preferences.save', error);
@@ -121,20 +108,6 @@ export function SettingsModal({
         }}
       >
         <fieldset disabled={saving || !accountMode} className="space-y-5">
-          <label className="block text-sm">
-            {t('翻译与回答语言')}
-            <select
-              className="mt-2 block w-full rounded-lg border bg-background p-3"
-              value={draft.language}
-              onChange={(e) => setDraft({ ...draft, language: e.target.value })}
-            >
-              {languages.map(([id, label]) => (
-                <option value={id} key={id}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
           <TranslationPromptEditor
             value={draft.translationPrompt}
             onChange={(translationPrompt) => setDraft({ ...draft, translationPrompt })}
@@ -165,37 +138,61 @@ export function Answer({
 }) {
   const { t } = useI18n();
   // Render only text, emphasis and verified citation buttons. Model HTML is never executed.
-  const inline = (value: string) =>
-    value.split(/(\[\d+\.\d+\]|\*\*[^*]+\*\*)/g).map((part, i) => {
-      if (/^\[\d+\.\d+\]$/.test(part)) {
-        const id = part.slice(1, -1);
-        return sources.includes(id) ? (
-          <Button
-            variant="plain"
-            size="plain"
-            key={i}
-            className="mx-[3px] inline-flex items-center justify-center rounded-sm bg-accent px-1 align-baseline text-[9px] leading-[1.7] text-primary hover:bg-accent/80 "
-            onClick={() => navigate(id)}
-            title={t('查看原文 {value0}', { value0: id })}
-          >
-            {id}
-          </Button>
-        ) : (
-          <span
-            className="text-[10px] text-[#b18567]"
-            key={i}
-            title={t('引用未包含在本次提供的原文中')}
-          >
-            {part}?
-          </span>
+  const allowed = new Set(sources);
+  const citation = (id: string, key: number) => (
+    <Button
+      variant="plain"
+      size="plain"
+      key={key}
+      className="mx-[3px] inline-flex items-center justify-center rounded-sm bg-accent px-1 align-baseline text-[9px] leading-[1.7] text-primary hover:bg-accent/80 "
+      onClick={() => navigate(id)}
+      title={t('查看原文 {value0}', { value0: id })}
+    >
+      {id}
+    </Button>
+  );
+  const citations = (value: string) =>
+    value.split(/(\[[^\[\]\r\n]+\])(?!\()/g).map((part, i) => {
+      if (part.startsWith('[') && part.endsWith(']')) {
+        const body = part.slice(1, -1);
+        if (/[\/\\]|(?:^|[\s,，;；])(?:mailto:|https?:|www\.)/i.test(body)) return part;
+        const tokens = body.split(/([,，;；])/);
+        // Split only explicit list separators. URLs and ranges are never expanded
+        // or interpreted as IDs; every complete token still needs an exact match.
+        if (!tokens.some((token, index) => index % 2 === 0 && allowed.has(token.trim())))
+          return part;
+        if (tokens.length === 1) return citation(tokens[0].trim(), i);
+        return (
+          <Fragment key={i}>
+            {'['}
+            {tokens.map((token, index) => {
+              const id = token.trim();
+              return index % 2 === 0 && allowed.has(id) ? (
+                <Fragment key={index}>
+                  {token.slice(0, token.indexOf(id))}
+                  {citation(id, index)}
+                  {token.slice(token.indexOf(id) + id.length)}
+                </Fragment>
+              ) : (
+                token
+              );
+            })}
+            {']'}
+          </Fragment>
         );
       }
-      return part.startsWith('**') && part.endsWith('**') ? (
-        <strong key={i}>{part.slice(2, -2)}</strong>
-      ) : (
-        part
-      );
+      return part;
     });
+  const inline = (value: string) =>
+    value
+      .split(/(\*\*[^*]+\*\*)/g)
+      .map((part, i) =>
+        part.startsWith('**') && part.endsWith('**') ? (
+          <strong key={i}>{citations(part.slice(2, -2))}</strong>
+        ) : (
+          <Fragment key={i}>{citations(part)}</Fragment>
+        ),
+      );
   return (
     <div className="wrap-anywhere text-xs leading-[1.9] text-foreground group-data-[role=user]/message:rounded-[9px] group-data-[role=user]/message:border group-data-[role=user]/message:bg-muted group-data-[role=user]/message:px-3 group-data-[role=user]/message:py-[10px] group-data-[role=user]/message:text-foreground [&_p]:mb-[5px] [&_h4]:mb-[5px] [&_h4]:mt-3 [&_h4]:text-[13px] [&_h4]:font-semibold [&_h4]:text-foreground">
       {content.split('\n').map((line, i) =>

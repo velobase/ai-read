@@ -40,11 +40,15 @@ export function BookshelfPage() {
   const group = search.get('group') || '';
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
-  const [list, setList] = useState(false);
+  const list = search.get('view') === 'list';
   const [menu, setMenu] = useState<Book | null>(null);
   const [grouping, setGrouping] = useState(false);
   const [groupName, setGroupName] = useState('');
   const change = (key: string, value: string) => {
+    if (key === 'filter' || key === 'group') {
+      setSelected([]);
+      setSelecting(false);
+    }
     const params = new URLSearchParams(search.toString());
     params.set(key, value);
     router.replace(`/library?${params}`, { scroll: false });
@@ -141,9 +145,9 @@ export function BookshelfPage() {
             ))}
           </div>
           <button
-            className="hidden size-10 items-center justify-center rounded-full text-muted-foreground hover:bg-white sm:flex"
+            className="flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-white"
             aria-label={list ? t('切换为网格') : t('切换为列表')}
-            onClick={() => setList(!list)}
+            onClick={() => change('view', list ? 'grid' : 'list')}
           >
             {list ? <Grid2X2 size={18} /> : <List size={19} />}
           </button>
@@ -243,9 +247,18 @@ export function BookshelfPage() {
                 : t('导入喜欢的书，或去书城发现一篇原创短文。')
             }
           >
-            <button className="library-primary" onClick={openImport}>
-              {t('导入书籍')}
-            </button>
+            {filter !== 'all' || group ? (
+              <button
+                className="library-primary"
+                onClick={() => router.replace('/library', { scroll: false })}
+              >
+                {t('全部书籍')}
+              </button>
+            ) : (
+              <button className="library-primary" onClick={openImport}>
+                {t('导入书籍')}
+              </button>
+            )}
             <Link href="/discover" className="ms-5 text-sm text-primary">
               {t('去书城看看')}
             </Link>

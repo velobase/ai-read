@@ -19,7 +19,7 @@ export const defaultPreferences: Preferences = {
   fontSize: 19,
   lineHeight: 1.75,
   serif: true,
-  mode: 'bilingual',
+  mode: 'original',
   language: 'zh-CN',
   speechRate: 0.9,
   turnMode: 'paged',
@@ -37,7 +37,7 @@ export function cleanPreferences(raw: Partial<Preferences>): Preferences {
     serif: raw.serif !== false,
     mode: ['original', 'bilingual', 'translation'].includes(raw.mode || '')
       ? raw.mode!
-      : 'bilingual',
+      : defaultPreferences.mode,
     language:
       typeof raw.language === 'string' && /^[a-zA-Z-]{2,20}$/.test(raw.language)
         ? raw.language

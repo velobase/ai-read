@@ -1,7 +1,9 @@
+import * as Crypto from 'expo-crypto';
 import type { SQLiteDatabase } from 'expo-sqlite';
 import {
   assertSameSavedTranslationVersion,
   portableTranslationKey,
+  savedTranslationKey,
   sha256,
   TRANSLATION_SOURCE_SCHEME,
   translationChapterFingerprint,
@@ -284,4 +286,27 @@ export async function readTranslationDisplay(
     keys[value.language][value.paragraphId] = value.key;
   }
   return { texts, keys };
+}
+
+/** The caller commits the draft deletion and this write together, with its guard. */
+export async function writeCompletedTranslation(
+  tx: SQLiteDatabase,
+  book: Book,
+  language: string,
+  paragraphId: string,
+  text: string,
+): Promise<{ text: string; key: string }> {
+  await ensureBookTranslationMigration(tx, book);
+  const existing = await readSelectedTranslation(tx, book, language, paragraphId);
+  if (existing) return { text: existing.text, key: existing.key };
+  // A missing display choice is intentional. Do not silently claim an imported version.
+  const key = savedTranslationKey(language, paragraphId, Crypto.randomUUID());
+  const value = version(book, language, paragraphId, key, text);
+  await importTranslationVersions(
+    tx,
+    book,
+    [value],
+    [{ bookId: book.id, language, paragraphId, key }],
+  );
+  return { text: value.text, key: value.key };
 }

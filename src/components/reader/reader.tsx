@@ -1,4 +1,23 @@
 'use client';
+import { measureClient } from '@/lib/observability/client';
+import {
+  bookContents,
+  createContentsOutline,
+  visibleContentsOutline,
+  contentsOutlineAncestors,
+  isPdfBook,
+  sameReadingLanguage,
+  effectiveBookLanguage,
+  resolveSavedPassage,
+  resolvePdfTextEvidence,
+  safeReadingQuote,
+  readingScopeParagraphs,
+  readingChapterNavigation,
+  validateBookmark,
+  bookmarkLocationKey,
+  type Bookmark as ReadingBookmark,
+  type ReadingChapterTarget,
+} from '../../../packages/reading-core/src';
 
 import { SUPPORT_EMAIL, SUPPORT_MAILTO } from '@/lib/contact';
 
@@ -9,17 +28,23 @@ import {
   applyAIConnection,
   type AIConnection,
 } from '@/lib/ai-connection';
-import { localeStorageKey, directionFor } from '@/lib/i18n/config';
+import {
+  localeStorageKey,
+  directionFor,
+  readingLanguages,
+  displayLanguage,
+} from '@/lib/i18n/config';
 
 import { sameData } from '@/lib/sync-types';
 import { readingProgress } from '@/lib/reading-progress';
-import { captureNoteSelection, noteRange } from '@/lib/note-anchors';
+import { captureNoteSelection } from '@/lib/note-anchors';
 import { getSyncEntry } from '@/lib/sync-storage';
 import { storageKey } from '@/lib/storage-scope';
 import { useIdentity } from '@/components/auth/identity-provider';
 
 import { Button } from '@/components/ui/button';
 import { useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { updateLibraryBooks } from '@/lib/library-state';
 import { ChapterEnding, ReadingNavigation } from './reading-navigation';
@@ -29,7 +54,35 @@ import {
   useReadingNavigation,
   type ReadingAnchor,
 } from './use-reading-navigation';
-import { activeFrame, pageCount, setPage } from './reading-layout';
+import {
+  activeFrame,
+  forgetReadingAnchor,
+  hasReadableTranslation,
+  pageCount,
+  readingTop,
+  setPage,
+  type PendingContentAnchor,
+} from './reading-layout';
+import { BookIllustration, IllustrationDialog, type Illustration } from './book-illustration';
+import { BookmarksPanel } from './bookmarks-panel';
+import { ReaderLoading } from './reader-loading';
+import {
+  ReaderSearchMatches,
+  useReaderBookSearch,
+  type ReaderSearchSource,
+} from './reader-book-search';
+import type { PassageMatch } from '@/lib/book-search';
+import { readSearchTranslation, type TranslationSearchTarget } from '@/lib/translation-search';
+import {
+  BookReferencePreview,
+  MarkedPassage,
+  OriginalReferences,
+  type InlineBookReference,
+} from './book-reference';
+import type {
+  BookReferenceLink,
+  BookReferenceTarget,
+} from '../../../packages/reading-core/src/types';
 import { useReaderTranslations } from './use-reader-translations';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -49,6 +102,7 @@ import {
 } from '@/components/ui/select';
 import {
   useCallback,
+  Fragment,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -64,6 +118,7 @@ import {
   ArrowUpRight,
   BookOpen,
   Bookmark,
+  BookmarkPlus,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -73,6 +128,7 @@ import {
   Languages,
   History,
   LoaderCircle,
+  LocateFixed,
   Maximize2,
   Minimize2,
   Moon,
@@ -91,7 +147,10 @@ import { buildContext, expandQuestion, streamAI } from '@/lib/ai';
 import { sampleBook, sampleTranslations } from '@/lib/sample';
 import { loadSettings, saveSettings, storage } from '@/lib/storage';
 import { useBookTranslation } from './use-book-translation';
-import { ChapterPreparation, TranslationPanel } from './translation-panel';
+import { readSavedTranslationVersion } from '@/lib/saved-translation-storage';
+import { resolveTranslationKey } from '../../../packages/reading-core/src/translation-key';
+import { contentHash } from '@/lib/translation-edition';
+import { canUseAI, hasMatchingServerKey } from '@/lib/ai-availability';
 import {
   type Book,
   type Message,
@@ -102,10 +161,35 @@ import {
   type Settings,
 } from '@/lib/types';
 
+function withBookLanguage(bookId: string, settings: Settings): Settings {
+  try {
+    const saved = JSON.parse(localStorage.getItem(storageKey('ai-read-book-language')) || '{}')[
+      bookId
+    ];
+    if (!saved) return settings;
+    return {
+      ...settings,
+      readingMode: ['original', 'bilingual', 'translation'].includes(saved.readingMode)
+        ? saved.readingMode
+        : settings.readingMode,
+      language: readingLanguages.some(([code]) => code === saved.language)
+        ? saved.language
+        : settings.language,
+    };
+  } catch {
+    return settings;
+  }
+}
+
 const emptyPosition: Position = { chapter: 0, paragraph: '1.1', farthest: 0 };
+const PdfOriginalDialog = dynamic(
+  () => import('@/components/pdf/pdf-original-dialog').then((module) => module.PdfOriginalDialog),
+  { ssr: false },
+);
 const scopeNames = { chapter: '当前章节', read: '截至最远章节', book: '整本书（可能剧透）' };
 type ReaderTool =
   | 'contents'
+  | 'bookmarks'
   | 'companion'
   | 'appearance'
   | 'language'
@@ -114,54 +198,176 @@ type ReaderTool =
   | 'settings'
   | 'help'
   | 'delete'
-  | 'translations'
+  | 'pdf-original'
   | 'more';
 type PassageSelection = { paragraph: Paragraph; text: string; anchor?: NoteAnchor };
+type RevealedTranslation = {
+  bookId: string;
+  paragraph: string;
+  language: string;
+  key: string;
+  text: string;
+  sourceLanguage: string;
+  preferredLanguage: string;
+  readingMode: Settings['readingMode'];
+};
 
-function markedPassage(
-  text: string,
-  notes: Note[],
-  source: NoteAnchor['source'] = 'original',
-  key?: string,
-) {
-  const ranges = notes
-    .flatMap((note) => {
-      const range = noteRange(text, note, source, key);
-      return range ? [range] : [];
-    })
-    .sort((a, b) => a.start - b.start);
-  const merged: typeof ranges = [];
-  for (const range of ranges) {
-    const previous = merged.at(-1);
-    if (previous && range.start <= previous.end) previous.end = Math.max(previous.end, range.end);
-    else merged.push({ ...range });
-  }
-  let cursor = 0;
-  const content = merged.map((range) => {
-    const before = text.slice(cursor, range.start);
-    cursor = range.end;
-    return (
-      <span key={range.start}>
-        {before}
-        <mark className="passage-mark">{text.slice(range.start, range.end)}</mark>
-      </span>
-    );
-  });
-  return (
-    <>
-      {content}
-      {text.slice(cursor)}
-    </>
+type OriginalReadingOverride = {
+  bookId: string;
+  language: string;
+  readingMode: Settings['readingMode'];
+};
+type ReferenceReturn = {
+  bookId: string;
+  activation: number;
+  context: string;
+  anchor: ReadingAnchor;
+  translationKey?: string;
+  mode: Settings['navigationMode'];
+  panel: 'chat' | 'notes' | null;
+  selection: PassageSelection | null;
+  translation: RevealedTranslation | null;
+  original: OriginalReadingOverride | null;
+  referenceSources?: string[];
+};
+type SearchReturn = {
+  origin: ReferenceReturn;
+  history: ReferenceReturn[];
+  results: {
+    query: string;
+    source: ReaderSearchSource;
+    language: string;
+    page: number;
+    scrollTop: number;
+  };
+};
+const MAX_REFERENCE_RETURNS = 8;
+
+async function savedPassageTranslation(
+  book: Book,
+  paragraphId: string,
+  key: string | undefined,
+  saved: Record<string, string>,
+  settings: Settings,
+): Promise<RevealedTranslation | null> {
+  if (!key) return null;
+  const identity = resolveTranslationKey(
+    key,
+    new Set(book.chapters.flatMap((c) => c.paragraphs.map((p) => p.id))),
   );
+  if (!identity || identity.paragraphId !== paragraphId) return null;
+  const language = identity.language;
+  const prefix = `${language}:${paragraphId}:`;
+  const exact = await readSavedTranslationVersion(book, key);
+  if (exact === null) return null;
+  let text = exact?.paragraphId === paragraphId && exact.language === language ? exact.text : '';
+  if (exact === undefined)
+    text = key.startsWith(`${prefix}edition-`)
+      ? (await readSearchTranslation(book, { paragraphId, language, translationKey: key })) || ''
+      : saved[key];
+  if (!text) return null;
+  return {
+    bookId: book.id,
+    paragraph: paragraphId,
+    language,
+    key,
+    text,
+    sourceLanguage: effectiveBookLanguage(book),
+    preferredLanguage: settings.language,
+    readingMode: settings.readingMode,
+  };
+}
+
+async function savedNoteTranslation(
+  book: Book,
+  note: Note,
+  saved: Record<string, string>,
+  settings: Settings,
+): Promise<RevealedTranslation | null> {
+  if (note.bookId !== book.id) return null;
+  return savedPassageTranslation(
+    book,
+    note.paragraphId,
+    note.anchor?.source === 'translation' ? note.anchor.translationKey : undefined,
+    saved,
+    settings,
+  );
+}
+
+async function savedSearchTranslation(
+  book: Book,
+  paragraphId: string,
+  start: number | undefined,
+  target: TranslationSearchTarget,
+  settings: Settings,
+  signal?: AbortSignal,
+): Promise<{ translation: RevealedTranslation; start: number; quote: string } | null> {
+  if (
+    !Number.isSafeInteger(start) ||
+    start! < 0 ||
+    !Number.isSafeInteger(target.sourceEnd) ||
+    target.sourceEnd <= start! ||
+    !/^[a-f0-9]{64}$/.test(target.textHash)
+  )
+    return null;
+  const text = await readSearchTranslation(book, { paragraphId, ...target }, signal);
+  signal?.throwIfAborted();
+  if (!text || target.sourceEnd > text.length || (await contentHash(text)) !== target.textHash)
+    return null;
+  signal?.throwIfAborted();
+  const paragraph = book.chapters
+    .flatMap((chapter) => chapter.paragraphs)
+    .find((entry) => entry.id === paragraphId);
+  if (!paragraph) return null;
+  const resolved = resolveSavedPassage(
+    paragraph,
+    {
+      anchor: {
+        source: 'translation',
+        start: start!,
+        end: target.sourceEnd,
+        translationKey: target.translationKey,
+      },
+      quote: text.slice(start, target.sourceEnd),
+    },
+    (key) => (key === target.translationKey ? text : undefined),
+  );
+  if (
+    resolved.source !== 'translation' ||
+    resolved.fallback ||
+    resolved.start !== start ||
+    resolved.end !== target.sourceEnd
+  )
+    return null;
+  return {
+    start: resolved.start,
+    quote: safeReadingQuote(text, resolved.start),
+    translation: {
+      bookId: book.id,
+      paragraph: paragraphId,
+      language: target.language,
+      key: target.translationKey,
+      text,
+      sourceLanguage: effectiveBookLanguage(book),
+      preferredLanguage: settings.language,
+      readingMode: settings.readingMode,
+    },
+  };
 }
 
 export default function Reader({
   bookId,
   targetParagraph,
+  targetNoteId,
+  targetTextOffset,
+  targetTranslation,
   returnTo = '/library',
 }: {
   bookId?: string;
   targetParagraph?: string;
+  targetNoteId?: string;
+  targetTextOffset?: number;
+  targetTranslation?: TranslationSearchTarget;
   returnTo?: string;
 }) {
   const { t, text: localize, locale } = useI18n();
@@ -172,24 +378,72 @@ export default function Reader({
     router.push(
       `/login?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`,
     );
-  const returnLabel = returnTo.startsWith('/notes')
-    ? t('笔记')
-    : returnTo.startsWith('/books')
-      ? t('书籍详情')
-      : returnTo === '/'
-        ? t('阅读首页')
-        : t('书架');
+  const returnLabel = returnTo.startsWith('/search')
+    ? t('搜索')
+    : returnTo.startsWith('/notes')
+      ? t('笔记')
+      : returnTo.startsWith('/books')
+        ? t('书籍详情')
+        : returnTo === '/'
+          ? t('阅读首页')
+          : t('书架');
   const [missing, setMissing] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [book, setBook] = useState<Book>(sampleBook);
+  const [pdfPages, setPdfPages] = useState(false);
+  const chapterContents = useMemo(() => bookContents(book), [book]);
+  const pageContents = useMemo(() => bookContents(book, { pdfPages: true }), [book]);
+  const hasPdfContents =
+    isPdfBook(book) &&
+    (chapterContents.length !== pageContents.length ||
+      chapterContents.some(
+        (item, index) =>
+          item.title !== pageContents[index]?.title ||
+          item.paragraphId !== pageContents[index]?.paragraphId,
+      ));
+  const contents = hasPdfContents && pdfPages ? pageContents : chapterContents;
+  useEffect(() => setPdfPages(false), [book.id]);
   const [position, setPosition] = useState<Position>(emptyPosition);
   const [notes, setNotes] = useState<Note[]>([]);
+  const [bookmarks, setBookmarks] = useState<ReadingBookmark[]>([]);
+  const bookmarkMutation = useRef(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [translations, setTranslations] = useState<Record<string, string>>({});
   const [settings, setSettings] = useState(loadSettings);
-  const [hasServerKey, setHasServerKey] = useState(false);
+  const [revealed, setRevealed] = useState<RevealedTranslation | null>(null);
+  const noteRequest = useRef(0);
+  const [temporaryOriginal, setTemporaryOriginal] = useState<OriginalReadingOverride | null>(null);
+  useEffect(() => {
+    setTemporaryOriginal((current) =>
+      current &&
+      (current.bookId !== book.id ||
+        current.language !== settings.language ||
+        current.readingMode !== settings.readingMode)
+        ? null
+        : current,
+    );
+  }, [book.id, settings.language, settings.readingMode]);
+  const [aiConnection, setAIConnection] = useState<AIConnection | null>(null);
+  const hasServerKey = hasMatchingServerKey(settings.baseUrl, aiConnection);
   const [ready, setReady] = useState(false);
   const [switching, setSwitching] = useState(false);
+  const surfaceReady =
+    ready && !missing && !loadFailed && !switching && (!bookId || book.id === bookId);
   const [tool, setTool] = useState<ReaderTool | null>(null);
+  const [illustration, setIllustration] = useState<Illustration | null>(null);
+  const illustrations = useMemo(() => {
+    const assets = new Map(book.media?.assets.map((asset) => [asset.id, asset]));
+    const result = new Map<string, { before: Illustration[]; after: Illustration[] }>();
+    for (const placement of book.media?.placements || []) {
+      const asset = assets.get(placement.assetId);
+      if (!asset) continue;
+      const group = result.get(placement.paragraphId) || { before: [], after: [] };
+      group[placement.position].push({ asset, placement });
+      result.set(placement.paragraphId, group);
+    }
+    return result;
+  }, [book.media]);
   const parentTool = useRef<ReaderTool | null>(null);
   const settingsOpen = tool === 'settings';
   const helpOpen = tool === 'help';
@@ -209,17 +463,63 @@ export default function Reader({
   const [savingNote, setSavingNote] = useState(false);
   const savingNoteRef = useRef(false);
   const [deleteNote, setDeleteNote] = useState<Note | null>(null);
-  const [referenceReturn, setReferenceReturn] = useState<{
-    anchor: ReadingAnchor;
-    mode: Settings['navigationMode'];
-    panel: 'chat' | 'notes' | null;
-    selection: PassageSelection | null;
+  const [referenceHistory, setReferenceHistory] = useState<ReferenceReturn[]>([]);
+  const referenceHistoryRef = useRef<ReferenceReturn[]>([]);
+  const referenceReturn = referenceHistory.at(-1) || null;
+  const [searchOrigin, setSearchOrigin] = useState<SearchReturn | null>(null);
+  const searchOriginRef = useRef<SearchReturn | null>(null);
+  const [referenceSession, setReferenceSession] = useState(false);
+  const [referencePreview, setReferencePreview] = useState<{
+    link: BookReferenceLink;
+    target: BookReferenceTarget;
+    origin: ReferenceReturn;
+    opener: HTMLElement | null;
   } | null>(null);
+  useEffect(() => setReferencePreview(null), [book.id, book.references?.revision]);
   const jumpAnchor = useRef<ReadingAnchor | null>(null);
+  const pendingContentAnchor = useRef<PendingContentAnchor | null>(null);
   const jumpEdge = useRef<'start' | 'end'>('start');
+  const jumpGeneration = useRef(0);
+  const [jumpRequest, setJumpRequest] = useState(0);
+  const scrollIntent = useRef<{ top: number; until: number } | null>(null);
   const pendingPosition = useRef<{ bookId: string; position: Position } | null>(null);
   const [question, setQuestion] = useState('');
   const [search, setSearch] = useState('');
+  const [searchSource, setSearchSource] = useState<ReaderSearchSource>('original');
+  const [searchTitles, setSearchTitles] = useState(false);
+  const [searchLanguage, setSearchLanguage] = useState('');
+  const [searchPage, setSearchPage] = useState(0);
+  const [searchOpening, setSearchOpening] = useState(false);
+  const searchOpeningRef = useRef(false);
+  const searchPageTransition = useRef<string | null>(null);
+  const searchScroll = useRef(0);
+  const restoringSearchScroll = useRef(false);
+  const searchList = useRef<HTMLElement | null>(null);
+  const [contentsLocateRequest, setContentsLocateRequest] = useState(0);
+  const contentsLocateFrame = useRef<number | null>(null);
+  const searchJump = useRef<AbortController | null>(null);
+  const searchIdentity = useRef('');
+  searchIdentity.current = JSON.stringify([
+    book.id,
+    search,
+    searchSource,
+    searchLanguage,
+    searchPage,
+    searchTitles,
+  ]);
+  const searchResults = useReaderBookSearch({
+    book,
+    query: search,
+    source: searchSource,
+    language: searchLanguage,
+    page: searchPage,
+    enabled: sidebarOpen && ready && !switching && !searchTitles,
+  });
+  useEffect(() => {
+    return () => {
+      searchJump.current?.abort();
+    };
+  }, [book, search, searchSource, searchLanguage, searchPage, sidebarOpen, searchTitles]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [busy, setBusy] = useState<'chat' | null>(null);
   const [busyText, setBusyText] = useState('');
@@ -250,7 +550,35 @@ export default function Reader({
   const restoring = useRef(false);
   const settingsEdited = useRef(false);
   const chapter = book.chapters[position.chapter] || book.chapters[0];
-  const view = settings.readingMode;
+  const pdf = isPdfBook(book);
+  const chapterNavigation = readingChapterNavigation(book, position);
+  const readingTitle = chapterNavigation.current?.title || chapter.title;
+  const sourceLanguage = effectiveBookLanguage(book);
+  const bookmarkScope = useRef('');
+  bookmarkScope.current = JSON.stringify([
+    book.id,
+    sourceLanguage,
+    settings.language,
+    settings.readingMode,
+  ]);
+  const revealedTranslation =
+    revealed?.bookId === book.id &&
+    revealed.sourceLanguage === sourceLanguage &&
+    revealed.preferredLanguage === settings.language &&
+    revealed.readingMode === settings.readingMode
+      ? revealed
+      : null;
+  useEffect(() => {
+    if (revealed && !revealedTranslation) setRevealed(null);
+  }, [revealed, revealedTranslation]);
+  const view = revealedTranslation
+    ? 'bilingual'
+    : sameReadingLanguage(sourceLanguage, settings.language) ||
+        (temporaryOriginal?.bookId === book.id &&
+          temporaryOriginal.language === settings.language &&
+          temporaryOriginal.readingMode === settings.readingMode)
+      ? 'original'
+      : settings.readingMode;
   const readingIndex = Math.max(
     0,
     chapter.paragraphs.findIndex((p) => p.id === position.paragraph),
@@ -258,15 +586,35 @@ export default function Reader({
   const readingParagraph =
     chapter.paragraphs.slice(readingIndex).find((p) => p.kind !== 'heading') ||
     chapter.paragraphs[readingIndex];
-  const aiReady = !needsLogin && Boolean(settings.baseUrl && settings.model);
+  const aiReady = !needsLogin && canUseAI(settings, aiConnection);
   const legacyTranslations = useMemo(
     () => (book.id === sampleBook.id ? { ...sampleTranslations, ...translations } : translations),
     [book.id, translations],
   );
+  const [translationTarget, setTranslationTarget] = useState({
+    scope: '',
+    paragraph: '',
+    missing: '',
+  });
+  const contentScope = JSON.stringify([book.id, settings.language, view]);
+  const translationScope = JSON.stringify([
+    book.id,
+    settings.language,
+    view,
+    position.chapter,
+    position.paragraph,
+  ]);
   const bookTranslation = useBookTranslation(book, settings, {
     chapter: position.chapter,
     enabled: ready && !missing && !switching,
-    auto: aiReady && view !== 'original',
+    paragraph:
+      pendingContentAnchor.current?.scope === contentScope
+        ? pendingContentAnchor.current.anchor.paragraph
+        : translationTarget.scope === translationScope
+          ? translationTarget.paragraph
+          : position.paragraph,
+    auto: view !== 'original' && !revealedTranslation && !referenceSession,
+    connectionReady: aiReady,
     legacy: legacyTranslations,
   });
   const paragraphChapters = useMemo(
@@ -275,6 +623,170 @@ export default function Reader({
   );
   const normalizeHeading = (text: string) => text.replace(/[\s\p{P}]/gu, '').toLowerCase();
   const allParagraphs = useMemo(() => book.chapters.flatMap((c) => c.paragraphs), [book]);
+  const paragraphsById = useMemo(
+    () => new Map(allParagraphs.map((paragraph) => [paragraph.id, paragraph])),
+    [allParagraphs],
+  );
+  const referenceTargets = useMemo(
+    () => new Map(book.references?.targets.map((target) => [target.id, target])),
+    [book.references],
+  );
+  const referencesByParagraph = useMemo(() => {
+    const result = new Map<string, InlineBookReference[]>();
+    for (const link of book.references?.links || []) {
+      const target = referenceTargets.get(link.targetId);
+      if (!target) continue;
+      for (const range of link.source) {
+        const entries = result.get(range.paragraphId) || [];
+        entries.push({
+          link,
+          start: range.start,
+          end: range.end,
+          href: `#passage-${target.location?.paragraphId || range.paragraphId}`,
+        });
+        result.set(range.paragraphId, entries);
+      }
+    }
+    return result;
+  }, [book.references, referenceTargets]);
+  const paragraphOrder = useMemo(
+    () => new Map(allParagraphs.map((paragraph, index) => [paragraph.id, index])),
+    [allParagraphs],
+  );
+  const activeContent = useMemo(() => {
+    const current = paragraphOrder.get(position.paragraph) ?? 0;
+    let active = -1,
+      nearest = -1;
+    contents.forEach((item, index) => {
+      if (!(hasPdfContents && !pdfPages) && item.chapterId !== book.chapters[position.chapter]?.id)
+        return;
+      const order = paragraphOrder.get(item.paragraphId) ?? -1;
+      if (
+        order >= 0 &&
+        order <= current &&
+        (order > nearest ||
+          (order === nearest && (active < 0 || item.depth >= contents[active].depth)))
+      ) {
+        active = index;
+        nearest = order;
+      }
+    });
+    return active;
+  }, [
+    book.chapters,
+    contents,
+    paragraphOrder,
+    position.chapter,
+    position.paragraph,
+    hasPdfContents,
+    pdfPages,
+  ]);
+  const contentsOutline = useMemo(
+    () =>
+      createContentsOutline(
+        contents.map((item, index) => ({
+          ...item,
+          key: JSON.stringify([item.chapterId, item.paragraphId, index]),
+        })),
+      ),
+    [contents],
+  );
+  const contentsActivation = JSON.stringify([book.id, activation.current]);
+  const contentsMode = pdfPages ? 'pages' : 'contents';
+  const [contentsFolds, setContentsFolds] = useState<{
+    activation: string;
+    modes: Partial<
+      Record<'pages' | 'contents', { entries: typeof contents; keys: ReadonlySet<string> }>
+    >;
+  }>({ activation: '', modes: {} });
+  const savedContentsFolds =
+    contentsFolds.activation === contentsActivation ? contentsFolds.modes[contentsMode] : undefined;
+  const collapsedContents =
+    savedContentsFolds?.entries === contents ? savedContentsFolds.keys : undefined;
+  const setCollapsedContents = useCallback(
+    (change: (keys: ReadonlySet<string>) => ReadonlySet<string>) => {
+      setContentsFolds((previous) => {
+        const modes = previous.activation === contentsActivation ? previous.modes : {};
+        const saved = modes[contentsMode];
+        const keys = saved?.entries === contents ? saved.keys : new Set<string>();
+        const next = change(keys);
+        if (next === keys && saved?.entries === contents) return previous;
+        return {
+          activation: contentsActivation,
+          modes: { ...modes, [contentsMode]: { entries: contents, keys: next } },
+        };
+      });
+    },
+    [contentsActivation, contentsMode, contents],
+  );
+  const activeContentKey = contentsOutline.nodes[activeContent]?.key;
+  const contentsProjection = useMemo(
+    () =>
+      visibleContentsOutline(contentsOutline, {
+        collapsedKeys: collapsedContents,
+        query: searchTitles ? search : '',
+        activeKey: activeContentKey,
+      }),
+    [contentsOutline, collapsedContents, searchTitles, search, activeContentKey],
+  );
+  const hierarchicalContents =
+    !(pdf && (!hasPdfContents || pdfPages)) &&
+    contentsOutline.nodes.some((node) => node.hasChildren);
+  const searchingContents = searchTitles ? contentsProjection.searching : !!search.trim();
+  const visibleActiveContent = contentsProjection.rows.reduce(
+    (active, row) => (row.isActive || row.isActiveAncestor ? row.index : active),
+    -1,
+  );
+  const contentsLocateIdentity = JSON.stringify([
+    contentsActivation,
+    sidebarOpen,
+    search.trim(),
+    visibleActiveContent,
+    pdfPages,
+    surfaceReady,
+    contentsLocateRequest,
+  ]);
+  const contentsLocateState = useRef({ identity: '', enabled: false, active: -1 });
+  contentsLocateState.current = {
+    identity: contentsLocateIdentity,
+    enabled: sidebarOpen && !search.trim() && surfaceReady && activeContent >= 0,
+    active: visibleActiveContent,
+  };
+  const locateContents = useCallback(() => {
+    if (contentsLocateFrame.current !== null) cancelAnimationFrame(contentsLocateFrame.current);
+    contentsLocateFrame.current = null;
+    const request = contentsLocateState.current;
+    if (!request.enabled) return;
+    contentsLocateFrame.current = requestAnimationFrame(() => {
+      contentsLocateFrame.current = null;
+      if (contentsLocateState.current.identity !== request.identity) return;
+      const list = searchList.current;
+      const item = list?.querySelector<HTMLElement>(
+        `[data-reader-content-index="${request.active}"]`,
+      );
+      if (!list?.isConnected || !item || !list.clientHeight) return;
+      // The positioned nav is the rows' offset parent. These coordinates are
+      // independent of dialog animations, and only this scroll container moves.
+      const top = item.offsetTop;
+      const bottom = top + item.offsetHeight;
+      if (top >= list.scrollTop + 12 && bottom <= list.scrollTop + list.clientHeight - 12) return;
+      list.scrollTop = Math.max(0, top - Math.max(0, (list.clientHeight - item.offsetHeight) / 2));
+    });
+  }, []);
+  const attachContentsList = useCallback(
+    (element: HTMLElement | null) => {
+      searchList.current = element;
+      if (element) locateContents();
+    },
+    [locateContents],
+  );
+  useEffect(() => {
+    locateContents();
+    return () => {
+      if (contentsLocateFrame.current !== null) cancelAnimationFrame(contentsLocateFrame.current);
+      contentsLocateFrame.current = null;
+    };
+  }, [contentsLocateIdentity, locateContents]);
   const continuous = settings.navigationMode === 'scroll' && settings.scrollFlow === 'continuous';
   const range =
     scrollRange.bookId === book.id
@@ -294,18 +806,22 @@ export default function Reader({
     );
   const stableTranslations = useReaderTranslations({
     book,
-    settings,
+    settings: { ...settings, readingMode: view },
     chapterIndex: position.chapter,
     translations,
     contentRevision: bookTranslation.revision,
     version: bookTranslation.version,
     getTranslation,
     getKey: (p) => bookTranslation.key(paragraphChapters.get(p.id) ?? 0, p.id),
-    preparationAnchor: position,
+    fallbackAnchor: jumpAnchor.current || position,
+    contentScope,
+    pendingContentAnchor,
     root: readerRef,
+    surfaceReady,
   });
   const navigation = useReadingNavigation({
     root: readerRef,
+    surfaceReady,
     chapterId: chapter.id,
     chapterIndex: position.chapter,
     chapterCount: book.chapters.length,
@@ -318,16 +834,119 @@ export default function Reader({
       settings.lineHeight,
       settings.pageWidth,
       settings.pageMargin,
-      settings.readingMode,
+      view,
       settings.scrollFlow,
       settings.language,
       bookTranslation.version,
       stableTranslations.revision,
+      book.media?.revision,
+      book.references?.revision,
+      revealedTranslation?.key,
     ].join(':'),
     enabled: ready && !missing && !switching && !jump,
-    blocked: Boolean(tool || selectionMenu),
+    blocked: Boolean(tool || selectionMenu || illustration || referencePreview),
     onChapter: toChapter,
   });
+  useEffect(() => {
+    if (pendingContentAnchor.current?.scope !== contentScope) pendingContentAnchor.current = null;
+  }, [contentScope]);
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (
+        !surfaceReady ||
+        tool ||
+        illustration ||
+        referencePreview ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.isComposing ||
+        target?.closest('button,a,input,textarea,select,[contenteditable="true"]') ||
+        (target && target !== document.body && !readerRef.current?.contains(target)) ||
+        window.getSelection()?.toString().trim()
+      )
+        return;
+      if (
+        [
+          'ArrowUp',
+          'ArrowDown',
+          'ArrowLeft',
+          'ArrowRight',
+          'PageUp',
+          'PageDown',
+          'Home',
+          'End',
+          ' ',
+        ].includes(event.key)
+      )
+        markScrollIntent();
+    };
+    // The navigation hook also handles keys targeted at document.body.
+    window.addEventListener('keydown', key, true);
+    return () => window.removeEventListener('keydown', key, true);
+  });
+  useEffect(() => {
+    const root = readerRef.current;
+    if (!surfaceReady || !root) return;
+    let frameId = 0;
+    const update = () => {
+      if (root.dataset.turning === 'true') return;
+      const frame = settings.navigationMode === 'paged' ? activeFrame(root) : root;
+      const area =
+        settings.navigationMode === 'paged'
+          ? frame?.querySelector<HTMLElement>('.page-viewport')
+          : root;
+      if (!frame || !area) return;
+      const bounds = area.getBoundingClientRect();
+      const top = bounds.top + (settings.navigationMode === 'paged' ? 0 : readingTop(root));
+      const visible = Array.from(frame.querySelectorAll<HTMLElement>('[data-paragraph]'))
+        .filter((passage) =>
+          Array.from(passage.getClientRects()).some(
+            (rect) =>
+              rect.bottom > top + 1 &&
+              rect.top < bounds.bottom &&
+              rect.right > bounds.left + 1 &&
+              rect.left < bounds.right - 1,
+          ),
+        )
+        .map((passage) => passage.dataset.paragraph!)
+        .filter((id) => paragraphsById.get(id)?.text.trim());
+      const missing =
+        visible.find((id) => !bookTranslation.text(paragraphChapters.get(id) ?? 0, id)) || '';
+      const paragraph = missing || visible.at(-1) || position.paragraph;
+      setTranslationTarget((old) =>
+        old.scope === translationScope && old.paragraph === paragraph && old.missing === missing
+          ? old
+          : { scope: translationScope, paragraph, missing },
+      );
+    };
+    const schedule = () => {
+      cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(update);
+    };
+    root.addEventListener('reader-location', schedule);
+    root.addEventListener('scroll', schedule, { passive: true });
+    window.addEventListener('resize', schedule);
+    schedule();
+    return () => {
+      cancelAnimationFrame(frameId);
+      root.removeEventListener('reader-location', schedule);
+      root.removeEventListener('scroll', schedule);
+      window.removeEventListener('resize', schedule);
+    };
+  }, [
+    surfaceReady,
+    translationScope,
+    bookTranslation.revision,
+    translations,
+    stableTranslations.revision,
+    settings.navigationMode,
+    view,
+    jump,
+    paragraphsById,
+    paragraphChapters,
+  ]);
   const progress =
     position.chapter === book.chapters.length - 1 && navigation.atEnd
       ? 100
@@ -335,9 +954,18 @@ export default function Reader({
 
   function openTool(next: ReaderTool | null) {
     if (tapTimer.current) clearTimeout(tapTimer.current);
+    if (tool === 'contents' && next !== 'contents') {
+      cancelSearchJump();
+      if (search.trim() && searchList.current) searchScroll.current = searchList.current.scrollTop;
+    }
+    if (tool === 'bookmarks' && next !== 'bookmarks') noteRequest.current++;
     parentTool.current = null;
     setSelectionMenu(null);
     setTool(next);
+  }
+  function navigateChapter(target: ReadingChapterTarget) {
+    if (!ready || switching || navigation.turning) return;
+    navigate(target.paragraphId, false);
   }
   function subTool(next: ReaderTool, open: boolean) {
     if (open) {
@@ -358,22 +986,59 @@ export default function Reader({
   function report(error: unknown) {
     setNotice(error instanceof Error ? error.message : String(error));
   }
+  function advanceJumpRequest() {
+    // The ref invalidates in-flight callbacks immediately; state also schedules
+    // a new effect when the requested paragraph is unchanged.
+    abandonPendingContentAnchor();
+    setJumpRequest(++jumpGeneration.current);
+  }
   async function activate(next: Book) {
+    const readingSettings = withBookLanguage(next.id, settings);
+    const measured = measureClient('reader_ready');
     const token = ++activation.current;
+    advanceJumpRequest();
+    noteRequest.current++;
+    searchJump.current?.abort();
+    setReferencePreview(null);
+    replaceReferenceHistory([]);
+    replaceSearchOrigin(null);
+    setReferenceSession(false);
+    jumpEdge.current = 'start';
+    scrollIntent.current = null;
     operation.current?.abort();
     operation.current = null;
     setBusy(null);
     setBusyText('');
+    setReady(false);
+    setMissing(false);
+    setLoadFailed(false);
     setSwitching(true);
     if (scrollTimer.current) clearTimeout(scrollTimer.current);
     try {
-      const [savedPosition, savedNotes, savedMessages, savedTranslations] = await Promise.all([
-        storage.readingPosition(next.id),
-        storage.notes(next.id),
-        storage.chat(next.id),
-        storage.translations(next.id),
-      ]);
+      const [savedPosition, savedNotes, savedMessages, savedTranslations, savedBookmarks] =
+        await Promise.all([
+          storage.readingPosition(next.id),
+          storage.notes(next.id),
+          storage.chat(next.id),
+          storage.translations(next.id),
+          storage.bookmarks(next.id),
+        ]);
       if (token !== activation.current) return;
+      const targetNote = savedNotes.find(
+        (note) => note.id === targetNoteId && note.bookId === next.id,
+      );
+      const noteTranslation = targetNote
+        ? await savedNoteTranslation(
+            next,
+            targetNote,
+            next.id === sampleBook.id
+              ? { ...sampleTranslations, ...savedTranslations }
+              : savedTranslations,
+            readingSettings,
+          )
+        : null;
+      if (token !== activation.current) return;
+      const destination = targetNote?.paragraphId || targetParagraph;
       const pos = savedPosition || {
         ...emptyPosition,
         paragraph: next.chapters[0].paragraphs[0].id,
@@ -391,19 +1056,65 @@ export default function Reader({
           ? Math.min(next.chapters.length - 1, Math.max(safeChapter, pos.farthest))
           : safeChapter,
       };
-      const targetChapter = targetParagraph
-        ? next.chapters.findIndex((c) => c.paragraphs.some((p) => p.id === targetParagraph))
+      const targetChapter = destination
+        ? next.chapters.findIndex((c) => c.paragraphs.some((p) => p.id === destination))
         : -1;
-      if (targetChapter >= 0 && targetParagraph) {
+      const targetText =
+        targetChapter >= 0
+          ? next.chapters[targetChapter].paragraphs.find((p) => p.id === destination)?.text
+          : undefined;
+      const translationSearchRequested = !targetNote && !!targetTranslation;
+      const searchController = new AbortController();
+      searchJump.current = searchController;
+      const searchTranslation =
+        translationSearchRequested && targetChapter >= 0 && destination
+          ? await savedSearchTranslation(
+              next,
+              destination,
+              targetTextOffset,
+              targetTranslation!,
+              readingSettings,
+              searchController.signal,
+            ).catch(() => null)
+          : null;
+      if (token !== activation.current || searchController.signal.aborted) return;
+      const exactSearch =
+        !targetNote &&
+        !translationSearchRequested &&
+        targetText !== undefined &&
+        typeof targetTextOffset === 'number' &&
+        Number.isSafeInteger(targetTextOffset) &&
+        targetTextOffset >= 0 &&
+        targetTextOffset < targetText.length;
+      if (targetChapter >= 0 && destination) {
         safePosition.chapter = targetChapter;
-        safePosition.paragraph = targetParagraph;
+        safePosition.paragraph = destination;
         safePosition.farthest = Math.max(safePosition.farthest, targetChapter);
         safePosition.offset = 0;
         safePosition.textOffset = 0;
         safePosition.textQuote = undefined;
         safePosition.textSource = 'original';
+        if (targetNote?.anchor && (targetNote.anchor.source === 'original' || noteTranslation)) {
+          safePosition.textOffset = targetNote.anchor.start;
+          safePosition.textQuote = targetNote.quote;
+          safePosition.textSource = targetNote.anchor.source;
+        } else if (searchTranslation) {
+          safePosition.textOffset = searchTranslation.start;
+          safePosition.textQuote = searchTranslation.quote;
+          safePosition.textSource = 'translation';
+          safePosition.offset = searchTranslation.start / searchTranslation.translation.text.length;
+        } else if (exactSearch) {
+          safePosition.textOffset = targetTextOffset;
+          safePosition.textQuote = targetText!.slice(targetTextOffset, targetTextOffset + 32);
+          safePosition.offset = targetTextOffset / targetText!.length;
+        }
       }
       jumpAnchor.current = safePosition;
+      setSettings((current) => ({
+        ...current,
+        readingMode: readingSettings.readingMode,
+        language: readingSettings.language,
+      }));
       try {
         const preferences = JSON.parse(
           localStorage.getItem(storageKey('ai-read-book-navigation')) || '{}',
@@ -424,6 +1135,27 @@ export default function Reader({
         /* Optional, device-local book preferences. */
       }
       setBook(next);
+      setRevealed(noteTranslation || searchTranslation?.translation || null);
+      setReferenceSession(!!targetNote || exactSearch || translationSearchRequested);
+      if ((exactSearch || translationSearchRequested) && destination) setJumpHighlight(destination);
+      if (translationSearchRequested && !searchTranslation)
+        setNotice(
+          locale.startsWith('zh')
+            ? '这处译文未保存在本机或内容已变化，已回到原文。'
+            : 'This saved translation is missing or has changed. The original is shown instead.',
+        );
+      if (targetNote?.anchor?.source === 'translation' && !noteTranslation)
+        setNotice(t('这条笔记的译文尚未保存在本机，已定位到原文。'));
+      setTemporaryOriginal(
+        (targetNote && !noteTranslation) || exactSearch || translationSearchRequested
+          ? {
+              bookId: next.id,
+              language: readingSettings.language,
+              readingMode: readingSettings.readingMode,
+            }
+          : null,
+      );
+      measured();
       setScrollRange({
         bookId: next.id,
         start: Math.max(0, safePosition.chapter - 1),
@@ -431,12 +1163,21 @@ export default function Reader({
       });
       setPosition(safePosition);
       setNotes(savedNotes);
+      setBookmarks(savedBookmarks);
       setMessages(savedMessages);
       setTranslations(savedTranslations);
       setSelected(null);
       setDraftSelection(null);
       setNoteDraft('');
       setSearch('');
+      setSearchSource('original');
+      setSearchTitles(false);
+      setSearchLanguage('');
+      setSearchPage(0);
+      cancelSearchJump();
+      searchPageTransition.current = null;
+      searchScroll.current = 0;
+      restoringSearchScroll.current = false;
       setQuestion('');
       setBusy(null);
       setJump(safePosition.paragraph);
@@ -446,23 +1187,30 @@ export default function Reader({
       } catch {
         /* Reading remains available if preferences cannot be stored. */
       }
+      setReady(true);
     } catch (error) {
-      report(error);
+      if (token === activation.current) {
+        report(error);
+        setLoadFailed(true);
+      }
     } finally {
       if (token === activation.current) {
         setSwitching(false);
-        setReady(true);
       }
     }
   }
 
   useEffect(() => {
     let alive = true;
+    setReady(false);
+    setMissing(false);
+    setLoadFailed(false);
+    setNotice('');
     void (async () => {
       try {
         const stored = await storage.books();
         const list = [
-          sampleBook,
+          stored.find((book) => book.id === sampleBook.id) || sampleBook,
           ...stored
             .filter((b) => b.id !== sampleBook.id)
             .sort((a, b) => b.importedAt - a.importedAt),
@@ -483,25 +1231,26 @@ export default function Reader({
       } catch (error) {
         if (alive) {
           report(error);
-          setReady(true);
+          setLoadFailed(true);
         }
       }
     })();
     return () => {
       alive = false;
       activation.current++;
+      searchJump.current?.abort();
       operation.current?.abort();
       if (scrollTimer.current) clearTimeout(scrollTimer.current);
       if (tapTimer.current) clearTimeout(tapTimer.current);
     };
-  }, []);
+  }, [bookId, loadAttempt]);
   useEffect(() => {
     let alive = true;
     const refresh = () => {
       void readAIConnection()
         .then((config) => {
           if (!alive) return;
-          setHasServerKey(config.hasKey);
+          setAIConnection(config);
           if (config.accountManaged || !settingsEdited.current)
             setSettings((s) => applyAIConnection(s, config));
         })
@@ -512,15 +1261,19 @@ export default function Reader({
     const configurationChanged = (event: Event) => {
       const config = (event as CustomEvent<AIConnection>).detail;
       if (!alive || !config) return;
-      setHasServerKey(config.hasKey);
+      setAIConnection(config);
       setSettings((s) => applyAIConnection(s, config));
     };
     refresh();
     window.addEventListener('ai-read-ai-configuration-change', configurationChanged);
     window.addEventListener('focus', refresh);
+    window.addEventListener('online', refresh);
+    window.addEventListener('ai-read-refresh-connection', refresh);
     return () => {
       alive = false;
       window.removeEventListener('focus', refresh);
+      window.removeEventListener('online', refresh);
+      window.removeEventListener('ai-read-refresh-connection', refresh);
       window.removeEventListener('ai-read-ai-configuration-change', configurationChanged);
     };
   }, [user?.id]);
@@ -537,7 +1290,6 @@ export default function Reader({
           if (alive && next && !loading) {
             loading = true;
             await activate(next);
-            if (alive) setMissing(false);
           }
         })
         .catch(report);
@@ -550,9 +1302,13 @@ export default function Reader({
     };
   }, [missing, bookId]);
   useEffect(() => {
-    const update = () => setSettings(loadSettings());
+    const update = () => setSettings(withBookLanguage(book.id, loadSettings()));
     const storageChanged = (event: StorageEvent) => {
-      if (event.key === storageKey('ai-read-settings')) update();
+      if (
+        event.key === storageKey('ai-read-settings') ||
+        event.key === storageKey('ai-read-book-language')
+      )
+        update();
     };
     window.addEventListener('ai-read-preferences-change', update);
     window.addEventListener('storage', storageChanged);
@@ -560,12 +1316,13 @@ export default function Reader({
       window.removeEventListener('ai-read-preferences-change', update);
       window.removeEventListener('storage', storageChanged);
     };
-  }, []);
+  }, [book.id]);
   useEffect(() => {
     document.documentElement.dataset.theme = settings.theme;
     document.documentElement.style.setProperty('--page-width', `${settings.pageWidth}px`);
     try {
-      saveSettings(settings);
+      const defaults = loadSettings();
+      saveSettings({ ...settings, readingMode: defaults.readingMode, language: defaults.language });
     } catch {
       setNotice(t('偏好设置无法保存到浏览器。'));
     }
@@ -593,16 +1350,33 @@ export default function Reader({
   useEffect(() => {
     if (!ready || switching) return;
     let alive = true;
+    let revision = 0;
     const refresh = () => {
+      const request = ++revision;
       void Promise.all([
         storage.notes(book.id),
         storage.chat(book.id),
         storage.translations(book.id),
         getSyncEntry('book', book.id, book.id),
+        storage.books(),
+        storage.bookmarks(book.id),
       ])
-        .then(([nextNotes, nextChat, nextTranslations, meta]) => {
-          if (!alive) return;
+        .then(([nextNotes, nextChat, nextTranslations, meta, books, nextBookmarks]) => {
+          if (!alive || request !== revision) return;
+          const latestBook = books.find((item) => item.id === book.id);
+          if (latestBook)
+            setBook((current) =>
+              current.sourceLanguage === latestBook.sourceLanguage &&
+              current.references?.revision === latestBook.references?.revision
+                ? current
+                : {
+                    ...current,
+                    sourceLanguage: latestBook.sourceLanguage,
+                    references: latestBook.references,
+                  },
+            );
           setNotes((old) => (sameData(old, nextNotes) ? old : nextNotes));
+          setBookmarks((old) => (sameData(old, nextBookmarks) ? old : nextBookmarks));
           if (!operation.current && !savingChat.current)
             setMessages((old) => (sameData(old, nextChat) ? old : nextChat));
           setTranslations((old) =>
@@ -647,9 +1421,12 @@ export default function Reader({
     };
   }, [book.id, messages, busy, ready, switching]);
   useEffect(() => {
-    if (!jump) return;
+    if (!jump || !ready || switching) return;
+    const generation = jumpRequest;
     restoring.current = true;
     const frame = requestAnimationFrame(() => {
+      if (generation !== jumpGeneration.current) return;
+      scrollIntent.current = null;
       if (readerRef.current) {
         const root = readerRef.current;
         if (jumpEdge.current === 'end' && settings.navigationMode === 'paged') {
@@ -666,19 +1443,37 @@ export default function Reader({
                 64,
               behavior: 'instant',
             });
-        } else restoreReadingAnchor(root, jumpAnchor.current || { paragraph: jump, offset: 0 });
+        } else {
+          const anchor = jumpAnchor.current || { paragraph: jump, offset: 0 };
+          pendingContentAnchor.current =
+            view === 'translation' && !hasReadableTranslation(root, anchor.paragraph)
+              ? { scope: contentScope, anchor }
+              : null;
+          restoreReadingAnchor(root, anchor);
+        }
         navigation.refresh();
       }
       jumpAnchor.current = null;
       jumpEdge.current = 'start';
       setJump(null);
       requestAnimationFrame(() => {
+        if (generation !== jumpGeneration.current) return;
         restoring.current = false;
         saveScroll();
       });
     });
     return () => cancelAnimationFrame(frame);
-  }, [jump, chapter.id, book.id]);
+  }, [
+    jump,
+    jumpRequest,
+    chapter.id,
+    book.id,
+    view,
+    contentScope,
+    stableTranslations.revision,
+    ready,
+    switching,
+  ]);
   useEffect(() => {
     chatEnd.current?.scrollIntoView({ block: 'nearest' });
   }, [messages, busyText]);
@@ -689,6 +1484,7 @@ export default function Reader({
   }, [notice]);
   useEffect(() => {
     const listener = (e: KeyboardEvent) => {
+      if (illustration) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && !e.isComposing) {
         e.preventDefault();
         setSearchOpen(true);
@@ -697,10 +1493,10 @@ export default function Reader({
     };
     window.addEventListener('keydown', listener);
     return () => window.removeEventListener('keydown', listener);
-  }, []);
+  }, [illustration]);
 
   useEffect(() => {
-    if (tool) return;
+    if (tool || illustration || referencePreview) return;
     let timer: ReturnType<typeof setTimeout>;
     const update = () => {
       clearTimeout(timer);
@@ -711,12 +1507,14 @@ export default function Reader({
       clearTimeout(timer);
       document.removeEventListener('selectionchange', update);
     };
-  }, [tool, chapter, selected?.paragraph.id, selected?.text]);
+  }, [tool, illustration, referencePreview, chapter, selected?.paragraph.id, selected?.text]);
 
   useLayoutEffect(() => {
     const anchor = layoutAnchor.current;
     const root = readerRef.current;
     if (!anchor || !root) return;
+    if (view === 'translation' && !hasReadableTranslation(root, anchor.paragraph))
+      pendingContentAnchor.current = { scope: contentScope, anchor };
     restoreReadingAnchor(root, anchor);
     layoutAnchor.current = null;
   }, [
@@ -725,7 +1523,7 @@ export default function Reader({
     settings.lineHeight,
     settings.pageWidth,
     settings.pageMargin,
-    settings.readingMode,
+    view,
     settings.navigationMode,
     settings.scrollFlow,
     settings.language,
@@ -751,7 +1549,30 @@ export default function Reader({
 
   function updateAppearance(patch: Partial<Settings>) {
     const root = readerRef.current;
-    layoutAnchor.current = root ? readReadingAnchor(root) : null;
+    scrollIntent.current = null;
+    layoutAnchor.current =
+      jumpAnchor.current ||
+      (pendingContentAnchor.current?.scope === contentScope
+        ? pendingContentAnchor.current.anchor
+        : null) ||
+      (root ? readReadingAnchor(root) : null);
+    if (patch.readingMode !== undefined || patch.language !== undefined) {
+      pendingContentAnchor.current = null;
+      setTemporaryOriginal(null);
+      setRevealed(null);
+      setReferenceSession(false);
+      noteRequest.current++;
+      try {
+        const preferences = JSON.parse(
+          localStorage.getItem(storageKey('ai-read-book-language')) || '{}',
+        );
+        const next = { ...settings, ...patch };
+        preferences[book.id] = { readingMode: next.readingMode, language: next.language };
+        localStorage.setItem(storageKey('ai-read-book-language'), JSON.stringify(preferences));
+      } catch {
+        setNotice(t('偏好设置无法保存到浏览器。'));
+      }
+    }
     setSettings((previous) => ({ ...previous, ...patch }));
     if (patch.navigationMode || patch.pageEffect || patch.scrollFlow) {
       try {
@@ -790,40 +1611,623 @@ export default function Reader({
     openTool('compose');
   }
 
-  function followReference(id: string, source: 'chat' | 'notes') {
-    setReferenceReturn({
-      anchor: (readerRef.current && readReadingAnchor(readerRef.current)) || position,
+  function validReferenceReturn(snapshot: ReferenceReturn) {
+    return (
+      snapshot.bookId === book.id &&
+      snapshot.activation === activation.current &&
+      paragraphsById.has(snapshot.anchor.paragraph)
+    );
+  }
+  function replaceReferenceHistory(history: ReferenceReturn[]) {
+    const next = history.slice(-MAX_REFERENCE_RETURNS);
+    referenceHistoryRef.current = next;
+    setReferenceHistory(next);
+  }
+  function replaceSearchOrigin(next: SearchReturn | null) {
+    searchOriginRef.current = next;
+    setSearchOrigin(next);
+  }
+  function captureReferenceReturn(panel: 'chat' | 'notes' | null = null): ReferenceReturn {
+    const anchor: ReadingAnchor = {
+      ...(jumpAnchor.current ||
+        (readerRef.current && readReadingAnchor(readerRef.current)) ||
+        position),
+    };
+    let translationKey: string | undefined;
+    if (anchor.textSource === 'translation') {
+      const paragraph = paragraphsById.get(anchor.paragraph);
+      const index = paragraphChapters.get(anchor.paragraph);
+      if (paragraph && index !== undefined) {
+        const passage =
+          readerRef.current &&
+          Array.from(readerRef.current.querySelectorAll<HTMLElement>('[data-paragraph]')).find(
+            (node) => node.dataset.paragraph === anchor.paragraph,
+          );
+        const element = passage?.querySelector<HTMLElement>('[data-note-source="translation"]');
+        const reveal = revealedTranslation?.paragraph === paragraph.id ? revealedTranslation : null;
+        const text =
+          element?.textContent || reveal?.text || stableTranslations.read(index, paragraph);
+        translationKey =
+          element?.dataset.noteKey ||
+          reveal?.key ||
+          stableTranslations.key(index, paragraph) ||
+          undefined;
+        const offset = anchor.textOffset ?? Math.floor((anchor.offset || 0) * text.length);
+        if (Number.isSafeInteger(offset) && offset >= 0 && offset < text.length) {
+          anchor.textOffset = offset;
+          anchor.textQuote = safeReadingQuote(text, offset);
+        } else translationKey = undefined;
+      }
+    }
+    return {
+      bookId: book.id,
+      activation: activation.current,
+      context: JSON.stringify([bookmarkScope.current, bookTranslation.version]),
+      anchor,
+      translationKey,
       mode: settings.navigationMode,
-      panel: source,
+      panel,
       selection: selected,
-    });
+      translation: revealedTranslation,
+      original: temporaryOriginal,
+    };
+  }
+  function pushReferenceReturn(snapshot: ReferenceReturn) {
+    if (!validReferenceReturn(snapshot)) return;
+    replaceReferenceHistory([
+      ...referenceHistoryRef.current.filter(validReferenceReturn),
+      snapshot,
+    ]);
+  }
+  function followReference(id: string, source: 'chat' | 'notes') {
+    if (!paragraphsById.has(id)) return;
+    pushReferenceReturn(captureReferenceReturn(source));
     navigate(id, false);
+    if (source === 'chat') {
+      setReferenceSession(true);
+      setTemporaryOriginal({
+        bookId: book.id,
+        language: settings.language,
+        readingMode: settings.readingMode,
+      });
+    }
     openTool(null);
   }
 
-  function returnFromReference() {
-    if (!referenceReturn) return;
-    navigate(referenceReturn.anchor.paragraph, false);
-    jumpAnchor.current = referenceReturn.anchor;
-    setSettings((current) => ({ ...current, navigationMode: referenceReturn.mode }));
-    setSelected(referenceReturn.selection);
-    if (referenceReturn.panel) openCompanion(referenceReturn.panel);
+  function cancelSearchJump() {
+    searchJump.current?.abort();
+    searchJump.current = null;
+    searchOpeningRef.current = false;
+    setSearchOpening(false);
+  }
+
+  function changeSearchCriteria(change: {
+    query?: string;
+    source?: ReaderSearchSource;
+    language?: string;
+    titles?: boolean;
+  }) {
+    if (searchOpeningRef.current) return;
+    cancelSearchJump();
+    searchPageTransition.current = null;
+    searchScroll.current = 0;
+    restoringSearchScroll.current = false;
+    setSearchPage(0);
+    if (change.query !== undefined) setSearch(change.query);
+    if (change.source !== undefined) {
+      setSearchSource(change.source);
+      setSearchTitles(false);
+    }
+    if (change.titles !== undefined) setSearchTitles(change.titles);
+    if (change.language !== undefined) setSearchLanguage(change.language);
+  }
+
+  function changeSearchPage(page: number) {
+    if (
+      searchOpeningRef.current ||
+      searchResults.loading ||
+      searchPageTransition.current === searchIdentity.current ||
+      !Number.isSafeInteger(page) ||
+      page < 0 ||
+      Math.abs(page - searchPage) !== 1 ||
+      (page > searchPage && !searchResults.data?.limited)
+    )
+      return;
+    // Lock this rendered page synchronously, before React can disable its controls.
+    searchPageTransition.current = searchIdentity.current;
+    cancelSearchJump();
+    searchScroll.current = 0;
+    restoringSearchScroll.current = false;
+    searchList.current?.scrollTo({ top: 0 });
+    setSearchPage(page);
+  }
+
+  async function followSearchMatch(match: PassageMatch) {
+    const paragraph = paragraphsById.get(match.paragraphId);
+    const index = paragraphChapters.get(match.paragraphId);
+    if (
+      !paragraph ||
+      searchTitles ||
+      index === undefined ||
+      match.bookId !== book.id ||
+      match.chapterIndex !== index ||
+      !ready ||
+      switching ||
+      navigation.turning ||
+      searchOpeningRef.current ||
+      searchResults.loading ||
+      searchPageTransition.current === searchIdentity.current
+    )
+      return;
+    const request = ++noteRequest.current;
+    const token = activation.current;
+    const scope = bookmarkScope.current;
+    const identity = searchIdentity.current;
+    searchJump.current?.abort();
+    const controller = new AbortController();
+    searchJump.current = controller;
+    searchOpeningRef.current = true;
+    setSearchOpening(true);
+    try {
+      const previous = searchOriginRef.current;
+      const origin: SearchReturn = {
+        origin:
+          previous && validReferenceReturn(previous.origin)
+            ? previous.origin
+            : captureReferenceReturn(),
+        history:
+          previous && validReferenceReturn(previous.origin)
+            ? previous.history
+            : [...referenceHistoryRef.current],
+        results: {
+          query: search,
+          source: searchSource,
+          language: searchLanguage,
+          page: searchPage,
+          scrollTop: searchList.current?.scrollTop || 0,
+        },
+      };
+      const translated = match.source === 'translation';
+      const found =
+        translated && match.language && match.translationKey && match.textHash
+          ? await savedSearchTranslation(
+              book,
+              paragraph.id,
+              match.sourceStart,
+              {
+                language: match.language,
+                translationKey: match.translationKey,
+                textHash: match.textHash,
+                sourceEnd: match.sourceEnd,
+              },
+              settings,
+              controller.signal,
+            ).catch(() => null)
+          : null;
+      if (
+        controller.signal.aborted ||
+        request !== noteRequest.current ||
+        token !== activation.current ||
+        scope !== bookmarkScope.current ||
+        identity !== searchIdentity.current
+      )
+        return;
+      const text = found?.translation.text || paragraph.text;
+      const textOffset = translated ? found?.start || 0 : match.sourceStart;
+      if (!Number.isSafeInteger(textOffset) || textOffset < 0 || textOffset >= text.length) return;
+      navigate(paragraph.id, false);
+      replaceReferenceHistory([]);
+      replaceSearchOrigin(origin);
+      setJumpHighlight(paragraph.id);
+      setReferenceSession(true);
+      setRevealed(found?.translation || null);
+      setTemporaryOriginal({
+        bookId: book.id,
+        language: settings.language,
+        readingMode: settings.readingMode,
+      });
+      const anchor: ReadingAnchor = {
+        chapter: index,
+        paragraph: paragraph.id,
+        textSource: found ? 'translation' : 'original',
+        textOffset,
+        textQuote: safeReadingQuote(text, textOffset),
+        offset: textOffset / text.length,
+      };
+      layoutAnchor.current = null;
+      jumpAnchor.current = anchor;
+      setPosition((current) => ({ ...current, ...anchor }));
+      if (translated && !found)
+        setNotice(
+          locale.startsWith('zh')
+            ? '这处译文未保存在本机或内容已变化，已回到原文。'
+            : 'This saved translation is missing or has changed. The original is shown instead.',
+        );
+    } finally {
+      if (searchJump.current === controller) {
+        searchJump.current = null;
+        searchOpeningRef.current = false;
+        setSearchOpening(false);
+      }
+    }
+  }
+
+  function returnToSearchResults() {
+    const origin = searchOriginRef.current;
+    if (!origin || !validReferenceReturn(origin.origin)) return;
+    const previous = origin.results;
+    cancelSearchJump();
+    searchPageTransition.current = null;
+    setSearch(previous.query);
+    setSearchTitles(false);
+    setSearchSource(previous.source);
+    setSearchLanguage(previous.language);
+    setSearchPage(previous.page);
+    searchScroll.current = previous.scrollTop;
+    restoringSearchScroll.current = true;
+    setSearchOpen(true);
+    openTool('contents');
+  }
+
+  function visitBookReference(target: BookReferenceTarget, origin: ReferenceReturn) {
+    const location = target.location;
+    if (
+      !location ||
+      !validReferenceReturn(origin) ||
+      referenceTargets.get(target.id) !== target ||
+      restoring.current ||
+      !ready ||
+      missing ||
+      switching ||
+      !paragraphsById.has(location.paragraphId)
+    )
+      return;
+    const index = paragraphChapters.get(location.paragraphId);
+    if (index === undefined) return;
+    const text = paragraphsById.get(location.paragraphId)!.text;
+    pushReferenceReturn(origin);
+    navigate(location.paragraphId, false);
+    setReferenceSession(true);
+    jumpAnchor.current = {
+      chapter: index,
+      paragraph: location.paragraphId,
+      offset: 0,
+      textOffset: location.offset,
+      textSource: 'original',
+      textQuote: safeReadingQuote(text, location.offset),
+    };
+    layoutAnchor.current = null;
+    setPosition((previous) => ({
+      ...previous,
+      textOffset: location.offset,
+      textSource: 'original',
+      textQuote: safeReadingQuote(text, location.offset),
+    }));
+    // Source offsets belong to the original. Reveal it temporarily without
+    // changing preferences, selecting an edition, or preparing new translations.
+    setTemporaryOriginal({
+      bookId: book.id,
+      language: settings.language,
+      readingMode: settings.readingMode,
+    });
+    openTool(null);
+  }
+
+  function openBookReference(link: BookReferenceLink, opener: HTMLElement) {
+    if (
+      navigation.suppressClick ||
+      navigation.turning ||
+      restoring.current ||
+      !ready ||
+      switching ||
+      window.getSelection()?.toString().trim()
+    )
+      return;
+    const target = referenceTargets.get(link.targetId);
+    if (!target) return;
+    if (tapTimer.current) clearTimeout(tapTimer.current);
+    noteRequest.current++;
+    setSelectionMenu(null);
+    setReferenceSession(true);
+    const previous = referenceHistoryRef.current.at(-1);
+    if (
+      link.kind === 'backlink' &&
+      previous &&
+      validReferenceReturn(previous) &&
+      !!target.location &&
+      (target.location.paragraphId === previous.anchor.paragraph ||
+        previous.referenceSources?.includes(target.location.paragraphId))
+    ) {
+      returnFromReference();
+      return;
+    }
+    const origin = {
+      ...captureReferenceReturn(),
+      referenceSources: link.source.map((range) => range.paragraphId),
+    };
+    if (link.kind === 'footnote' || !target.location)
+      setReferencePreview({ link, target, origin, opener });
+    else visitBookReference(target, origin);
+  }
+
+  async function addCurrentBookmark() {
+    if (bookmarkMutation.current) return;
+    const root = readerRef.current;
+    const anchor =
+      root && ready && !switching && !restoring.current && !navigation.turning
+        ? readReadingAnchor(root)
+        : null;
+    const index = anchor && paragraphChapters.get(anchor.paragraph);
+    const paragraph = anchor && paragraphsById.get(anchor.paragraph);
+    const source = anchor?.textSource || 'original';
+    const passage =
+      anchor &&
+      root &&
+      Array.from(root.querySelectorAll<HTMLElement>('[data-paragraph]')).find(
+        (element) => element.dataset.paragraph === anchor.paragraph,
+      );
+    const textElement = passage?.querySelector<HTMLElement>(`[data-note-source="${source}"]`);
+    const text = textElement?.textContent;
+    if (!anchor || index == null || !paragraph || !textElement || !text)
+      throw new Error(t('当前位置暂无可保存的正文。'));
+    const textOffset = anchor.textOffset ?? 0;
+    const translationKey = source === 'translation' ? textElement.dataset.noteKey : undefined;
+    if (textOffset > text.length || (source === 'translation' && !translationKey))
+      throw new Error(t('当前位置暂无可保存的正文。'));
+    const bookmark = validateBookmark(book, {
+      id: crypto.randomUUID(),
+      bookId: book.id,
+      position: {
+        chapter: index,
+        paragraph: paragraph.id,
+        farthest: Math.max(position.farthest, index),
+        offset: source === 'original' ? textOffset / Math.max(1, paragraph.text.length) : 0,
+        textSource: source,
+        textOffset,
+        textQuote: text.slice(textOffset, textOffset + 32),
+      },
+      quote: text.slice(textOffset, textOffset + 280),
+      label: '',
+      ...(translationKey ? { translationKey } : {}),
+      createdAt: Date.now(),
+    });
+    const token = activation.current;
+    bookmarkMutation.current = true;
+    try {
+      const next = await storage.addBookmark(bookmark);
+      if (token !== activation.current) return;
+      setBookmarks(next);
+      const saved = next.find(
+        (item) => bookmarkLocationKey(item) === bookmarkLocationKey(bookmark),
+      );
+      setNotice(t(saved?.id === bookmark.id ? '书签已添加。' : '这个位置已有书签。'));
+    } finally {
+      bookmarkMutation.current = false;
+    }
+  }
+
+  async function changeBookmark(bookmark: ReadingBookmark, label: string | null) {
+    if (bookmarkMutation.current) return;
+    const token = activation.current;
+    bookmarkMutation.current = true;
+    try {
+      await storage.modifyBookmark(
+        book.id,
+        bookmark.id,
+        label === null ? null : { label },
+        bookmark,
+      );
+      const next = await storage.bookmarks(book.id);
+      if (token !== activation.current) return;
+      setBookmarks(next);
+      setNotice(t(label === null ? '书签已删除。' : '书签已更新。'));
+    } finally {
+      bookmarkMutation.current = false;
+    }
+  }
+
+  async function followBookmark(value: ReadingBookmark) {
+    const bookmark = validateBookmark(book, value);
+    const request = ++noteRequest.current;
+    const token = activation.current;
+    const scope = bookmarkScope.current;
+    const origin = captureReferenceReturn();
+    let translation =
+      bookmark.position.textSource === 'translation'
+        ? await savedPassageTranslation(
+            book,
+            bookmark.position.paragraph,
+            bookmark.translationKey,
+            legacyTranslations,
+            settings,
+          )
+        : null;
+    if (
+      request !== noteRequest.current ||
+      token !== activation.current ||
+      scope !== bookmarkScope.current
+    )
+      return;
+    let textOffset = bookmark.position.textOffset ?? 0;
+    const quote = bookmark.position.textQuote;
+    if (translation) {
+      if (quote && translation.text.slice(textOffset, textOffset + quote.length) !== quote) {
+        const found = translation.text.indexOf(quote);
+        if (found >= 0 && translation.text.indexOf(quote, found + 1) < 0) textOffset = found;
+        else translation = null;
+      } else if (textOffset > translation.text.length) translation = null;
+    }
+    const fallback = bookmark.position.textSource === 'translation' && !translation;
+    const paragraph = paragraphsById.get(bookmark.position.paragraph)!;
+    const target: ReadingAnchor = fallback
+      ? {
+          chapter: bookmark.position.chapter,
+          paragraph: paragraph.id,
+          textSource: 'original',
+          textOffset: 0,
+          textQuote: paragraph.text.slice(0, 32),
+          offset: 0,
+        }
+      : { ...bookmark.position, textOffset };
+    navigate(paragraph.id, false);
+    pushReferenceReturn(origin);
+    setJumpHighlight(paragraph.id);
+    // Commit the jump and disable automatic translation in the same render.
+    setReferenceSession(true);
+    setRevealed(translation);
+    // Original bookmarks also bypass an unprepared translated chapter.
+    setTemporaryOriginal({
+      bookId: book.id,
+      language: settings.language,
+      readingMode: settings.readingMode,
+    });
+    layoutAnchor.current = null;
+    jumpAnchor.current = target;
+    setPosition((current) => ({
+      ...current,
+      chapter: bookmark.position.chapter,
+      paragraph: target.paragraph,
+      offset: target.offset,
+      textSource: target.textSource,
+      textOffset: target.textOffset,
+      textQuote: target.textQuote,
+    }));
+    if (fallback) setNotice(t('书签的译文未保存在本机或已变化，已定位到原文。'));
+  }
+
+  async function followNote(note: Note) {
+    const request = ++noteRequest.current;
+    const token = activation.current;
+    try {
+      const translation = await savedNoteTranslation(book, note, legacyTranslations, settings);
+      if (request !== noteRequest.current || token !== activation.current) return;
+      followReference(note.paragraphId, 'notes');
+      setRevealed(translation);
+      if (note.anchor && (note.anchor.source === 'original' || translation)) {
+        jumpAnchor.current = {
+          paragraph: note.paragraphId,
+          offset: 0,
+          chapter: paragraphChapters.get(note.paragraphId),
+          textOffset: note.anchor.start,
+          textQuote: note.quote,
+          textSource: note.anchor.source,
+        };
+      }
+      if (note.anchor?.source === 'translation' && !translation) {
+        setTemporaryOriginal({
+          bookId: book.id,
+          language: settings.language,
+          readingMode: settings.readingMode,
+        });
+        setNotice(t('这条笔记的译文尚未保存在本机，已定位到原文。'));
+      }
+    } catch (error) {
+      report(error);
+    }
+  }
+
+  function restoreReference(snapshot: ReferenceReturn) {
+    if (!surfaceReady || navigation.turning || restoring.current || !validReferenceReturn(snapshot))
+      return false;
+    const paragraph = paragraphsById.get(snapshot.anchor.paragraph)!;
+    const index = paragraphChapters.get(paragraph.id)!;
+    const sameContext =
+      snapshot.context === JSON.stringify([bookmarkScope.current, bookTranslation.version]);
+    let verifiedTranslation = false;
+    if (sameContext && snapshot.anchor.textSource === 'translation' && snapshot.translationKey) {
+      const reveal = snapshot.translation?.paragraph === paragraph.id ? snapshot.translation : null;
+      // Published chapters outside the nearby cache window can still have a
+      // stable rendered snapshot. Legacy/exact choices must use the current
+      // per-paragraph key, not the controller's generic "legacy" version label.
+      const key =
+        reveal?.key ||
+        bookTranslation.key(index, paragraph.id) ||
+        (bookTranslation.version !== 'legacy' ? stableTranslations.key(index, paragraph) : '');
+      const text =
+        reveal?.text ||
+        bookTranslation.text(index, paragraph.id) ||
+        (bookTranslation.version !== 'legacy' ? stableTranslations.read(index, paragraph) : '');
+      const offset = snapshot.anchor.textOffset;
+      const quote = snapshot.anchor.textQuote;
+      verifiedTranslation =
+        key === snapshot.translationKey &&
+        Number.isSafeInteger(offset) &&
+        offset! >= 0 &&
+        !!quote &&
+        text.slice(offset, offset! + quote.length) === quote;
+    }
+    const translationFallback =
+      snapshot.anchor.textSource === 'translation' && (!sameContext || !verifiedTranslation);
+    const anchor: ReadingAnchor = translationFallback
+      ? {
+          chapter: index,
+          paragraph: paragraph.id,
+          textSource: 'original',
+          textOffset: 0,
+          offset: 0,
+          textQuote: safeReadingQuote(paragraph.text, 0),
+        }
+      : { ...snapshot.anchor, chapter: index };
+    navigate(paragraph.id, false);
+    jumpAnchor.current = anchor;
+    layoutAnchor.current = null;
+    const { visualOffset: _visualOffset, ...positionAnchor } = anchor;
+    setPosition((previous) => ({
+      ...previous,
+      ...positionAnchor,
+      chapter: index,
+      farthest: Math.max(previous.farthest, index),
+    }));
+    setSettings((current) => ({ ...current, navigationMode: snapshot.mode }));
+    setSelected(sameContext && !translationFallback ? snapshot.selection : null);
+    setRevealed(sameContext && !translationFallback ? snapshot.translation : null);
+    setTemporaryOriginal(
+      !sameContext || translationFallback
+        ? { bookId: book.id, language: settings.language, readingMode: settings.readingMode }
+        : snapshot.original,
+    );
+    setReferenceSession(true);
+    if (snapshot.panel) openCompanion(snapshot.panel);
     else openTool(null);
-    setReferenceReturn(null);
+    if (translationFallback)
+      setNotice(
+        locale.startsWith('zh')
+          ? '阅读语言或译本已变化，已返回对应原文。'
+          : 'The reading language or edition changed. Returned to the original passage.',
+      );
+    return true;
+  }
+  function returnFromReference() {
+    if (!surfaceReady || navigation.turning) return;
+    const history = referenceHistoryRef.current.filter(validReferenceReturn);
+    const previous = history.at(-1);
+    if (!previous) {
+      replaceReferenceHistory([]);
+      return;
+    }
+    if (restoreReference(previous)) replaceReferenceHistory(history.slice(0, -1));
+  }
+  function returnBeforeSearch() {
+    const previous = searchOriginRef.current;
+    if (!previous) return;
+    if (!validReferenceReturn(previous.origin)) {
+      replaceSearchOrigin(null);
+      return;
+    }
+    if (!restoreReference(previous.origin)) return;
+    replaceReferenceHistory(previous.history.filter(validReferenceReturn));
+    replaceSearchOrigin(null);
+  }
+  function dismissReferenceHistory() {
+    replaceReferenceHistory([]);
+    replaceSearchOrigin(null);
   }
 
   function navigate(id: string, remember = true) {
     const index = book.chapters.findIndex((c) => c.paragraphs.some((p) => p.id === id));
     if (index < 0) return;
     if (remember && readerRef.current) {
-      const anchor = readReadingAnchor(readerRef.current);
-      if (anchor)
-        setReferenceReturn({
-          anchor,
-          mode: settings.navigationMode,
-          panel: null,
-          selection: selected,
-        });
+      pushReferenceReturn(captureReferenceReturn());
       setJumpHighlight(id);
     }
     setScrollRange({
@@ -833,10 +2237,17 @@ export default function Reader({
     });
     setSelected(null);
     setSelectionMenu(null);
+    setReferencePreview(null);
+    setReferenceSession(false);
+    setRevealed(null);
+    noteRequest.current++;
     if (scrollTimer.current) clearTimeout(scrollTimer.current);
     pendingPosition.current = null;
+    advanceJumpRequest();
+    scrollIntent.current = null;
     restoring.current = true;
-    jumpAnchor.current = null;
+    jumpAnchor.current = { paragraph: id, offset: 0, chapter: index };
+    jumpEdge.current = 'start';
     window.getSelection()?.removeAllRanges();
     setPosition((p) => ({ chapter: index, paragraph: id, farthest: Math.max(p.farthest, index) }));
     setJump(id);
@@ -846,18 +2257,47 @@ export default function Reader({
     const c = book.chapters[index];
     if (c?.paragraphs.length) {
       setSelected(null);
-      jumpEdge.current = edge;
       navigate(
         edge === 'end' ? c.paragraphs[c.paragraphs.length - 1].id : c.paragraphs[0].id,
         false,
       );
+      jumpEdge.current = edge;
     }
   }
-  function saveScroll() {
-    if (restoring.current || switching || !ready || readerRef.current?.dataset.turning === 'true')
-      return;
+  function markScrollIntent() {
     const root = readerRef.current;
-    const anchor = root && readReadingAnchor(root);
+    if (!tool && !illustration && !referencePreview) abandonPendingContentAnchor();
+    if (continuous && root && !tool && !illustration && !referencePreview)
+      scrollIntent.current = { top: root.scrollTop, until: performance.now() + 1500 };
+  }
+  function abandonPendingContentAnchor() {
+    if (!pendingContentAnchor.current) return;
+    pendingContentAnchor.current = null;
+    if (readerRef.current) {
+      forgetReadingAnchor(readerRef.current);
+      navigation.refresh();
+    }
+  }
+  function turnReadingPage(direction: -1 | 1) {
+    abandonPendingContentAnchor();
+    return navigation.turn(direction);
+  }
+  function saveScroll(scrolled = false) {
+    const root = readerRef.current;
+    if (switching || !ready || !root || referencePreview || root.dataset.turning === 'true') return;
+    const intent = scrollIntent.current;
+    const userMoved =
+      scrolled &&
+      continuous &&
+      intent &&
+      performance.now() <= intent.until &&
+      Math.abs(root.scrollTop - intent.top) > 1;
+    if (userMoved) intent.top = root.scrollTop;
+    if (restoring.current) return;
+    // Placeholder layout must not replace a saved within-paragraph position.
+    // Explicit navigation clears this pending anchor before updating progress.
+    if (pendingContentAnchor.current?.scope === contentScope) return;
+    const anchor = readReadingAnchor(root);
     if (!anchor) return;
     if (continuous && root) {
       const nearBottom =
@@ -874,22 +2314,6 @@ export default function Reader({
     }
     const { visualOffset: _visualOffset, chapter: anchoredChapter, ...contentAnchor } = anchor;
     const index = anchoredChapter ?? position.chapter;
-    if (
-      view !== 'original' &&
-      !book.chapters[index]?.paragraphs.every((p) => stableTranslations.read(index, p))
-    ) {
-      // A preparation screen has no text location. Never overwrite a saved
-      // paragraph/offset with its placeholder while a cached chapter downloads.
-      if (scrollTimer.current) clearTimeout(scrollTimer.current);
-      pendingPosition.current = null;
-      if (index !== position.chapter)
-        setPosition((p) => ({
-          chapter: index,
-          paragraph: book.chapters[index].paragraphs[0].id,
-          farthest: Math.max(p.farthest, index),
-        }));
-      return;
-    }
     const next = {
       ...position,
       ...contentAnchor,
@@ -932,7 +2356,7 @@ export default function Reader({
     }, 180);
   }
   function readSelection() {
-    if (tool) return;
+    if (tool || referencePreview) return;
     const selection = window.getSelection();
     const value = selection?.toString().trim();
     if (!value || value.length < 2 || !selection?.anchorNode || !selection.focusNode) {
@@ -962,7 +2386,6 @@ export default function Reader({
     }
   }
   function getTranslation(p: Paragraph) {
-    if (book.language.toLowerCase() === settings.language.toLowerCase()) return p.text;
     return bookTranslation.text(paragraphChapters.get(p.id) ?? 0, p.id);
   }
   async function ask(prompt: string, passage = selected) {
@@ -984,17 +2407,7 @@ export default function Reader({
     setQuestion('');
     const focus = passage || { paragraph: readingParagraph, text: readingParagraph.text };
     const allowedIds = new Set(
-      book.chapters.flatMap((c, i) =>
-        (
-          settings.scope === 'chapter'
-            ? i === position.chapter
-            : settings.scope === 'read'
-              ? i <= Math.max(position.farthest, position.chapter)
-              : true
-        )
-          ? c.paragraphs.map((p) => p.id)
-          : [],
-      ),
+      readingScopeParagraphs(book, position, settings.scope).map(({ paragraph }) => paragraph.id),
     );
     const history: Message[] = [];
     for (let i = 0; i < messages.length - 1; i++) {
@@ -1033,6 +2446,7 @@ export default function Reader({
         settings.scope,
         prompt,
         focus.paragraph,
+        position.paragraph,
       );
       if (context.partial) {
         setBusyText(t('正在跨语言查找相关原文…'));
@@ -1057,6 +2471,7 @@ export default function Reader({
           settings.scope,
           `${prompt} ${terms}`,
           focus.paragraph,
+          position.paragraph,
         );
       }
       sourceIds = context.sources.map((s) => s.id);
@@ -1137,6 +2552,7 @@ export default function Reader({
       return;
     }
     savingNoteRef.current = true;
+    const measured = measureClient('note_save');
     setSavingNote(true);
     const note: Note = {
       id: crypto.randomUUID(),
@@ -1150,6 +2566,7 @@ export default function Reader({
     const token = activation.current;
     try {
       const saved = await storage.addNote(note);
+      measured();
       if (token !== activation.current) return;
       setNotes(saved);
       if (kind === 'note') {
@@ -1187,12 +2604,27 @@ export default function Reader({
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
-  const searchResults = search.trim()
-    ? allParagraphs
-        .filter((p) => p.text.toLowerCase().includes(search.trim().toLowerCase()))
-        .slice(0, 60)
-    : [];
-
+  if (loadFailed)
+    return (
+      <div className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-sidebar px-6 text-center">
+        <BookOpen size={38} className="text-muted-foreground" aria-hidden="true" />
+        <h1 className="text-xl" role="alert">
+          {t('打开失败，请重试。')}
+        </h1>
+        <Button
+          className="rounded-full px-6"
+          onClick={() => {
+            setLoadFailed(false);
+            setLoadAttempt((attempt) => attempt + 1);
+          }}
+        >
+          {t('重试')}
+        </Button>
+        <Link className="text-sm text-primary" href={returnTo}>
+          {t('返回{value0}', { value0: returnLabel })}
+        </Link>
+      </div>
+    );
   if (missing)
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-sidebar px-6 text-center">
@@ -1216,6 +2648,9 @@ export default function Reader({
         </Link>
       </div>
     );
+  // The sample is only an internal hook initializer until the requested book
+  // and its local reading data have loaded. Never expose it as a placeholder.
+  if (!surfaceReady) return <ReaderLoading />;
   return (
     <div
       className="reading-app h-dvh overflow-hidden bg-sidebar"
@@ -1241,15 +2676,6 @@ export default function Reader({
           <span className="hidden sm:inline">{returnLabel}</span>
         </Button>
         <span className="min-w-0 truncate text-sm text-muted-foreground">{book.title}</span>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="shrink-0 rounded-full text-xs text-muted-foreground"
-          onClick={() => openTool('translations')}
-        >
-          <BookOpen size={16} />
-          {locale.startsWith('zh') ? '译本' : 'Translation'}
-        </Button>
         <Button
           variant="ghost"
           size="icon"
@@ -1284,7 +2710,10 @@ export default function Reader({
         onScroll={() => {
           if (tapTimer.current) clearTimeout(tapTimer.current);
           setSelectionMenu(null);
-          saveScroll();
+          saveScroll(true);
+        }}
+        onWheel={(event) => {
+          if (!event.ctrlKey && (event.deltaX || event.deltaY)) markScrollIntent();
         }}
         onPointerDown={(event) => {
           navigation.onPointerDown(event);
@@ -1295,14 +2724,49 @@ export default function Reader({
             scroll: readerRef.current?.scrollTop ?? 0,
             time: Date.now(),
           };
+          const root = event.currentTarget;
+          const gutter = root.offsetWidth - root.clientWidth;
+          const bounds = root.getBoundingClientRect();
+          if (
+            gutter > 0 &&
+            event.target === root &&
+            (event.clientX >= bounds.right - gutter || event.clientX <= bounds.left + gutter)
+          )
+            markScrollIntent();
         }}
-        onPointerMove={navigation.onPointerMove}
+        onPointerMove={(event) => {
+          navigation.onPointerMove(event);
+          const start = pointerStart.current;
+          if (
+            event.buttons &&
+            start &&
+            (Math.abs(event.clientY - start.y) > 8 || Math.abs(event.clientX - start.x) > 8)
+          )
+            markScrollIntent();
+        }}
         onPointerUp={navigation.onPointerUp}
         onPointerCancel={navigation.onPointerCancel}
         onMouseUp={readSelection}
         onKeyUp={readSelection}
         onKeyDown={(event) => {
           if (event.target !== event.currentTarget) return;
+          if (
+            !event.metaKey &&
+            !event.ctrlKey &&
+            !event.altKey &&
+            [
+              'ArrowUp',
+              'ArrowDown',
+              'ArrowLeft',
+              'ArrowRight',
+              'PageUp',
+              'PageDown',
+              'Home',
+              'End',
+              ' ',
+            ].includes(event.key)
+          )
+            markScrollIntent();
           if (event.key === 'Escape') {
             setChromeVisible(true);
             setSelectionMenu(null);
@@ -1342,7 +2806,7 @@ export default function Reader({
                   ?.getBoundingClientRect();
                 const fraction = bounds ? (event.clientX - bounds.left) / bounds.width : 0.5;
                 if (settings.navigationMode === 'paged' && (fraction < 0.2 || fraction > 0.8))
-                  navigation.turn(
+                  turnReadingPage(
                     ((fraction < 0.2 ? -1 : 1) * (book.pageDirection === 'rtl' ? -1 : 1)) as -1 | 1,
                   );
                 else setChromeVisible((visible) => !visible);
@@ -1357,9 +2821,10 @@ export default function Reader({
               normalizeHeading(visibleChapter.paragraphs[0]?.text ?? '') ===
               normalizeHeading(visibleChapter.title);
             const hidden = settings.navigationMode === 'paged' && chapterIndex !== position.chapter;
-            const chapterReady = visibleChapter.paragraphs.every(
-              (p) => !!stableTranslations.read(chapterIndex, p),
-            );
+            const statusParagraph =
+              translationTarget.scope === translationScope
+                ? translationTarget.missing
+                : position.paragraph;
             return (
               <section
                 key={visibleChapter.id}
@@ -1377,32 +2842,46 @@ export default function Reader({
                     data-font={settings.fontFamily}
                     aria-label={visibleChapter.title}
                   >
-                    {(!hasChapterHeading || (view !== 'original' && !chapterReady)) && (
+                    {!pdf && !hasChapterHeading && view !== 'translation' && (
                       <h1
                         className="chapter-title"
                         dir="auto"
-                        lang={book.language === 'auto' ? undefined : book.language}
+                        lang={sourceLanguage === 'auto' ? undefined : sourceLanguage}
                       >
                         {visibleChapter.title}
                       </h1>
                     )}
-                    {view !== 'original' && !chapterReady ? (
-                      <div data-paragraph={visibleChapter.paragraphs[0]?.id}>
-                        <ChapterPreparation
-                          controller={bookTranslation}
-                          index={chapterIndex}
-                          open={() => openTool('translations')}
-                          original={() => updateAppearance({ readingMode: 'original' })}
-                          connect={() => (needsLogin ? openLogin() : setSettingsOpen(true))}
-                        />
-                      </div>
-                    ) : (
-                      visibleChapter.paragraphs.map((paragraph, index) => {
-                        const translated = stableTranslations.read(chapterIndex, paragraph);
-                        const isTitle = index === 0 && hasChapterHeading;
-                        return (
+                    {pdf && visibleChapter.sourcePage && (
+                      <p className="mb-5 text-xs text-muted-foreground">
+                        {t('PDF 第 {n} 页', { n: visibleChapter.sourcePage })}
+                      </p>
+                    )}
+                    {visibleChapter.paragraphs.map((paragraph, index) => {
+                      const savedTranslation =
+                        revealedTranslation?.paragraph === paragraph.id
+                          ? revealedTranslation
+                          : null;
+                      const translated = revealedTranslation
+                        ? savedTranslation?.text || ''
+                        : stableTranslations.read(chapterIndex, paragraph);
+                      const translationKey =
+                        savedTranslation?.key || stableTranslations.key(chapterIndex, paragraph);
+                      const isTitle = index === 0 && hasChapterHeading;
+                      const images = illustrations.get(paragraph.id);
+                      const paragraphReferences = referencesByParagraph.get(paragraph.id) || [];
+                      const paragraphNotes = notes.filter(
+                        (note) => note.paragraphId === paragraph.id,
+                      );
+                      const passage = (
+                        <Fragment key={paragraph.id}>
+                          {images?.before.map((image) => (
+                            <BookIllustration
+                              key={image.placement.id}
+                              image={image}
+                              open={setIllustration}
+                            />
+                          ))}
                           <section
-                            key={paragraph.id}
                             id={`passage-${paragraph.id}`}
                             data-paragraph={paragraph.id}
                             data-jump-target={jumpHighlight === paragraph.id || undefined}
@@ -1416,67 +2895,113 @@ export default function Reader({
                                 <h1
                                   className="chapter-title"
                                   data-note-source="original"
-                                  lang={book.language === 'auto' ? undefined : book.language}
+                                  lang={sourceLanguage === 'auto' ? undefined : sourceLanguage}
                                   dir="auto"
                                 >
-                                  {markedPassage(
-                                    paragraph.text,
-                                    notes.filter((note) => note.paragraphId === paragraph.id),
-                                  )}
+                                  <MarkedPassage
+                                    text={paragraph.text}
+                                    notes={paragraphNotes}
+                                    references={paragraphReferences}
+                                    openReference={openBookReference}
+                                  />
                                 </h1>
                               ) : (
                                 <div
                                   className="passage-original"
                                   data-note-source="original"
-                                  lang={book.language === 'auto' ? undefined : book.language}
+                                  lang={sourceLanguage === 'auto' ? undefined : sourceLanguage}
                                   dir="auto"
                                 >
-                                  {markedPassage(
-                                    paragraph.text,
-                                    notes.filter((note) => note.paragraphId === paragraph.id),
-                                  )}
+                                  <MarkedPassage
+                                    text={paragraph.text}
+                                    notes={paragraphNotes}
+                                    references={paragraphReferences}
+                                    openReference={openBookReference}
+                                  />
                                 </div>
                               ))}
-                            {view !== 'original' && (translated || view === 'translation') && (
+                            {view !== 'original' && translated && (
                               <div
                                 data-translation
-                                data-note-source={translated ? 'translation' : undefined}
-                                data-note-key={
-                                  translated
-                                    ? stableTranslations.key(chapterIndex, paragraph)
-                                    : undefined
-                                }
+                                data-note-source="translation"
+                                data-note-key={translationKey}
                                 className={
                                   isTitle && view === 'translation'
                                     ? 'chapter-title'
                                     : 'passage-translation'
                                 }
-                                lang={settings.language}
+                                lang={savedTranslation?.language || settings.language}
                                 dir="auto"
                               >
-                                {translated ? (
-                                  markedPassage(
-                                    translated,
-                                    notes.filter((note) => note.paragraphId === paragraph.id),
-                                    'translation',
-                                    stableTranslations.key(chapterIndex, paragraph),
-                                  )
-                                ) : (
-                                  <div
-                                    data-note-source="original"
-                                    lang={book.language}
-                                    dir="auto"
-                                    className="text-foreground"
-                                  >
-                                    {markedPassage(
-                                      paragraph.text,
-                                      notes.filter((note) => note.paragraphId === paragraph.id),
-                                    )}
-                                  </div>
-                                )}
+                                <MarkedPassage
+                                  text={translated}
+                                  notes={paragraphNotes}
+                                  source="translation"
+                                  translationKey={translationKey}
+                                />
                               </div>
                             )}
-                            {!isTitle && (
+                            {view === 'translation' && !translated && (
+                              <div className="translation-placeholder" aria-hidden="true">
+                                <span />
+                                <span />
+                                <span />
+                              </div>
+                            )}
+                            {view !== 'original' &&
+                              !translated &&
+                              paragraph.id === statusParagraph && (
+                                <div className="inline-translation-status" role="status">
+                                  {!bookTranslation.online ? (
+                                    <span>
+                                      {locale.startsWith('zh')
+                                        ? '当前离线，联网后继续翻译。已保存的译文仍可阅读。'
+                                        : 'Offline. Translation resumes when connected. Saved translations remain available.'}
+                                    </span>
+                                  ) : needsLogin ? (
+                                    <>
+                                      <span>
+                                        {locale.startsWith('zh')
+                                          ? '登录后继续翻译。'
+                                          : 'Sign in to continue translating.'}
+                                      </span>
+                                      <button type="button" onClick={openLogin}>
+                                        {t('登录')}
+                                      </button>
+                                    </>
+                                  ) : bookTranslation.error ? (
+                                    <>
+                                      <span>{localize(bookTranslation.error)}</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => void bookTranslation.retry()}
+                                      >
+                                        {locale.startsWith('zh') ? '重试' : 'Retry'}
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <LoaderCircle
+                                        size={14}
+                                        className="animate-spin motion-reduce:animate-none"
+                                      />
+                                      <span>
+                                        {locale.startsWith('zh') ? '正在翻译…' : 'Translating…'}
+                                      </span>
+                                    </>
+                                  )}
+                                </div>
+                              )}
+                            {view === 'translation' &&
+                              !!translated &&
+                              paragraphReferences.length > 0 && (
+                                <OriginalReferences
+                                  references={paragraphReferences}
+                                  paragraphs={paragraphsById}
+                                  open={openBookReference}
+                                />
+                              )}
+                            {!isTitle && (view !== 'translation' || translated) && (
                               <div className="passage-actions">
                                 <Button
                                   variant="ghost"
@@ -1489,7 +3014,7 @@ export default function Reader({
                                     openNoteComposer({ paragraph, text: paragraph.text });
                                   }}
                                 >
-                                  <Bookmark size={15} />
+                                  <PencilLine size={15} />
                                 </Button>
                                 <Button
                                   variant="ghost"
@@ -1509,9 +3034,25 @@ export default function Reader({
                               </div>
                             )}
                           </section>
-                        );
-                      })
-                    )}
+                          {images?.after.map((image) => (
+                            <BookIllustration
+                              key={image.placement.id}
+                              image={image}
+                              open={setIllustration}
+                            />
+                          ))}
+                        </Fragment>
+                      );
+                      return paragraph.kind === 'heading' &&
+                        paragraph.text.length < 240 &&
+                        (images?.before.length || 0) + (images?.after.length || 0) === 1 ? (
+                        <div key={paragraph.id} className="reader-illustrated-passage">
+                          {passage}
+                        </div>
+                      ) : (
+                        passage
+                      );
+                    })}
                   </article>
                 </div>
                 {settings.navigationMode === 'paged' && (
@@ -1531,6 +3072,7 @@ export default function Reader({
                 {settings.navigationMode === 'scroll' && settings.scrollFlow === 'chapter' && (
                   <ChapterEnding
                     chapter={visibleChapter}
+                    pdf={pdf}
                     next={book.chapters[chapterIndex + 1]}
                     previous={book.chapters[chapterIndex - 1]}
                     index={chapterIndex}
@@ -1578,6 +3120,16 @@ export default function Reader({
           title={t('笔记')}
           onClick={() => openCompanion('notes')}
         >
+          <PencilLine size={20} strokeWidth={1.6} />
+        </Button>
+        <Button
+          variant="plain"
+          size="plain"
+          className="reader-tool"
+          aria-label={t('书签')}
+          title={t('书签')}
+          onClick={() => openTool('bookmarks')}
+        >
           <Bookmark size={20} strokeWidth={1.6} />
         </Button>
         <span className="mx-auto my-1 h-px w-5 bg-border" />
@@ -1585,8 +3137,8 @@ export default function Reader({
           variant="plain"
           size="plain"
           className="reader-tool"
-          aria-label={t('阅读语言与双语')}
-          title={t('原文 / 双语 / 译文')}
+          aria-label={t('阅读语言')}
+          title={t('阅读语言')}
           onClick={() => openTool('language')}
         >
           <Languages size={21} strokeWidth={1.6} />
@@ -1642,20 +3194,14 @@ export default function Reader({
           <Maximize2 size={17} />
         </Button>
       )}
-      {stableTranslations.pending &&
-        settings.navigationMode === 'paged' &&
-        chapter.paragraphs.every((p) => stableTranslations.read(position.chapter, p)) && (
-          <button
-            className="reader-translation-ready"
-            onClick={stableTranslations.apply}
-            disabled={navigation.turning}
-          >
-            {t('译文已就绪 · 显示译文')}
-          </button>
-        )}
       <ReadingNavigation
         mode={settings.navigationMode}
-        chapterTitle={chapter.title}
+        chapterTitle={readingTitle}
+        pdf={pdf}
+        sourcePage={chapter.sourcePage}
+        chapterPrevious={chapterNavigation.previous}
+        chapterNext={chapterNavigation.next}
+        onChapter={navigateChapter}
         rtl={book.pageDirection === 'rtl'}
         page={navigation.page}
         pages={navigation.pages}
@@ -1666,7 +3212,7 @@ export default function Reader({
         turning={navigation.turning}
         progress={progress}
         onTurn={(direction) => {
-          void navigation.turn(direction);
+          void turnReadingPage(direction);
         }}
         onContents={() => setSidebarOpen(true)}
         onMode={() => setAppearanceOpen(true)}
@@ -1684,16 +3230,21 @@ export default function Reader({
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label={settings.navigationMode === 'paged' ? t('向前翻页') : t('上一章')}
+            aria-label={
+              settings.navigationMode === 'paged'
+                ? t('向前翻页')
+                : t(chapterNavigation.previous?.kind === 'page' ? '上一原页' : '上一章')
+            }
             disabled={
               navigation.turning ||
-              (position.chapter === 0 &&
-                (settings.navigationMode !== 'paged' || navigation.atStart))
+              (settings.navigationMode === 'paged'
+                ? position.chapter === 0 && navigation.atStart
+                : !chapterNavigation.previous)
             }
             onClick={() =>
               settings.navigationMode === 'paged'
-                ? void navigation.turn(-1)
-                : navigation.changeChapter(position.chapter - 1, 'end')
+                ? void turnReadingPage(-1)
+                : chapterNavigation.previous && navigateChapter(chapterNavigation.previous)
             }
           >
             {book.pageDirection === 'rtl' ? <ChevronRight size={15} /> : <ChevronLeft size={15} />}
@@ -1703,7 +3254,10 @@ export default function Reader({
             onClick={() => openTool('progress')}
             aria-label={t('调整阅读进度')}
           >
-            <span className="min-w-0 flex-1 truncate text-start">{chapter.title}</span>
+            <span className="min-w-0 flex-1 truncate text-start">{readingTitle}</span>
+            {pdf && chapter.sourcePage && (
+              <span className="shrink-0">{t('PDF 第 {n} 页', { n: chapter.sourcePage })}</span>
+            )}
             <span className="shrink-0 tabular-nums">
               {settings.navigationMode === 'paged'
                 ? t('{value0}/{value1} 页', { value0: navigation.page, value1: navigation.pages })
@@ -1716,19 +3270,20 @@ export default function Reader({
             aria-label={
               settings.navigationMode === 'paged'
                 ? navigation.atEnd
-                  ? t('下一章')
+                  ? t(pdf ? '下一原页' : '下一章')
                   : t('向后翻页')
-                : t('下一章')
+                : t(chapterNavigation.next?.kind === 'page' ? '下一原页' : '下一章')
             }
             disabled={
               navigation.turning ||
-              (position.chapter === book.chapters.length - 1 &&
-                (settings.navigationMode !== 'paged' || navigation.atEnd))
+              (settings.navigationMode === 'paged'
+                ? position.chapter === book.chapters.length - 1 && navigation.atEnd
+                : !chapterNavigation.next)
             }
             onClick={() =>
               settings.navigationMode === 'paged'
-                ? void navigation.turn(1)
-                : navigation.changeChapter(position.chapter + 1)
+                ? void turnReadingPage(1)
+                : chapterNavigation.next && navigateChapter(chapterNavigation.next)
             }
           >
             {book.pageDirection === 'rtl' ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}
@@ -1762,7 +3317,7 @@ export default function Reader({
             className="mobile-reader-tool"
             onClick={() => openCompanion('notes')}
           >
-            <Bookmark size={21} strokeWidth={1.6} />
+            <PencilLine size={21} strokeWidth={1.6} />
             <span>{t('笔记')}</span>
           </Button>
           <Button
@@ -1772,9 +3327,7 @@ export default function Reader({
             onClick={() => openTool('language')}
           >
             <Languages size={22} strokeWidth={1.6} />
-            <span>
-              {view === 'original' ? t('双语') : view === 'bilingual' ? t('双语中') : t('译文中')}
-            </span>
+            <span>{t('阅读语言')}</span>
           </Button>
           <Button
             variant="plain"
@@ -1788,26 +3341,48 @@ export default function Reader({
         </nav>
       </footer>
 
-      {referenceReturn && !tool && (
-        <div className="reference-return fixed bottom-10 left-1/2 z-30 flex -translate-x-1/2 items-center gap-1 rounded-full border bg-card p-1 shadow-lg">
+      {referencePreview && (
+        <BookReferencePreview
+          link={referencePreview.link}
+          target={referencePreview.target}
+          paragraphs={paragraphsById}
+          language={sourceLanguage}
+          opener={referencePreview.opener}
+          close={() => setReferencePreview(null)}
+          visit={() => visitBookReference(referencePreview.target, referencePreview.origin)}
+        />
+      )}
+
+      {(referenceReturn || searchOrigin) && surfaceReady && !tool && !referencePreview && (
+        <div className="reference-return fixed bottom-10 left-1/2 z-30 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-wrap items-center justify-center gap-1 rounded-full border bg-card p-1 shadow-lg">
           <Button
             variant="ghost"
             className="h-9 rounded-full px-4 text-xs"
-            onClick={returnFromReference}
+            onClick={referenceReturn ? returnFromReference : returnBeforeSearch}
           >
             <ArrowLeft size={14} />
-            {referenceReturn.panel
+            {referenceReturn?.panel
               ? t('返回{value0}', {
                   value0: referenceReturn.panel === 'chat' ? t('AI 伴读') : t('笔记'),
                 })
               : t('返回刚才位置')}
           </Button>
+          {searchOrigin && (
+            <Button
+              variant="ghost"
+              className="h-9 rounded-full px-4 text-xs"
+              onClick={returnToSearchResults}
+            >
+              <Search size={14} />
+              {locale.startsWith('zh') ? '返回搜索结果' : 'Back to results'}
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="icon-sm"
             className="rounded-full"
             aria-label={t('留在当前原文')}
-            onClick={() => setReferenceReturn(null)}
+            onClick={dismissReferenceHistory}
           >
             <X size={14} />
           </Button>
@@ -1878,10 +3453,101 @@ export default function Reader({
         onOpenChange={setSidebarOpen}
         title={t('目录')}
         autoFocusSelector={searchOpen ? '[data-reader-search]' : undefined}
+        scrollCurrent={false}
       >
         <div className="shrink-0 px-7 pb-4">
           <p className="mb-1 line-clamp-2 text-base font-medium leading-relaxed">{book.title}</p>
           <p className="mb-5 text-xs text-muted-foreground">{book.author}</p>
+          {searchOrigin && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mb-3 w-full justify-start rounded-full"
+              onClick={returnBeforeSearch}
+            >
+              <ArrowLeft size={16} />
+              {locale.startsWith('zh') ? '返回刚才阅读位置' : 'Back to reading position'}
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="mb-3 w-full justify-start rounded-full"
+            disabled={activeContent < 0 || !surfaceReady || searchOpening}
+            onClick={() => {
+              changeSearchCriteria({ query: '' });
+              const ancestors = activeContentKey
+                ? contentsOutlineAncestors(contentsOutline, activeContentKey)
+                : [];
+              setCollapsedContents(
+                (keys) => new Set([...keys].filter((key) => !ancestors.includes(key))),
+              );
+              setContentsLocateRequest((request) => request + 1);
+            }}
+          >
+            <LocateFixed size={16} />
+            {t('定位正在读')}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="mb-4 w-full justify-start rounded-full"
+            onClick={() => openTool('bookmarks')}
+          >
+            <Bookmark size={16} />
+            {t('书签')}
+            <span className="ms-auto text-muted-foreground">{bookmarks.length}</span>
+          </Button>
+          {hasPdfContents && (
+            <div className="mb-4 flex gap-2" role="group" aria-label={t('目录')}>
+              {[false, true].map((pages) => (
+                <Button
+                  key={String(pages)}
+                  variant={pdfPages === pages ? 'secondary' : 'ghost'}
+                  size="sm"
+                  className="rounded-full"
+                  aria-pressed={pdfPages === pages}
+                  disabled={searchOpening}
+                  onClick={() => {
+                    if (searchOpeningRef.current) return;
+                    setPdfPages(pages);
+                    changeSearchCriteria({ query: '' });
+                  }}
+                >
+                  {pages ? t('原页目录') : t('章节')}
+                </Button>
+              ))}
+            </div>
+          )}
+          {hierarchicalContents && !searchingContents && (
+            <div className="mb-3 flex flex-wrap gap-2" role="group" aria-label={t('目录')}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="rounded-full"
+                onClick={() => setCollapsedContents(() => new Set())}
+              >
+                {t('展开所有目录')}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="rounded-full"
+                onClick={() =>
+                  setCollapsedContents(
+                    () =>
+                      new Set(
+                        contentsOutline.nodes
+                          .filter((node) => node.hasChildren)
+                          .map((node) => node.key),
+                      ),
+                  )
+                }
+              >
+                {t('收起所有目录')}
+              </Button>
+            </div>
+          )}
           <div className="relative">
             <Search
               size={16}
@@ -1889,79 +3555,215 @@ export default function Reader({
             />
             <Input
               className="h-10 rounded-full border-0 bg-muted ps-10 pe-9 text-sm shadow-none"
-              placeholder={t('搜索书中内容')}
+              placeholder={t(searchTitles ? '搜索目录标题' : '搜索书中内容')}
               data-reader-search
-              aria-label={t('搜索书中内容')}
+              aria-label={t(searchTitles ? '搜索目录标题' : '搜索书中内容')}
+              maxLength={160}
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              disabled={searchOpening}
+              onChange={(event) => {
+                changeSearchCriteria({ query: event.target.value });
+              }}
             />
             {search && (
               <Button
                 variant="ghost"
                 size="icon-sm"
                 className="absolute right-1 top-1 rounded-full"
-                onClick={() => setSearch('')}
+                disabled={searchOpening}
+                onClick={() => changeSearchCriteria({ query: '' })}
                 aria-label={t('清除搜索')}
               >
                 <X size={14} />
               </Button>
             )}
           </div>
+          <div
+            className="mt-3 flex flex-wrap gap-2"
+            role="group"
+            aria-label={locale.startsWith('zh') ? '搜索来源' : 'Search source'}
+          >
+            <Button
+              variant={searchTitles ? 'secondary' : 'ghost'}
+              size="sm"
+              className="rounded-full"
+              aria-pressed={searchTitles}
+              disabled={searchOpening}
+              onClick={() => changeSearchCriteria({ titles: true })}
+            >
+              {t('目录标题')}
+            </Button>
+            {(['original', 'translation'] as const).map((source) => (
+              <Button
+                key={source}
+                variant={!searchTitles && searchSource === source ? 'secondary' : 'ghost'}
+                size="sm"
+                className="rounded-full"
+                aria-pressed={!searchTitles && searchSource === source}
+                disabled={searchOpening}
+                onClick={() => {
+                  changeSearchCriteria({ source });
+                }}
+              >
+                {source === 'original'
+                  ? t('原文')
+                  : locale.startsWith('zh')
+                    ? '已保存译文'
+                    : 'Saved translations'}
+              </Button>
+            ))}
+          </div>
+          {!searchTitles && searchSource === 'translation' && (
+            <div className="mt-3 space-y-2">
+              <select
+                value={searchLanguage}
+                disabled={searchOpening}
+                aria-label={locale.startsWith('zh') ? '搜索译文语言' : 'Translation language'}
+                className="h-9 w-full rounded-lg border bg-background px-3 text-sm"
+                onChange={(event) => {
+                  changeSearchCriteria({ language: event.target.value });
+                }}
+              >
+                <option value="">
+                  {locale.startsWith('zh') ? '所有已保存语言' : 'All saved languages'}
+                </option>
+                {readingLanguages.map(([code, name]) => (
+                  <option key={code} value={code}>
+                    {displayLanguage(code, locale) || name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs leading-5 text-muted-foreground">
+                {locale.startsWith('zh')
+                  ? '仅搜索整本书在本机保存的译本，不会生成译文。'
+                  : 'Searches this book’s locally saved editions. No translation is generated.'}
+              </p>
+            </div>
+          )}
         </div>
         <nav
-          className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-6"
+          ref={attachContentsList}
+          onScroll={(event) => {
+            if (
+              search.trim() &&
+              !searchTitles &&
+              searchResults.data &&
+              !searchResults.loading &&
+              !restoringSearchScroll.current
+            )
+              searchScroll.current = event.currentTarget.scrollTop;
+          }}
+          className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-6"
           aria-label={t('章节目录')}
         >
-          {search.trim() ? (
-            searchResults.length ? (
-              searchResults.map((paragraph) => (
+          {search.trim() && !searchTitles ? (
+            <ReaderSearchMatches
+              key={searchResults.identity}
+              state={searchResults}
+              source={searchSource}
+              locale={locale}
+              open={followSearchMatch}
+              page={searchPage}
+              changePage={changeSearchPage}
+              opening={searchOpening}
+              onReady={() => {
+                const list = searchList.current;
+                const identity = searchIdentity.current;
+                if (list && search.trim())
+                  requestAnimationFrame(() => {
+                    if (
+                      list.isConnected &&
+                      searchIdentity.current === identity &&
+                      searchList.current === list
+                    ) {
+                      list.scrollTop = searchScroll.current;
+                      restoringSearchScroll.current = false;
+                    }
+                  });
+              }}
+            />
+          ) : contentsProjection.rows.length ? (
+            contentsProjection.rows.map((row) => (
+              <div
+                key={row.key}
+                data-reader-content-index={row.index}
+                className="flex items-start rounded-lg hover:bg-muted"
+                style={{ paddingInlineStart: 4 + Math.min(row.depth, 5) * 16 }}
+              >
+                {hierarchicalContents &&
+                  (row.hasChildren && !searchingContents ? (
+                    <Button
+                      variant="plain"
+                      size="plain"
+                      className="mt-2.5 flex size-9 shrink-0 items-center justify-center rounded-full hover:bg-muted-foreground/10"
+                      aria-label={t(row.collapsed ? '展开{value0}' : '收起{value0}', {
+                        value0: row.entry.title,
+                      })}
+                      aria-expanded={!row.collapsed}
+                      onClick={() =>
+                        setCollapsedContents((keys) => {
+                          const next = new Set(keys);
+                          if (next.has(row.key)) next.delete(row.key);
+                          else next.add(row.key);
+                          return next;
+                        })
+                      }
+                    >
+                      {row.collapsed ? (
+                        <ChevronRight className="rtl:rotate-180" size={16} />
+                      ) : (
+                        <ChevronDown size={16} />
+                      )}
+                    </Button>
+                  ) : (
+                    <span aria-hidden className="w-9 shrink-0" />
+                  ))}
                 <Button
                   variant="plain"
                   size="plain"
-                  key={paragraph.id}
-                  className="block w-full border-b px-3 py-4 text-start text-sm leading-7 hover:bg-muted"
-                  onClick={() => {
-                    navigate(paragraph.id);
-                    setSearch('');
-                  }}
+                  aria-current={row.isActive ? 'location' : undefined}
+                  className={`flex min-w-0 flex-1 items-center justify-between gap-3 px-3 py-4 text-start text-sm leading-7 aria-[current=location]:text-primary ${row.isContext ? 'text-muted-foreground' : ''}`}
+                  onClick={() => navigate(row.entry.paragraphId)}
+                  disabled={switching}
                 >
-                  <span className="mb-1 block text-xs text-muted-foreground">
-                    {
-                      book.chapters.find((item) =>
-                        item.paragraphs.some((p) => p.id === paragraph.id),
-                      )?.title
-                    }
+                  <span className="min-w-0 break-words">
+                    {row.entry.title}
+                    {hasPdfContents && !pdfPages && (
+                      <span className="block text-xs font-normal text-muted-foreground">
+                        {t('PDF 第 {n} 页', {
+                          n:
+                            book.chapters[paragraphChapters.get(row.entry.paragraphId) ?? 0]
+                              ?.sourcePage ?? '',
+                        })}
+                      </span>
+                    )}
                   </span>
-                  <span className="line-clamp-3">{paragraph.text}</span>
+                  {row.isActive && <span className="shrink-0 text-[11px]">{t('正在读')}</span>}
+                  {row.isActiveAncestor && row.collapsed && !searchingContents && (
+                    <span className="shrink-0 text-[11px] text-primary">{t('包含当前位置')}</span>
+                  )}
                 </Button>
-              ))
-            ) : (
-              <p className="px-3 py-8 text-sm text-muted-foreground">{t('没有找到匹配的内容')}</p>
-            )
-          ) : (
-            book.chapters.map((item, index) => (
-              <Button
-                variant="plain"
-                size="plain"
-                key={item.id}
-                aria-current={position.chapter === index ? 'location' : undefined}
-                className="flex w-full items-center justify-between gap-4 rounded-lg px-3 py-4 text-start text-sm leading-7 hover:bg-muted aria-[current=location]:text-primary"
-                onClick={() => {
-                  const firstParagraph = item.paragraphs[0];
-                  if (firstParagraph) navigate(firstParagraph.id);
-                }}
-                disabled={switching}
-              >
-                <span>{item.title}</span>
-                {position.chapter === index && (
-                  <span className="shrink-0 text-[11px]">{t('正在读')}</span>
-                )}
-              </Button>
+              </div>
             ))
+          ) : (
+            <p className="px-3 py-6 text-sm text-muted-foreground">{t('未找到匹配文字。')}</p>
           )}
         </nav>
         <div className="flex shrink-0 items-center justify-between border-t px-7 py-4 text-xs text-muted-foreground">
-          <span>{t('{count} 个章节', { count: book.chapters.length })}</span>
+          <span>
+            {searchTitles && contentsProjection.searching
+              ? t('匹配 {count} 项', { count: contentsProjection.directMatchCount })
+              : (!search.trim() || searchTitles) && hierarchicalContents
+                ? t('显示 {visible}/{total} 项', {
+                    visible: contentsProjection.rows.length,
+                    total: contents.length,
+                  })
+                : isPdfBook(book)
+                  ? hasPdfContents && !pdfPages
+                    ? t('{count} 个章节', { count: contents.length })
+                    : t('{count} 个原页', { count: contents.length })
+                  : t('{count} 个章节', { count: book.chapters.length })}
+          </span>
           <Button
             variant="link"
             size="plain"
@@ -1973,22 +3775,6 @@ export default function Reader({
           >
             {t('返回书架')}
           </Button>
-        </div>
-      </ReadingPanel>
-
-      <ReadingPanel
-        open={tool === 'translations'}
-        onOpenChange={(open) => openTool(open ? 'translations' : null)}
-        title={locale.startsWith('zh') ? '书籍译本' : 'Book translation'}
-      >
-        <div className="overflow-y-auto px-7 pb-8">
-          <p className="mb-5 text-sm leading-6 text-muted-foreground">{book.title}</p>
-          <TranslationPanel
-            controller={bookTranslation}
-            book={book}
-            chapter={position.chapter}
-            connect={() => (needsLogin ? openLogin() : setSettingsOpen(true))}
-          />
         </div>
       </ReadingPanel>
 
@@ -2008,9 +3794,11 @@ export default function Reader({
         compact
       >
         <ReadingLanguage
-          settings={settings}
-          update={updateAppearance}
-          openSettings={() => setSettingsOpen(true)}
+          settings={{ ...settings, readingMode: view }}
+          update={(patch) => {
+            updateAppearance(patch);
+            openTool(null);
+          }}
         />
       </ReadingPanel>
 
@@ -2021,6 +3809,37 @@ export default function Reader({
         compact
       >
         <div className="grid gap-1 px-5 pb-6 text-sm">
+          <button
+            className="flex items-center gap-3 rounded-xl px-4 py-4 text-start hover:bg-muted"
+            onClick={() => void addCurrentBookmark().catch(report)}
+          >
+            <BookmarkPlus size={19} />
+            {t('添加当前位置书签')}
+          </button>
+          <button
+            className="flex items-center gap-3 rounded-xl px-4 py-4 text-start hover:bg-muted"
+            onClick={() => openTool('bookmarks')}
+          >
+            <Bookmark size={19} />
+            {t('书签')}
+            <span className="ms-auto text-muted-foreground">{bookmarks.length}</span>
+          </button>
+          <button
+            className="flex items-center gap-3 rounded-xl px-4 py-4 text-start hover:bg-muted"
+            onClick={() => openTool('progress')}
+          >
+            <ArrowUpRight size={19} />
+            {t('阅读进度')}
+          </button>
+          {isPdfBook(book) && (
+            <button
+              className="flex items-center gap-3 rounded-xl px-4 py-4 text-start hover:bg-muted"
+              onClick={() => openTool('pdf-original')}
+            >
+              <BookOpen size={19} />
+              {t('PDF 原页')}
+            </button>
+          )}
           <Link
             className="flex items-center gap-3 rounded-xl px-4 py-4 hover:bg-muted"
             href={`/books/${book.id}`}
@@ -2045,6 +3864,60 @@ export default function Reader({
         </div>
       </ReadingPanel>
 
+      <BookmarksPanel
+        book={book}
+        bookmarks={bookmarks}
+        open={tool === 'bookmarks'}
+        onOpenChange={(open) => openTool(open ? 'bookmarks' : null)}
+        add={addCurrentBookmark}
+        visit={followBookmark}
+        change={changeBookmark}
+      />
+
+      {illustration && (
+        <IllustrationDialog image={illustration} close={() => setIllustration(null)} />
+      )}
+      {tool === 'pdf-original' && isPdfBook(book) && (
+        <PdfOriginalDialog
+          key={book.id}
+          book={book}
+          sourcePage={chapter.sourcePage || 1}
+          close={() => openTool(null)}
+          readPage={(index, evidence) => {
+            if (!surfaceReady || restoring.current || navigation.turning) return;
+            const page = book.chapters[index];
+            const target =
+              evidence && page?.sourcePage
+                ? resolvePdfTextEvidence(book, page.sourcePage, evidence)
+                : null;
+            if (target) {
+              const paragraph = paragraphsById.get(target.paragraph);
+              if (!paragraph) return;
+              navigate(target.paragraph);
+              setReferenceSession(true);
+              setTemporaryOriginal({
+                bookId: book.id,
+                language: settings.language,
+                readingMode: settings.readingMode,
+              });
+              const anchor: ReadingAnchor = {
+                chapter: target.chapter,
+                paragraph: target.paragraph,
+                textSource: 'original',
+                textOffset: target.start,
+                textQuote: safeReadingQuote(paragraph.text, target.start),
+                offset: target.start / Math.max(1, paragraph.text.length),
+              };
+              layoutAnchor.current = null;
+              jumpAnchor.current = anchor;
+              setPosition((current) => ({ ...current, ...anchor }));
+            } else if (page?.paragraphs[0] && index !== position.chapter)
+              navigate(page.paragraphs[0].id);
+            openTool(null);
+          }}
+        />
+      )}
+
       <ReadingPanel
         open={tool === 'progress'}
         onOpenChange={(open) => !open && openTool(null)}
@@ -2053,7 +3926,7 @@ export default function Reader({
       >
         <ReadingProgress
           key={tool === 'progress' ? position.paragraph : 'closed'}
-          chapters={book.chapters}
+          book={book}
           paragraph={position.paragraph}
           navigate={(id) => {
             navigate(id);
@@ -2424,7 +4297,7 @@ export default function Reader({
             </div>
             {!notes.length && !selected && (
               <div className="py-16 text-center text-muted-foreground">
-                <Bookmark size={28} strokeWidth={1.3} className="mx-auto mb-4" />
+                <PencilLine size={28} strokeWidth={1.3} className="mx-auto mb-4" />
                 <p className="text-sm">{t('选中文字，留下一个想法。')}</p>
                 <p className="mt-2 text-xs">{t('笔记和划线保存在本地')}</p>
               </div>
@@ -2436,7 +4309,7 @@ export default function Reader({
                   size="plain"
                   className="mb-3 max-w-full text-start text-xs leading-6 text-muted-foreground"
                   onClick={() => {
-                    followReference(note.paragraphId, 'notes');
+                    void followNote(note);
                   }}
                 >
                   <span className="truncate">
@@ -2479,12 +4352,12 @@ export default function Reader({
           settings={settings}
           hasServerKey={hasServerKey}
           accountMode={authEnabled && Boolean(user)}
-          onSave={async (s, clearKey) => {
+          onSave={async (s) => {
             let next = s;
             if (authEnabled && user) {
               const config = await saveAIConnection(s);
               next = applyAIConnection(s, config);
-              setHasServerKey(config.hasKey);
+              setAIConnection(config);
             }
             settingsEdited.current = true;
             setSettings(next);
@@ -2502,16 +4375,16 @@ export default function Reader({
               )}
             </p>
             <p>
-              {t(
-                '从书架导入 EPUB 或 TXT。双语和译文模式按章节准备，完整章节就绪后自动打开。可在“译本”中准备整本、暂停或继续；切回原文不会取消任务。已完成章节保存在本机。AI 跟随阅读位置，选中文字可指定提问范围。',
-              )}
+              {locale.startsWith('zh')
+                ? '在“阅读语言”中选择原文、双语或仅译文。译文会随阅读自动补齐；切回原文会停止后续翻译。AI 跟随阅读位置，选中文字可指定提问范围。'
+                : 'Choose Original, Bilingual or Translation only in Reading language. Missing translations fill in as you read; switching to Original stops further translation. AI follows your reading position, or the text you select.'}
             </p>
             <p>
               {t(
                 '“截至最远章节”包括你曾打开的章节，不代表逐段读过。长书采用关键词检索，回答可能只参考部分原文。引用可点击核对。',
               )}
             </p>
-            <p>{t('当前专注文字阅读，不支持 PDF、DRM 或扫描件。')}</p>
+            <p>{t('保留文字与页码出处。复杂表格、公式和图片不会还原为原版版式。')}</p>
             <div className="mt-3 flex flex-wrap items-center gap-4 text-xs">
               <a
                 className="inline-flex items-center gap-[5px] text-primary no-underline [&_svg]:rotate-45"
@@ -2549,15 +4422,6 @@ export default function Reader({
           >
             <X size={14} />
           </Button>
-        </div>
-      )}
-      {(!ready || switching) && (
-        <div
-          className="fixed inset-0 z-40 flex items-center justify-center gap-3 bg-background/90 text-[13px] text-muted-foreground backdrop-blur-[3px] dark:bg-background/90"
-          role="status"
-        >
-          <LoaderCircle size={20} className="animate-spin" />
-          {t('正在打开书籍…')}
         </div>
       )}
     </div>

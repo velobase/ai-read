@@ -22,6 +22,7 @@ export type { ReadingAnchor } from './reading-layout';
 type Direction = -1 | 1;
 type Options = {
   root: RefObject<HTMLElement | null>;
+  surfaceReady: boolean;
   chapterId: string;
   chapterIndex: number;
   chapterCount: number;
@@ -118,7 +119,7 @@ export function useReadingNavigation(options: Options) {
 
   useLayoutEffect(() => {
     const root = options.root.current;
-    if (!root) return;
+    if (!options.surfaceReady || !root) return;
     cancel();
     for (const frame of chapterFrames(root)) {
       const content = frame.querySelector<HTMLElement>('[data-book-page]');
@@ -128,11 +129,11 @@ export function useReadingNavigation(options: Options) {
     if (anchor.current && !document.hidden) restoreReadingAnchor(root, anchor.current);
     const frame = requestAnimationFrame(() => refresh(true));
     return () => cancelAnimationFrame(frame);
-  }, [options.mode, options.layoutKey, cancel, refresh, options.root]);
+  }, [options.mode, options.layoutKey, options.surfaceReady, cancel, refresh, options.root]);
 
   useLayoutEffect(() => {
     const root = options.root.current;
-    if (!root) return;
+    if (!options.surfaceReady || !root) return;
     const frame = requestAnimationFrame(() => refresh());
     let first = true;
     let disposed = false;
@@ -168,7 +169,15 @@ export function useReadingNavigation(options: Options) {
       document.fonts.removeEventListener('loadingdone', fontReady);
       cancelAnimationFrame(frame);
     };
-  }, [options.chapterId, options.mode, options.enabled, options.root, cancel, refresh]);
+  }, [
+    options.chapterId,
+    options.mode,
+    options.enabled,
+    options.surfaceReady,
+    options.root,
+    cancel,
+    refresh,
+  ]);
 
   const destination = useCallback((direction: Direction): Turn | null => {
     const current = latest.current;
@@ -328,7 +337,7 @@ export function useReadingNavigation(options: Options) {
 
   useEffect(() => {
     const root = options.root.current;
-    if (!root || options.mode !== 'paged') return;
+    if (!options.surfaceReady || !root || options.mode !== 'paged') return;
     let amount = 0,
       last = 0,
       consumed = false;
@@ -352,7 +361,7 @@ export function useReadingNavigation(options: Options) {
     };
     root.addEventListener('wheel', onWheel, { passive: false });
     return () => root.removeEventListener('wheel', onWheel);
-  }, [options.root, options.mode, turn]);
+  }, [options.root, options.mode, options.surfaceReady, turn]);
 
   return {
     ...metrics,

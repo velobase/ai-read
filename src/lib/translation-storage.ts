@@ -1,26 +1,13 @@
 import { idb, localTransaction, readLocal } from './local-database';
-import type {
-  ChapterTranslation,
-  ChunkResult,
-  Term,
-  TranslationManifest,
-} from './translation-edition';
+import { assertSavedTranslationChapter } from './saved-translation-storage';
+import type { Book } from './types';
+import type { ChapterTranslation, TranslationManifest } from './translation-edition';
 
 export const manifestKey = (bookId: string, language: string) => JSON.stringify([bookId, language]);
 export const chapterKey = (editionId: string, index: number): [string, number] => [
   editionId,
   index,
 ];
-export type LocalTranslationJob = {
-  editionId: string;
-  bookId: string;
-  language: string;
-  terms: Term[];
-  chapters: Record<
-    number,
-    { results: ChunkResult[]; priority: number; attempts: number; retryAt: number }
-  >;
-};
 export function translationChanged() {
   window.dispatchEvent(new Event('bypage-translations'));
   if (typeof BroadcastChannel !== 'undefined') {
@@ -69,18 +56,20 @@ export const cachedChapterIndices = (editionId: string) =>
       ).map((key) => Number((key as [string, number])[1])),
     ['chapter-translations'],
   );
-export async function cacheChapterTranslation(chapter: ChapterTranslation) {
+export async function cacheChapterTranslation(chapter: ChapterTranslation, language: string) {
   await localTransaction(
     'readwrite',
     async (tx) => {
-      if (!(await idb(tx.objectStore('books').get(chapter.bookId)))) return;
+      const book = (await idb(tx.objectStore('books').get(chapter.bookId))) as Book | undefined;
+      if (!book) return;
+      await assertSavedTranslationChapter(tx, book, { ...chapter, language });
       await idb(
         tx
           .objectStore('chapter-translations')
           .put(chapter, chapterKey(chapter.editionId, chapter.index)),
       );
     },
-    ['books', 'chapter-translations'],
+    ['books', 'chapter-translations', 'translation-versions'],
   );
 }
 export async function removeBookTranslations(tx: IDBTransaction, bookId: string) {

@@ -1,6 +1,7 @@
 'use client';
 
 import { useI18n } from '@/lib/i18n/provider';
+import { effectiveBookLanguage } from '../../../packages/reading-core/src/reading-language';
 
 import Link from 'next/link';
 import { LanguageMenu } from './language-menu';
@@ -166,7 +167,7 @@ export function Avatar({
 export function SearchBar({
   large = false,
   className,
-  placeholder = '搜索书名、作者或笔记',
+  placeholder = '搜索书名、作者、正文或笔记',
   defaultValue = '',
 }: {
   large?: boolean;
@@ -189,10 +190,11 @@ export function SearchBar({
       <Search size={20} className="shrink-0 text-muted-foreground" />
       <input
         name="q"
-        aria-label={t('搜索书名、作者或笔记')}
+        aria-label={localize(placeholder)}
         defaultValue={defaultValue}
         placeholder={localize(placeholder)}
         autoComplete="off"
+        enterKeyHint="search"
         maxLength={160}
       />
       <Link
@@ -253,7 +255,7 @@ export function BookCover({ book, className }: { book: BookDisplay; className?: 
       : 'LEAFREAD ORIGINALS'
     : book.listingOnly
       ? t('英文原版')
-      : book.language.toUpperCase();
+      : effectiveBookLanguage(book).toUpperCase();
   const authorLabel = book.sample
     ? book.id === 'ai-read-original-demo-v1'
       ? isChineseUi

@@ -4,6 +4,7 @@ import { SUPPORT_EMAIL, SUPPORT_MAILTO } from '@/lib/contact';
 
 import { useI18n } from '@/lib/i18n/provider';
 import { TranslationPromptEditor } from '@/components/reader/translation-prompt-editor';
+import { ReadingNavigationSettings } from '@/components/reader/reading-controls';
 import { ContentLanguageLabel } from '@/components/library/language-menu';
 
 import Link from 'next/link';
@@ -24,6 +25,7 @@ import {
   ShieldCheck,
   ArrowUpRight,
   Download,
+  Activity,
 } from 'lucide-react';
 import { useLibrary } from './library-provider';
 import { Avatar, LibraryShell, PageHeading, SettingsRow } from './library-ui';
@@ -80,7 +82,17 @@ export function ProfilePage() {
           </div>
           <ChevronRight size={22} className="text-muted-foreground/50" />
         </Link>
-        {user?.isAdmin && <Link className="mb-5 block rounded-xl bg-primary/10 p-4 text-sm font-medium text-primary" href="/admin">{locale.startsWith('zh') ? '书城管理 · 上书与发布' : 'Bookstore admin · Upload & publish'} →</Link>}
+        {user?.isAdmin && (
+          <Link
+            className="mb-5 block rounded-xl bg-primary/10 p-4 text-sm font-medium text-primary"
+            href="/admin"
+          >
+            {locale.startsWith('zh')
+              ? '书城管理 · 上书与发布'
+              : 'Bookstore admin · Upload & publish'}{' '}
+            →
+          </Link>
+        )}
         <Link href="/library" className="profile-reading-card">
           <span className="profile-color-icon bg-[#edbd66]">
             <BookOpen size={22} />
@@ -358,6 +370,11 @@ export function SettingsPage() {
           <SettingsRow icon={<Palette size={22} />} title={t('阅读偏好')} href="/me/appearance" />
           <SettingsRow icon={<Sparkles size={22} />} title={t('AI 连接')} href="/me/models" />
           <SettingsRow icon={<HardDrive size={22} />} title={t('数据与备份')} href="/me/data" />
+          <SettingsRow
+            icon={<Activity size={22} />}
+            title={t('诊断与隐私')}
+            href="/me/diagnostics"
+          />
         </div>
         <div className="settings-group">
           <SettingsRow
@@ -386,7 +403,6 @@ export function PreferencesPage({ models = false }: { models?: boolean }) {
   const [hasKey, setHasKey] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [clearKey, setClearKey] = useState(false);
   const accountMode = identityEnabled && Boolean(user);
   const readOnly = !loaded || saving || (models && identityEnabled && !user);
   useEffect(() => {
@@ -431,7 +447,6 @@ export function PreferencesPage({ models = false }: { models?: boolean }) {
         const config = await saveAIConnection(settings);
         next = applyAIConnection(settings, config);
         setHasKey(config.hasKey);
-        setClearKey(false);
         setSettings(next);
       }
       saveSettings(next);
@@ -516,6 +531,7 @@ export function PreferencesPage({ models = false }: { models?: boolean }) {
                 {t('让一个新的想法，慢慢走进生活。')}
               </div>
               <div className="settings-form-card">
+                <ReadingNavigationSettings settings={settings} update={patch} />
                 <label className="settings-field">
                   <span>
                     {t('字号')}{' '}
@@ -601,10 +617,16 @@ export function PreferencesPage({ models = false }: { models?: boolean }) {
                     <SelectContent>
                       <SelectItem value="original">{t('原文')}</SelectItem>
                       <SelectItem value="bilingual">{t('双语')}</SelectItem>
-                      <SelectItem value="translation">{t('译文')}</SelectItem>
+                      <SelectItem value="translation">
+                        {locale.startsWith('zh') ? '仅译文' : 'Translation only'}
+                      </SelectItem>
                     </SelectContent>
                   </Select>
-                  <small>{t('双语与译文模式准备当前章和下一章，可在“译本”中管理任务。')}</small>
+                  <small>
+                    {locale.startsWith('zh')
+                      ? '用于尚未设置阅读语言的书籍。双语和仅译文会随阅读自动补齐，本书选择在阅读器中单独记住。'
+                      : 'Used until a book has its own reading-language choice. Bilingual and translation-only modes translate as you read; the reader remembers each book’s choice.'}
+                  </small>
                 </div>
               </div>
             </>

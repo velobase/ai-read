@@ -4,12 +4,30 @@ import { authEnabled, nativeAuthConfigured } from './auth-config';
 import { serverAIConfig } from './ai-config';
 import { normalizeAIUrl } from './ai-endpoint';
 import { canUseAI } from '../ai-availability';
+import { effectiveTranslationPrompt } from '../translation-prompt';
 import { MobileAuthError, mobileAuthOrigin, requireMobileSession } from './mobile-auth';
 
 /** Public configuration identity for local history isolation; excludes keys and sessions. */
 export function mobileAIContextKey(config: { baseUrl: string; model: string }) {
   return createHash('sha256')
     .update(JSON.stringify([normalizeAIUrl(config.baseUrl), config.model]))
+    .digest('hex');
+}
+
+/** Freeze a translation run's provider, model and prompt without exposing their credentials. */
+export function mobileTranslationContextKey(config: {
+  baseUrl: string;
+  model: string;
+  translationPrompt?: string;
+}) {
+  return createHash('sha256')
+    .update(
+      JSON.stringify([
+        normalizeAIUrl(config.baseUrl),
+        config.model,
+        effectiveTranslationPrompt(config.translationPrompt),
+      ]),
+    )
     .digest('hex');
 }
 

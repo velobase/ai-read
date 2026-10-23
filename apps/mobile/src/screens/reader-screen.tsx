@@ -20,7 +20,11 @@ import {
   type BookReferenceTarget,
   type BookReferenceLink,
 } from '@bypage/reading-core';
-import { useApp } from '../context';
+import { AppContext, useApp, type Preferences } from '../context';
+import {
+  saveBookReadingPreferences,
+  type BookReadingPreferences,
+} from '../adapters/book-reading-preferences';
 import { useLibrary } from '../library-context';
 import { useLibraryController } from '../library-controller';
 import type { LibraryLease } from '../adapters/library-scope';
@@ -49,7 +53,7 @@ import { ReadingProgressPanel } from '../components/reading-progress-panel';
 import { BookImage, BookImageViewer } from '../components/book-image';
 import { bookImages, type BookImageReference } from '../adapters/book-media';
 import { useChapterTranslation } from '../components/use-chapter-translation';
-import { TranslationPreparation } from '../components/translation-preparation';
+import { TranslationStatus } from '../components/translation-status';
 import { buildSpeechPlan, type SpeechScope, type SpeechSource } from '../adapters/speech-plan';
 import { useReaderSpeech } from '../components/use-reader-speech';
 import { ReaderSpeechPanel } from '../components/reader-speech-panel';
@@ -108,6 +112,7 @@ export type OpenBook = {
   revealTranslation?: RevealedTranslation;
   /** A source jump applies only to this Reader session, never global preferences. */
   readingOverride?: ReadingOverride;
+  readingPreferences: BookReadingPreferences;
 };
 type ReadingOverride = { language: string; mode: 'original' | 'bilingual' | 'translation' };
 const emptyTranslations: Record<string, string> = {};
@@ -143,7 +148,31 @@ export function ReaderScreen({
   if (value.library !== library) throw new Error('reader_library_mismatch');
   const { book } = value;
   const sourceLanguage = effectiveBookLanguage(book);
-  const { colors, preferences: prefs, patch, t, notify } = useApp();
+  const app = useApp();
+  const { colors, preferences: globalPreferences, patch: patchGlobal, t, notify } = app;
+  const [bookPreferences, setBookPreferences] = useState(value.readingPreferences);
+  const bookPreferencesRef = useRef(bookPreferences);
+  const prefs = { ...globalPreferences, ...bookPreferences };
+  const patch = (change: Partial<Preferences>) => {
+    const { language, mode, ...appearance } = change;
+    if (Object.keys(appearance).length) patchGlobal(appearance);
+    if (language === undefined && mode === undefined) return;
+    const next = {
+      ...bookPreferencesRef.current,
+      ...(language ? { language } : {}),
+      ...(mode ? { mode } : {}),
+    };
+    bookPreferencesRef.current = next;
+    setBookPreferences(next);
+    void saveBookReadingPreferences(library.handle, book.id, next).catch((error) => {
+      console.error(
+        'Book reading preferences could not be saved',
+        { bookId: book.id, libraryKey: library.handle.key },
+        error,
+      );
+      if (library.isCurrent()) notify(t('error'));
+    });
+  };
   let initial: Position = value.position || {
     chapter: 0,
     paragraph: book.chapters[0].paragraphs[0].id,
@@ -194,6 +223,35 @@ export function ReaderScreen({
     };
   };
   const [pageInfo, setPageInfo] = useState({ page: 1, total: 1 });
+  const [visibleParagraphs, setVisibleParagraphs] = useState([initial.paragraph]);
+  const visibleParagraphsChanged = (ids: string[]) =>
+    setVisibleParagraphs((previous) =>
+      previous.length === ids.length && previous.every((id, index) => id === ids[index])
+        ? previous
+        : ids,
+    );
+  const [interacting, setInteracting] = useState(false);
+  const interactionActive = useRef(false);
+  const interactionRevision = useRef(0);
+  const interactionSources = useRef(new Set<string>());
+  const interactionTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const readingInteraction = (active: boolean, source = 'motion') => {
+    clearTimeout(interactionTimer.current);
+    interactionRevision.current++;
+    if (active) {
+      interactionSources.current.add(source);
+      interactionActive.current = true;
+      setInteracting(true);
+    } else {
+      interactionSources.current.delete(source);
+      if (!interactionSources.current.size)
+        interactionTimer.current = setTimeout(() => {
+          interactionActive.current = false;
+          setInteracting(false);
+        }, 300);
+    }
+  };
+  useEffect(() => () => clearTimeout(interactionTimer.current), []);
   const [toolsVisible, setToolsVisible] = useState(false);
   useEffect(() => onToolsChange(toolsVisible), [toolsVisible, onToolsChange]);
   const [selected, setSelected] = useState<PassageSelection | null>(null);
@@ -383,14 +441,38 @@ export function ReaderScreen({
     return entries;
   }, [book, library]);
   const scrollParagraphs = continuous ? allParagraphs : chapter.paragraphs;
-  const translation = useChapterTranslation(book, value.translations, current, {
-    auto: prefs.mode !== 'original',
-    initialKeys: value.translationKeys,
+  const translationScope = `${book.id}:${current.chapter}:${current.paragraph}:${readingLanguage}:${readingOverride?.mode || prefs.mode}`;
+  const [translationWindow, setTranslationWindow] = useState<{
+    scope: string;
+    paragraph?: string;
+  }>();
+  const translationTarget =
+    translationWindow?.scope === translationScope ? translationWindow.paragraph : undefined;
+  const targetEntry = translationTarget ? paragraphIndex.get(translationTarget) : undefined;
+  const translation = useChapterTranslation(
+    book,
+    value.translations,
+    targetEntry && translationTarget
+      ? { ...current, chapter: targetEntry.chapter, paragraph: translationTarget }
+      : current,
+    {
+      auto:
+        !referenceOriginal && !readingOverride && !revealedTranslation && prefs.mode !== 'original',
+      language: readingLanguage,
+      initialKeys: value.translationKeys,
+    },
+  );
+  const [displayedTranslation, setDisplayedTranslation] = useState({
+    language: readingLanguage,
+    saved: translation.saved,
+    keys: translation.savedKeys,
   });
-  const baseTranslations = readingOverride
-    ? translation.saved[readingLanguage] || emptyTranslations
-    : translation.translations;
-  const baseTranslationKeys = translation.savedKeys[readingLanguage] || emptyTranslations;
+  const displayed =
+    displayedTranslation.language === readingLanguage
+      ? displayedTranslation
+      : { language: readingLanguage, saved: translation.saved, keys: translation.savedKeys };
+  const baseTranslations = displayed.saved[readingLanguage] || emptyTranslations;
+  const baseTranslationKeys = displayed.keys[readingLanguage] || emptyTranslations;
   const translations = useMemo(
     () =>
       revealedTranslation?.language === readingLanguage
@@ -446,7 +528,26 @@ export function ReaderScreen({
     ],
   );
   const speechActive = ['loading', 'speaking', 'paused'].includes(speech.state.status);
-  const hasTranslations = Object.keys(translations).length > 0;
+  const translationState = {
+    status: translation.loadError ? ('error' as const) : translation.status,
+    retry: translation.loadError ? () => void translation.refresh() : translation.retry,
+  };
+  const missingVisibleParagraph = visibleParagraphs.find(
+    (id) => paragraphIndex.get(id)?.paragraph.text.trim() && !translations[id],
+  );
+  useEffect(() => {
+    const firstMissing = visibleParagraphs.find(
+      (id) => paragraphIndex.get(id)?.paragraph.text.trim() && !translation.translations[id],
+    );
+    const paragraph =
+      firstMissing ||
+      visibleParagraphs.filter((id) => paragraphIndex.get(id)?.paragraph.text.trim()).at(-1);
+    setTranslationWindow((old) =>
+      old?.scope === translationScope && old.paragraph === paragraph
+        ? old
+        : { scope: translationScope, paragraph },
+    );
+  }, [visibleParagraphs, translation.translations, paragraphIndex, translationScope]);
   const bookmarkContext = useRef('');
   bookmarkContext.current = `${positionEpoch.current}:${jumpRevision}:${layoutRevision}:${readingMode}:${readingLanguage}:${prefs.turnMode}:${prefs.scrollFlow}:${prefs.fontSize}:${prefs.lineHeight}:${prefs.serif}`;
   const currentText = useRef({ translations, translationKeys, readingMode });
@@ -593,6 +694,9 @@ export function ReaderScreen({
   };
   const viewCallback = useRef<(info: { viewableItems: ViewToken<Paragraph>[] }) => void>(() => {});
   viewCallback.current = ({ viewableItems }) => {
+    visibleParagraphsChanged(
+      viewableItems.filter((item) => item.isViewable).map((item) => item.item.id),
+    );
     const first = viewableItems.find((item) => item.isViewable)?.item;
     // A delayed viewability callback must not replace a captured line in the
     // same paragraph with its start. Crossing paragraphs still supplies a fallback.
@@ -650,6 +754,51 @@ export function ReaderScreen({
   };
   const capturePositionRef = useRef(capturePosition);
   capturePositionRef.current = capturePosition;
+  useEffect(() => {
+    if (interacting || sheet || interactionActive.current || !library.isCurrent()) return;
+    if (
+      displayedTranslation.language === readingLanguage &&
+      displayedTranslation.saved[readingLanguage] === translation.saved[readingLanguage] &&
+      displayedTranslation.keys[readingLanguage] === translation.savedKeys[readingLanguage]
+    )
+      return;
+    let alive = true;
+    const revision = interactionRevision.current;
+    void (async () => {
+      if (readingMode !== 'original' && prefs.turnMode === 'scroll')
+        await capturePositionRef.current(180);
+      if (
+        !alive ||
+        interactionActive.current ||
+        revision !== interactionRevision.current ||
+        !library.isCurrent()
+      )
+        return;
+      // Capture before inserting text; remount restores the same semantic reading point.
+      setDisplayedTranslation({
+        language: readingLanguage,
+        saved: translation.saved,
+        keys: translation.savedKeys,
+      });
+      if (readingMode !== 'original') {
+        readyToTrack.current = false;
+        setLayoutRevision((value) => value + 1);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [
+    translation.saved,
+    translation.savedKeys,
+    displayedTranslation,
+    readingLanguage,
+    interacting,
+    sheet,
+    library,
+    prefs.turnMode,
+    readingMode,
+  ]);
   useEffect(
     () =>
       registerFlush(async () => {
@@ -712,7 +861,13 @@ export function ReaderScreen({
   useEffect(() => {
     void flushRef.current();
     const subscription = AppState.addEventListener('change', (state) => {
-      if (state !== 'active') {
+      if (state === 'active') {
+        clearTimeout(interactionTimer.current);
+        interactionSources.current.clear();
+        interactionActive.current = false;
+        interactionRevision.current++;
+        setInteracting(false);
+      } else {
         // Save the last trusted point immediately; native layout may be suspended
         // before a best-effort bounded capture finishes in the background.
         void flushRef.current();
@@ -1576,6 +1731,33 @@ export function ReaderScreen({
     position.textQuote = safeReadingQuote(translatedText, position.textOffset);
     position.offset = position.textOffset / Math.max(1, translatedText.length);
   };
+  const changeReadingLanguage = (change: Partial<BookReadingPreferences>) => {
+    if (!isReaderCurrent()) return;
+    const next = {
+      language: readingLanguage,
+      mode: readingOverride?.mode || prefs.mode,
+      ...change,
+    };
+    const position = { ...latest.current };
+    rebaseTranslatedPosition(
+      position,
+      next.mode === 'original' ? undefined : translation.saved[next.language]?.[position.paragraph],
+    );
+    invalidatePositionWork();
+    stop();
+    bookmarkSource.current = null;
+    setRevealedTranslation(null);
+    setReferenceOriginal(false);
+    setReadingOverride(null);
+    latest.current = position;
+    setCurrent(position);
+    readyToTrack.current = false;
+    setJump(position.paragraph);
+    setJumpRevision((value) => value + 1);
+    setLayoutRevision((value) => value + 1);
+    patch(next);
+    setSheet(null);
+  };
   const finishReading = async (dismiss = false) => {
     if (!isReaderCurrent()) return;
     try {
@@ -1660,910 +1842,944 @@ export function ReaderScreen({
     return active?.key;
   }, [contents, current.paragraph, paragraphIndex, hasPdfContents, pdfPages]);
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <View style={{ height: 54, paddingHorizontal: 28, justifyContent: 'center' }}>
-        <Text numberOfLines={1} style={{ color: colors.muted, fontSize: 11 }}>
-          {chapterTitle}
-        </Text>
-        {sourcePageLabel && chapterNavigation.current?.kind === 'chapter' && (
-          <Text numberOfLines={1} style={{ color: colors.muted, fontSize: 10, marginTop: 3 }}>
-            {sourcePageLabel}
+    <AppContext.Provider value={{ ...app, preferences: prefs, patch }}>
+      <View
+        style={{ flex: 1, backgroundColor: colors.background }}
+        onTouchStart={() => readingInteraction(true, 'touch')}
+        onTouchEnd={() => readingInteraction(false, 'touch')}
+        onTouchCancel={() => readingInteraction(false, 'touch')}
+      >
+        <View style={{ height: 54, paddingHorizontal: 28, justifyContent: 'center' }}>
+          <Text numberOfLines={1} style={{ color: colors.muted, fontSize: 11 }}>
+            {chapterTitle}
           </Text>
-        )}
-      </View>
-      {toolsVisible && (
-        <View
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            height: 54,
-            zIndex: 4,
-            backgroundColor: colors.surface,
-            flexDirection: 'row',
-            alignItems: 'center',
-            paddingHorizontal: 10,
-            borderBottomWidth: 0.5,
-            borderColor: colors.border,
-          }}
-        >
-          <IconButton icon="chevron-back" label={t('back')} onPress={() => void exit()} />
-          <Text numberOfLines={1} style={{ flex: 1, color: colors.muted, fontSize: 13 }}>
-            {book.title}
-          </Text>
-          <IconButton
-            icon="headset-outline"
-            label={t(speechActive ? 'speechControls' : 'listen')}
-            active={speechActive}
-            onPress={() => void openSpeech()}
-          />
-          <IconButton
-            icon="bookmark-outline"
-            label={t('bookmarks')}
-            onPress={() => setSheet('bookmarks')}
-          />
-          <IconButton
-            icon="ellipsis-horizontal"
-            label={t('more')}
-            onPress={() => setSheet('bookTools')}
-          />
+          {sourcePageLabel && chapterNavigation.current?.kind === 'chapter' && (
+            <Text numberOfLines={1} style={{ color: colors.muted, fontSize: 10, marginTop: 3 }}>
+              {sourcePageLabel}
+            </Text>
+          )}
         </View>
-      )}
-      {prefs.turnMode === 'paged' ? (
-        <PaginatedChapter
-          key={`${chapterIndex}:${jump}:${jumpRevision}`}
-          book={book}
-          chapter={chapter}
-          translations={translations}
-          translationKeys={translationKeys}
-          readingMode={readingMode}
-          readingLanguage={readingLanguage}
-          onReadyChange={(ready) => {
-            if (isReaderCurrent()) readyToTrack.current = ready;
-          }}
-          onImage={openImage}
-          onReference={openReference}
-          onReferences={(references) =>
-            setPageReferences((previous) =>
-              JSON.stringify(previous) === JSON.stringify(references) ? previous : references,
-            )
-          }
-          anchor={latest.current}
-          startAtEnd={jumpToEnd}
-          notes={notes}
-          onPosition={(id, offset, source) => {
-            if (!isReaderCurrent()) return;
-            setJumpToEnd(false);
-            track(id, offset, source);
-          }}
-          onPage={(page, total) => {
-            if (!isReaderCurrent()) return;
-            setPageInfo((previous) =>
-              previous.page === page && previous.total === total ? previous : { page, total },
-            );
-          }}
-          onTap={() => setToolsVisible((v) => !v)}
-          onSelect={(selection) => {
-            if (!isReaderCurrent()) return;
-            setSelected(selection);
-            setNoteText('');
-            setSheet('actions');
-          }}
-          onBoundary={(direction) => {
-            if (!isReaderCurrent()) return;
-            if (chapterIndex + direction >= 0 && chapterIndex + direction < book.chapters.length)
-              navigate(
-                chapterIndex + direction,
-                direction < 0 ? book.chapters[chapterIndex - 1].paragraphs.at(-1)!.id : undefined,
-                direction < 0,
-                undefined,
-                undefined,
-                undefined,
-                { remember: false, sequential: true },
-              );
-            else if (direction === 1) {
-              setToolsVisible(true);
-              setSheet('progress');
+        {toolsVisible && (
+          <View
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              height: 54,
+              zIndex: 4,
+              backgroundColor: colors.surface,
+              flexDirection: 'row',
+              alignItems: 'center',
+              paddingHorizontal: 10,
+              borderBottomWidth: 0.5,
+              borderColor: colors.border,
+            }}
+          >
+            <IconButton icon="chevron-back" label={t('back')} onPress={() => void exit()} />
+            <Text numberOfLines={1} style={{ flex: 1, color: colors.muted, fontSize: 13 }}>
+              {book.title}
+            </Text>
+            <IconButton
+              icon="headset-outline"
+              label={t(speechActive ? 'speechControls' : 'listen')}
+              active={speechActive}
+              onPress={() => void openSpeech()}
+            />
+            <IconButton
+              icon="bookmark-outline"
+              label={t('bookmarks')}
+              onPress={() => setSheet('bookmarks')}
+            />
+            <IconButton
+              icon="ellipsis-horizontal"
+              label={t('more')}
+              onPress={() => setSheet('bookTools')}
+            />
+          </View>
+        )}
+        {prefs.turnMode === 'paged' ? (
+          <PaginatedChapter
+            key={`${chapterIndex}:${jump}:${jumpRevision}`}
+            book={book}
+            chapter={chapter}
+            translations={translations}
+            translationKeys={translationKeys}
+            readingMode={readingMode}
+            readingLanguage={readingLanguage}
+            translationStatus={translation.loadError ? 'error' : translation.status}
+            retryTranslation={
+              translation.loadError ? () => void translation.refresh() : translation.retry
             }
-          }}
-        />
-      ) : (
-        <AnchoredParagraphList
-          key={`${continuous ? 'continuous' : chapterIndex}:${jump}:${jumpRevision}:${layoutRevision}:${readingMode}:${readingLanguage}:${prefs.fontSize}:${prefs.lineHeight}:${prefs.serif}:${book.media?.revision || ''}:${book.references?.revision || ''}`}
-          items={scrollParagraphs}
-          captureRef={capture}
-          anchor={scrollAnchor}
-          onRestoring={() => {
-            readyToTrack.current = false;
-          }}
-          onRestored={() => {
-            readyToTrack.current = true;
-          }}
-          onScrollIdle={saveIdlePosition}
-          keyExtractor={(p) => p.id}
-          onViewableItemsChanged={viewChanged}
-          viewabilityConfig={{ viewAreaCoveragePercentThreshold: 1, minimumViewTime: 180 }}
-          contentContainerStyle={{
-            paddingHorizontal: 26,
-            paddingBottom: 64,
-            maxWidth: 790,
-            width: '100%',
-            alignSelf: 'center',
-          }}
-          ListHeaderComponent={
-            !continuous ? (
-              <Pressable
-                onPress={() => setToolsVisible((v) => !v)}
-                style={{ paddingTop: pdf ? 8 : 24, paddingBottom: pdf ? 14 : 26, gap: 14 }}
-              >
-                <Text style={{ color: colors.accent, fontSize: 11, letterSpacing: 1.4 }}>
-                  {pdf
-                    ? sourcePageLabel || chapter.title
-                    : `${t('chapter', { n: chapterIndex + 1 })} / ${book.chapters.length}`}
-                </Text>
-                {!pdf && !chapterStartsWithTitle && (
-                  <Text
-                    accessibilityRole="header"
-                    style={{
-                      color: colors.ink,
-                      fontFamily: prefs.serif ? 'Georgia' : undefined,
-                      fontSize: 30,
-                      lineHeight: 39,
-                    }}
-                  >
-                    {chapter.title}
+            onVisibleParagraphs={visibleParagraphsChanged}
+            onInteractionChange={readingInteraction}
+            onReadyChange={(ready) => {
+              if (isReaderCurrent()) readyToTrack.current = ready;
+            }}
+            onImage={openImage}
+            onReference={openReference}
+            onReferences={(references) =>
+              setPageReferences((previous) =>
+                JSON.stringify(previous) === JSON.stringify(references) ? previous : references,
+              )
+            }
+            anchor={latest.current}
+            startAtEnd={jumpToEnd}
+            notes={notes}
+            onPosition={(id, offset, source) => {
+              if (!isReaderCurrent()) return;
+              setJumpToEnd(false);
+              track(id, offset, source);
+            }}
+            onPage={(page, total) => {
+              if (!isReaderCurrent()) return;
+              setPageInfo((previous) =>
+                previous.page === page && previous.total === total ? previous : { page, total },
+              );
+            }}
+            onTap={() => setToolsVisible((v) => !v)}
+            onSelect={(selection) => {
+              if (!isReaderCurrent()) return;
+              setSelected(selection);
+              setNoteText('');
+              setSheet('actions');
+            }}
+            onBoundary={(direction) => {
+              if (!isReaderCurrent()) return;
+              if (chapterIndex + direction >= 0 && chapterIndex + direction < book.chapters.length)
+                navigate(
+                  chapterIndex + direction,
+                  direction < 0 ? book.chapters[chapterIndex - 1].paragraphs.at(-1)!.id : undefined,
+                  direction < 0,
+                  undefined,
+                  undefined,
+                  undefined,
+                  { remember: false, sequential: true },
+                );
+              else if (direction === 1) {
+                setToolsVisible(true);
+                setSheet('progress');
+              }
+            }}
+          />
+        ) : (
+          <AnchoredParagraphList
+            key={`${continuous ? 'continuous' : chapterIndex}:${jump}:${jumpRevision}:${layoutRevision}:${readingMode}:${readingLanguage}:${prefs.fontSize}:${prefs.lineHeight}:${prefs.serif}:${book.media?.revision || ''}:${book.references?.revision || ''}`}
+            items={scrollParagraphs}
+            captureRef={capture}
+            anchor={scrollAnchor}
+            onRestoring={() => {
+              readyToTrack.current = false;
+            }}
+            onRestored={() => {
+              readyToTrack.current = true;
+            }}
+            onScrollBeginDrag={() => readingInteraction(true)}
+            onMomentumScrollBegin={() => readingInteraction(true)}
+            onScrollIdle={() => {
+              readingInteraction(false);
+              saveIdlePosition();
+            }}
+            keyExtractor={(p) => p.id}
+            onViewableItemsChanged={viewChanged}
+            viewabilityConfig={{ viewAreaCoveragePercentThreshold: 1, minimumViewTime: 180 }}
+            contentContainerStyle={{
+              paddingHorizontal: 26,
+              paddingBottom: 64,
+              maxWidth: 790,
+              width: '100%',
+              alignSelf: 'center',
+            }}
+            ListHeaderComponent={
+              !continuous ? (
+                <Pressable
+                  onPress={() => setToolsVisible((v) => !v)}
+                  style={{ paddingTop: pdf ? 8 : 24, paddingBottom: pdf ? 14 : 26, gap: 14 }}
+                >
+                  <Text style={{ color: colors.accent, fontSize: 11, letterSpacing: 1.4 }}>
+                    {pdf
+                      ? sourcePageLabel || chapter.title
+                      : `${t('chapter', { n: chapterIndex + 1 })} / ${book.chapters.length}`}
                   </Text>
-                )}
-                {!hasTranslations && readingMode !== 'original' && (
-                  <Text style={{ color: colors.muted, fontSize: 12, lineHeight: 19 }}>
-                    {t('noTranslations')}
-                  </Text>
-                )}
-              </Pressable>
-            ) : null
-          }
-          renderItem={({ item }) => {
-            const translation = translations[item.id];
-            const entry = paragraphIndex.get(item.id);
-            const itemChapter = book.chapters[entry?.chapter ?? chapterIndex];
-            const sourceIsChapterTitle =
-              entry?.first &&
-              item.kind === 'heading' &&
-              item.text.trim() === itemChapter.title.trim();
-            const showOriginal = readingMode !== 'translation' || !translation;
-            const paragraphText = (source: 'original' | 'translation', text: string) => (
-              <Pressable
-                key={source}
-                accessibilityRole="button"
-                accessibilityLabel={text}
-                accessibilityHint={t('noteHint')}
-                onPress={() => setToolsVisible((visible) => !visible)}
-                onLongPress={() => {
-                  setSelected({
-                    paragraph: item,
-                    source,
-                    text,
-                    start: 0,
-                    end: text.length,
-                    language: readingLanguage,
-                    ...(source === 'translation'
-                      ? { translationKey: translationKeys[item.id] }
-                      : {}),
-                  });
-                  setNoteText('');
-                  setSheet('actions');
-                }}
-              >
-                <AnchorPassageText
-                  paragraph={item.id}
-                  source={source}
-                  text={text}
-                  style={{
-                    color:
-                      source === 'translation' && readingMode === 'bilingual'
-                        ? colors.muted
-                        : colors.ink,
-                    fontSize:
-                      source === 'translation' && readingMode === 'bilingual'
-                        ? prefs.fontSize - 2
-                        : item.kind === 'heading'
-                          ? prefs.fontSize + 3
-                          : prefs.fontSize,
-                    lineHeight: prefs.fontSize * prefs.lineHeight,
-                    fontFamily:
-                      source === 'original'
-                        ? item.kind === 'code'
-                          ? 'Menlo'
-                          : prefs.serif
-                            ? 'Georgia'
-                            : undefined
-                        : undefined,
-                    fontStyle: item.kind === 'quote' ? 'italic' : 'normal',
-                    fontWeight: item.kind === 'heading' ? '600' : '400',
-                    textAlign:
-                      source === 'original' && book.pageDirection === 'rtl' ? 'right' : 'left',
-                    writingDirection:
-                      source === 'original' && book.pageDirection === 'rtl' ? 'rtl' : 'auto',
+                  {readingMode !== 'translation' && !pdf && !chapterStartsWithTitle && (
+                    <Text
+                      accessibilityRole="header"
+                      style={{
+                        color: colors.ink,
+                        fontFamily: prefs.serif ? 'Georgia' : undefined,
+                        fontSize: 30,
+                        lineHeight: 39,
+                      }}
+                    >
+                      {chapter.title}
+                    </Text>
+                  )}
+                </Pressable>
+              ) : null
+            }
+            renderItem={({ item }) => {
+              const translation = translations[item.id];
+              const entry = paragraphIndex.get(item.id);
+              const itemChapter = book.chapters[entry?.chapter ?? chapterIndex];
+              const sourceIsChapterTitle =
+                entry?.first &&
+                item.kind === 'heading' &&
+                item.text.trim() === itemChapter.title.trim();
+              const showOriginal = readingMode !== 'translation';
+              const paragraphText = (source: 'original' | 'translation', text: string) => (
+                <Pressable
+                  key={source}
+                  accessibilityRole="button"
+                  accessibilityLabel={text}
+                  accessibilityHint={t('noteHint')}
+                  onPress={() => setToolsVisible((visible) => !visible)}
+                  onLongPress={() => {
+                    setSelected({
+                      paragraph: item,
+                      source,
+                      text,
+                      start: 0,
+                      end: text.length,
+                      language: readingLanguage,
+                      ...(source === 'translation'
+                        ? { translationKey: translationKeys[item.id] }
+                        : {}),
+                    });
+                    setNoteText('');
+                    setSheet('actions');
                   }}
                 >
-                  <HighlightedPassage
+                  <AnchorPassageText
+                    paragraph={item.id}
+                    source={source}
                     text={text}
-                    ranges={passageRanges(notes, item.id, text, source, translationKeys[item.id])}
-                    links={source === 'original' ? paragraphReferences.get(item.id) : undefined}
-                    onLink={(link) =>
-                      openReference(link.id, {
-                        paragraph: item.id,
-                        textOffset: link.start,
-                        textSource: 'original',
-                      })
-                    }
-                    onLinkLongPress={() => {
-                      setSelected({
-                        paragraph: item,
-                        source,
-                        text,
-                        start: 0,
-                        end: text.length,
-                        language: readingLanguage,
-                        ...(source === 'translation'
-                          ? { translationKey: translationKeys[item.id] }
-                          : {}),
-                      });
-                      setNoteText('');
-                      setSheet('actions');
-                    }}
-                  />
-                </AnchorPassageText>
-              </Pressable>
-            );
-            return (
-              <View style={{ marginBottom: 22, gap: 13 }}>
-                {continuous && pdf && entry?.first && (
-                  <Text style={{ color: colors.muted, paddingTop: 8, fontSize: 11 }}>
-                    {itemChapter.sourcePage
-                      ? t('pdfPage', { n: itemChapter.sourcePage })
-                      : itemChapter.title}
-                  </Text>
-                )}
-                {continuous && !pdf && entry?.first && !sourceIsChapterTitle && (
-                  <Text
-                    accessibilityRole="header"
                     style={{
-                      color: colors.ink,
-                      paddingTop: 24,
-                      paddingBottom: 18,
-                      fontSize: 30,
-                      lineHeight: 39,
-                      fontFamily: prefs.serif ? 'Georgia' : undefined,
+                      color:
+                        source === 'translation' && readingMode === 'bilingual'
+                          ? colors.muted
+                          : colors.ink,
+                      fontSize:
+                        source === 'translation' && readingMode === 'bilingual'
+                          ? prefs.fontSize - 2
+                          : item.kind === 'heading'
+                            ? prefs.fontSize + 3
+                            : prefs.fontSize,
+                      lineHeight: prefs.fontSize * prefs.lineHeight,
+                      fontFamily:
+                        source === 'original'
+                          ? item.kind === 'code'
+                            ? 'Menlo'
+                            : prefs.serif
+                              ? 'Georgia'
+                              : undefined
+                          : undefined,
+                      fontStyle: item.kind === 'quote' ? 'italic' : 'normal',
+                      fontWeight: item.kind === 'heading' ? '600' : '400',
+                      textAlign:
+                        source === 'original' && book.pageDirection === 'rtl' ? 'right' : 'left',
+                      writingDirection:
+                        source === 'original' && book.pageDirection === 'rtl' ? 'rtl' : 'auto',
                     }}
                   >
-                    {itemChapter.title}
-                  </Text>
-                )}
-                {imagesByParagraph.get(item.id)?.before.map((image) => (
-                  <BookImage key={image.placement.id} image={image} open={openImage} />
-                ))}
-                {showOriginal && paragraphText('original', item.text)}
-                {readingMode !== 'original' &&
-                  translation &&
-                  paragraphText('translation', translation)}
-                {readingMode === 'translation' && !translation && (
-                  <Text style={{ color: colors.muted, fontSize: 11 }}>
-                    {t('translationMissing')}
-                  </Text>
-                )}
-                {imagesByParagraph.get(item.id)?.after.map((image) => (
-                  <BookImage key={image.placement.id} image={image} open={openImage} />
-                ))}
-                {!!paragraphReferences.get(item.id)?.length && (
+                    <HighlightedPassage
+                      text={text}
+                      ranges={passageRanges(notes, item.id, text, source, translationKeys[item.id])}
+                      links={source === 'original' ? paragraphReferences.get(item.id) : undefined}
+                      onLink={(link) =>
+                        openReference(link.id, {
+                          paragraph: item.id,
+                          textOffset: link.start,
+                          textSource: 'original',
+                        })
+                      }
+                      onLinkLongPress={() => {
+                        setSelected({
+                          paragraph: item,
+                          source,
+                          text,
+                          start: 0,
+                          end: text.length,
+                          language: readingLanguage,
+                          ...(source === 'translation'
+                            ? { translationKey: translationKeys[item.id] }
+                            : {}),
+                        });
+                        setNoteText('');
+                        setSheet('actions');
+                      }}
+                    />
+                  </AnchorPassageText>
+                </Pressable>
+              );
+              return (
+                <View style={{ marginBottom: 22, gap: 13 }}>
+                  {continuous && pdf && entry?.first && (
+                    <Text style={{ color: colors.muted, paddingTop: 8, fontSize: 11 }}>
+                      {itemChapter.sourcePage
+                        ? t('pdfPage', { n: itemChapter.sourcePage })
+                        : itemChapter.title}
+                    </Text>
+                  )}
+                  {readingMode !== 'translation' &&
+                    continuous &&
+                    !pdf &&
+                    entry?.first &&
+                    !sourceIsChapterTitle && (
+                      <Text
+                        accessibilityRole="header"
+                        style={{
+                          color: colors.ink,
+                          paddingTop: 24,
+                          paddingBottom: 18,
+                          fontSize: 30,
+                          lineHeight: 39,
+                          fontFamily: prefs.serif ? 'Georgia' : undefined,
+                        }}
+                      >
+                        {itemChapter.title}
+                      </Text>
+                    )}
+                  {imagesByParagraph.get(item.id)?.before.map((image) => (
+                    <BookImage key={image.placement.id} image={image} open={openImage} />
+                  ))}
+                  {showOriginal && paragraphText('original', item.text)}
+                  {readingMode !== 'original' &&
+                    translation &&
+                    paragraphText('translation', translation)}
+                  {readingMode !== 'original' &&
+                    !!item.text.trim() &&
+                    !translation &&
+                    (item.id === missingVisibleParagraph ? (
+                      <TranslationStatus
+                        status={translationState.status}
+                        retry={translationState.retry}
+                      />
+                    ) : readingMode === 'translation' ? (
+                      <Text
+                        style={{
+                          color: colors.muted,
+                          fontSize: 13,
+                          lineHeight: 24,
+                          paddingVertical: 12,
+                        }}
+                      >
+                        {t('translationPending')}
+                      </Text>
+                    ) : null)}
+                  {imagesByParagraph.get(item.id)?.after.map((image) => (
+                    <BookImage key={image.placement.id} image={image} open={openImage} />
+                  ))}
+                  {!!paragraphReferences.get(item.id)?.length && (
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => {
+                        const source =
+                          readingMode === 'translation' && translation ? 'translation' : 'original';
+                        const references = new Map(
+                          (paragraphReferences.get(item.id) || []).map(
+                            (link) =>
+                              [
+                                link.id,
+                                {
+                                  id: link.id,
+                                  label: link.label,
+                                  origin: {
+                                    paragraph: item.id,
+                                    textSource: source,
+                                    textOffset:
+                                      source === 'original'
+                                        ? link.start
+                                        : current.paragraph === item.id &&
+                                            current.textSource === 'translation'
+                                          ? current.textOffset || 0
+                                          : 0,
+                                  },
+                                },
+                              ] as const,
+                          ),
+                        );
+                        openReferenceChoices([...references.values()]);
+                      }}
+                      style={{ alignSelf: 'flex-start', paddingVertical: 8 }}
+                    >
+                      <Text style={{ color: colors.accent, fontSize: 12 }}>
+                        {t('bookReferences')}
+                      </Text>
+                    </Pressable>
+                  )}
+                </View>
+              );
+            }}
+            // FlatList mounts its footer outside the visible row window. Do not expose
+            // a finished-book announcement to accessibility while reading an earlier chapter.
+            ListFooterComponent={
+              <View style={{ gap: 18, paddingTop: 10 }}>
+                <Text style={{ color: colors.muted, fontSize: 11, textAlign: 'center' }}>
+                  {t('noteHint')}
+                </Text>
+                {!continuous && chapterIndex + 1 < book.chapters.length ? (
+                  <Button
+                    onPress={() =>
+                      navigate(
+                        chapterIndex + 1,
+                        undefined,
+                        false,
+                        undefined,
+                        undefined,
+                        undefined,
+                        {
+                          remember: false,
+                          sequential: true,
+                        },
+                      )
+                    }
+                    secondary
+                    icon="arrow-forward"
+                  >
+                    {t(pdf ? 'nextOriginalPage' : 'next')}
+                  </Button>
+                ) : chapterIndex === book.chapters.length - 1 ? (
+                  <>
+                    <Text style={{ color: colors.muted, textAlign: 'center' }}>{t('end')}</Text>
+                    <Button onPress={() => void finishReading()} icon="checkmark">
+                      {t('markFinished')}
+                    </Button>
+                  </>
+                ) : null}
+              </View>
+            }
+          />
+        )}
+        {sheet === 'image' && selectedImage && (
+          <BookImageViewer
+            key={selectedImage.placement.id}
+            image={selectedImage}
+            {...sheetProps('image')}
+            close={() => setSheet(null)}
+          />
+        )}
+        <View
+          pointerEvents={toolsVisible ? 'none' : 'auto'}
+          accessibilityElementsHidden={toolsVisible}
+          importantForAccessibility={toolsVisible ? 'no-hide-descendants' : 'auto'}
+          style={{
+            height: 32,
+            paddingHorizontal: 27,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <Text style={{ fontSize: 10, color: colors.muted }}>
+            {prefs.turnMode === 'paged'
+              ? t('pageNumber', pageInfo)
+              : `${chapterIndex + 1} / ${book.chapters.length}`}
+          </Text>
+          <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'center' }}>
+            {!toolsVisible && searchOrigin && (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setSheet('search')}
+                style={{ padding: 7 }}
+              >
+                <Text style={{ fontSize: 11, color: colors.accent }}>
+                  {t('searchReturnResults')}
+                </Text>
+              </Pressable>
+            )}
+            {!toolsVisible && !!referenceHistory.length && (
+              <ReaderReturnActions
+                compact
+                busy={returnBusy}
+                onReturn={returnFromReference}
+                onStay={stayHere}
+              />
+            )}
+            {!toolsVisible && prefs.turnMode === 'paged' && !!pageReferences.length && (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => openReferenceChoices(pageReferences)}
+                style={{ padding: 7 }}
+              >
+                <Text style={{ fontSize: 11, color: colors.accent }}>{t('bookReferences')}</Text>
+              </Pressable>
+            )}
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t(toolsVisible ? 'hideTools' : 'showTools')}
+            onPress={() => setToolsVisible((v) => !v)}
+            style={{ paddingHorizontal: 12, paddingVertical: 8 }}
+          >
+            <Text style={{ fontSize: 10, color: colors.muted }}>
+              {t('progress', { n: percent })}
+            </Text>
+          </Pressable>
+        </View>
+        {toolsVisible && (
+          <View
+            style={{
+              position: 'absolute',
+              bottom: 0,
+              left: 0,
+              right: 0,
+              zIndex: 4,
+              backgroundColor: colors.surface,
+              borderTopWidth: 0.5,
+              borderColor: colors.border,
+            }}
+          >
+            {(!!referenceHistory.length || !!availableReferences.length || !!searchOrigin) && (
+              <View
+                style={{
+                  flexDirection: 'row',
+                  borderBottomWidth: 0.5,
+                  borderColor: colors.border,
+                  paddingHorizontal: 12,
+                }}
+              >
+                {searchOrigin && (
                   <Pressable
                     accessibilityRole="button"
-                    onPress={() => {
-                      const source =
-                        readingMode === 'translation' && translation ? 'translation' : 'original';
-                      const references = new Map(
-                        (paragraphReferences.get(item.id) || []).map(
-                          (link) =>
-                            [
-                              link.id,
-                              {
-                                id: link.id,
-                                label: link.label,
-                                origin: {
-                                  paragraph: item.id,
-                                  textSource: source,
-                                  textOffset:
-                                    source === 'original'
-                                      ? link.start
-                                      : current.paragraph === item.id &&
-                                          current.textSource === 'translation'
-                                        ? current.textOffset || 0
-                                        : 0,
-                                },
-                              },
-                            ] as const,
-                        ),
-                      );
-                      openReferenceChoices([...references.values()]);
-                    }}
-                    style={{ alignSelf: 'flex-start', paddingVertical: 8 }}
+                    onPress={() => setSheet('search')}
+                    style={{ flex: 1, minHeight: 44, padding: 10, justifyContent: 'center' }}
                   >
-                    <Text style={{ color: colors.accent, fontSize: 12 }}>
+                    <Text style={{ color: colors.accent, fontSize: 12, textAlign: 'center' }}>
+                      {t('searchReturnResults')}
+                    </Text>
+                  </Pressable>
+                )}
+                {!!referenceHistory.length && (
+                  <ReaderReturnActions
+                    busy={returnBusy}
+                    onReturn={returnFromReference}
+                    onStay={stayHere}
+                  />
+                )}
+                {!!availableReferences.length && (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => openReferenceChoices(availableReferences)}
+                    style={{ flex: 1, minHeight: 44, padding: 10, justifyContent: 'center' }}
+                  >
+                    <Text style={{ color: colors.accent, fontSize: 12, textAlign: 'center' }}>
                       {t('bookReferences')}
                     </Text>
                   </Pressable>
                 )}
               </View>
-            );
-          }}
-          // FlatList mounts its footer outside the visible row window. Do not expose
-          // a finished-book announcement to accessibility while reading an earlier chapter.
-          ListFooterComponent={
-            <View style={{ gap: 18, paddingTop: 10 }}>
-              <Text style={{ color: colors.muted, fontSize: 11, textAlign: 'center' }}>
-                {t('noteHint')}
-              </Text>
-              {!continuous && chapterIndex + 1 < book.chapters.length ? (
-                <Button
-                  onPress={() =>
-                    navigate(chapterIndex + 1, undefined, false, undefined, undefined, undefined, {
-                      remember: false,
-                      sequential: true,
-                    })
-                  }
-                  secondary
-                  icon="arrow-forward"
-                >
-                  {t(pdf ? 'nextOriginalPage' : 'next')}
-                </Button>
-              ) : chapterIndex === book.chapters.length - 1 ? (
-                <>
-                  <Text style={{ color: colors.muted, textAlign: 'center' }}>{t('end')}</Text>
-                  <Button onPress={() => void finishReading()} icon="checkmark">
-                    {t('markFinished')}
-                  </Button>
-                </>
-              ) : null}
-            </View>
-          }
-        />
-      )}
-      {sheet === 'image' && selectedImage && (
-        <BookImageViewer
-          key={selectedImage.placement.id}
-          image={selectedImage}
-          {...sheetProps('image')}
-          close={() => setSheet(null)}
-        />
-      )}
-      <View
-        pointerEvents={toolsVisible ? 'none' : 'auto'}
-        accessibilityElementsHidden={toolsVisible}
-        importantForAccessibility={toolsVisible ? 'no-hide-descendants' : 'auto'}
-        style={{
-          height: 32,
-          paddingHorizontal: 27,
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}
-      >
-        <Text style={{ fontSize: 10, color: colors.muted }}>
-          {prefs.turnMode === 'paged'
-            ? t('pageNumber', pageInfo)
-            : `${chapterIndex + 1} / ${book.chapters.length}`}
-        </Text>
-        <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'center' }}>
-          {!toolsVisible && searchOrigin && (
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => setSheet('search')}
-              style={{ padding: 7 }}
+            )}
+            <View
+              style={{
+                flexDirection: 'row',
+                justifyContent: 'space-around',
+                paddingVertical: 10,
+              }}
             >
-              <Text style={{ fontSize: 11, color: colors.accent }}>{t('searchReturnResults')}</Text>
-            </Pressable>
-          )}
-          {!toolsVisible && !!referenceHistory.length && (
+              {[
+                { sheet: 'contents', icon: 'list-outline', label: 'chapters' },
+                { sheet: 'progress', icon: 'compass-outline', label: 'readingProgress' },
+                { sheet: 'notes', icon: 'create-outline', label: 'notes' },
+                { sheet: 'language', icon: 'language-outline', label: 'readingLanguage' },
+                { sheet: 'appearance', icon: 'text-outline', label: 'typesetting' },
+              ].map((item) => (
+                <Pressable
+                  key={item.sheet}
+                  accessibilityRole="button"
+                  onPress={() => setSheet(item.sheet as typeof sheet)}
+                  style={{ alignItems: 'center', gap: 5, minWidth: 52 }}
+                >
+                  <Icon
+                    name={item.icon as import('../components/ui').IconName}
+                    size={23}
+                    color={colors.muted}
+                  />
+                  <Text style={{ color: colors.muted, fontSize: 10 }}>
+                    {t(item.label as import('../i18n').TextKey)}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        )}
+        {sheet === 'selection' && selectionEditor && (
+          <PassageSelectionSheet
+            {...sheetProps('selection')}
+            selection={selectionEditor.passage}
+            close={() => {
+              const target = selectionEditor?.returnTo;
+              if (target) setSheet(target);
+            }}
+            onConfirm={(passage) => {
+              if (!selectionEditor) return;
+              const target = selectionEditor.returnTo;
+              if (selectionEditor.bookId === book.id && passageIsCurrent(passage)) {
+                setSelected(passage);
+                setNoteError('');
+              } else setNoteError(t('selectionChanged'));
+              setSheet(target);
+            }}
+          />
+        )}
+        <AssistantSheet
+          book={book}
+          position={current}
+          focus={currentFocus}
+          {...sheetProps('assistant')}
+          close={() => setSheet(null)}
+          open={openCitation}
+          save={(answer, focus) => addNote(answer, focus, false)}
+        />
+        <BookmarksSheet
+          book={book}
+          bookmarks={bookmarks}
+          {...sheetProps('bookmarks')}
+          loading={bookmarksLoading}
+          saving={bookmarkSaving}
+          close={() => setSheet(null)}
+          add={addBookmark}
+          open={openBookmark}
+          rename={async (bookmark, label) => {
+            library.assertCurrent();
+            try {
+              await renameBookmark(library.handle, book, bookmark.id, label, bookmark);
+              if (isReaderCurrent())
+                setBookmarks((items) =>
+                  items.map((item) => (item.id === bookmark.id ? { ...item, label } : item)),
+                );
+            } catch (error) {
+              const items = await listBookmarks(library.handle, book);
+              if (isReaderCurrent()) setBookmarks(items);
+              throw error;
+            }
+          }}
+          remove={async (bookmark) => {
+            library.assertCurrent();
+            try {
+              await removeBookmark(library.handle, book, bookmark.id, bookmark);
+              if (isReaderCurrent())
+                setBookmarks((items) => items.filter((item) => item.id !== bookmark.id));
+            } catch (error) {
+              const items = await listBookmarks(library.handle, book);
+              if (isReaderCurrent()) setBookmarks(items);
+              throw error;
+            }
+          }}
+        />
+        {sheet === 'referenceList' && referenceChoices && (
+          <ReferenceListSheet
+            references={referenceChoices}
+            open={(reference) => openReference(reference.id, reference.origin)}
+            {...sheetProps('referenceList')}
+            close={() => setSheet(null)}
+          />
+        )}
+        {sheet === 'referencePreview' && referencePreview && (
+          <ReferencePreviewSheet
+            book={book}
+            target={referencePreview.target}
+            label={referencePreview.label}
+            kind={referencePreview.kind}
+            {...sheetProps('referencePreview')}
+            close={() => setSheet(null)}
+            read={
+              referencePreview.target.location
+                ? () => readReference(referencePreview.target, referencePreview.origin)
+                : undefined
+            }
+          />
+        )}
+        <BookSearchSheet
+          book={book}
+          translations={translations}
+          translationKeys={translationKeys}
+          language={readingLanguage}
+          {...sheetProps('search')}
+          close={() => setSheet(null)}
+          open={openSearchHit}
+          returning={returnBusy}
+          returnToReading={searchOrigin ? returnBeforeSearch : undefined}
+        />
+        {sheet === 'pdfOriginal' && isPdfBook(book) && (
+          <PdfOriginalSheet
+            {...sheetProps('pdfOriginal')}
+            bookId={book.id}
+            title={book.title}
+            sourcePage={chapter.sourcePage || 1}
+            close={() => setSheet(null)}
+            canReadPage={(page) => book.chapters.some((item) => item.sourcePage === page)}
+            onReadPage={(page, evidence) => {
+              if (!isNavigationCurrent()) return;
+              const hit = evidence ? resolvePdfTextEvidence(book, page, evidence) : null;
+              if (hit) {
+                // PDF text offsets belong to its extraction engine. Only a verified
+                // quote in our immutable paragraph may become a reader anchor.
+                void navigate(
+                  hit.chapter,
+                  hit.paragraph,
+                  false,
+                  { source: 'original', start: hit.start, end: hit.end },
+                  hit.quote,
+                );
+                return;
+              }
+              // Checking this page's source should keep the exact text position and visual page.
+              if (page === chapter.sourcePage) {
+                setSheet(null);
+                return;
+              }
+              const index = book.chapters.findIndex((item) => item.sourcePage === page);
+              const paragraph = book.chapters[index]?.paragraphs[0];
+              if (paragraph) navigate(index, paragraph.id);
+            }}
+          />
+        )}
+        <Sheet {...sheetProps('bookTools')} title={t('more')} close={() => setSheet(null)}>
+          <Text style={{ color: colors.ink, fontSize: 19, fontWeight: '600' }}>{book.title}</Text>
+          <Text style={{ color: colors.muted }}>{book.author}</Text>
+          <Button secondary icon="bookmark-outline" onPress={() => setSheet('bookmarks')}>
+            {t('bookmarks')}
+          </Button>
+          {!!referenceHistory.length && (
             <ReaderReturnActions
-              compact
               busy={returnBusy}
               onReturn={returnFromReference}
               onStay={stayHere}
             />
           )}
-          {!toolsVisible && prefs.turnMode === 'paged' && !!pageReferences.length && (
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => openReferenceChoices(pageReferences)}
-              style={{ padding: 7 }}
-            >
-              <Text style={{ fontSize: 11, color: colors.accent }}>{t('bookReferences')}</Text>
-            </Pressable>
-          )}
-        </View>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t(toolsVisible ? 'hideTools' : 'showTools')}
-          onPress={() => setToolsVisible((v) => !v)}
-          style={{ paddingHorizontal: 12, paddingVertical: 8 }}
-        >
-          <Text style={{ fontSize: 10, color: colors.muted }}>{t('progress', { n: percent })}</Text>
-        </Pressable>
-      </View>
-      {toolsVisible && (
-        <View
-          style={{
-            position: 'absolute',
-            bottom: 0,
-            left: 0,
-            right: 0,
-            zIndex: 4,
-            backgroundColor: colors.surface,
-            borderTopWidth: 0.5,
-            borderColor: colors.border,
-          }}
-        >
-          {(!!referenceHistory.length || !!availableReferences.length || !!searchOrigin) && (
-            <View
-              style={{
-                flexDirection: 'row',
-                borderBottomWidth: 0.5,
-                borderColor: colors.border,
-                paddingHorizontal: 12,
+          {!!availableReferences.length && (
+            <Button
+              secondary
+              icon="link-outline"
+              onPress={() => {
+                openReferenceChoices(availableReferences);
               }}
             >
-              {searchOrigin && (
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => setSheet('search')}
-                  style={{ flex: 1, minHeight: 44, padding: 10, justifyContent: 'center' }}
-                >
-                  <Text style={{ color: colors.accent, fontSize: 12, textAlign: 'center' }}>
-                    {t('searchReturnResults')}
-                  </Text>
-                </Pressable>
-              )}
-              {!!referenceHistory.length && (
-                <ReaderReturnActions
-                  busy={returnBusy}
-                  onReturn={returnFromReference}
-                  onStay={stayHere}
-                />
-              )}
-              {!!availableReferences.length && (
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => openReferenceChoices(availableReferences)}
-                  style={{ flex: 1, minHeight: 44, padding: 10, justifyContent: 'center' }}
-                >
-                  <Text style={{ color: colors.accent, fontSize: 12, textAlign: 'center' }}>
-                    {t('bookReferences')}
-                  </Text>
-                </Pressable>
-              )}
-            </View>
+              {t('bookReferences')}
+            </Button>
           )}
-          <View
-            style={{
-              flexDirection: 'row',
-              justifyContent: 'space-around',
-              paddingVertical: 10,
+          <Button
+            icon="sparkles-outline"
+            onPress={() => {
+              setSelected(null);
+              setSheet('assistant');
             }}
           >
-            {[
-              { sheet: 'contents', icon: 'list-outline', label: 'chapters' },
-              { sheet: 'progress', icon: 'compass-outline', label: 'readingProgress' },
-              { sheet: 'notes', icon: 'create-outline', label: 'notes' },
-              { sheet: 'language', icon: 'language-outline', label: 'bilingual' },
-              { sheet: 'appearance', icon: 'text-outline', label: 'typesetting' },
-            ].map((item) => (
-              <Pressable
-                key={item.sheet}
-                accessibilityRole="button"
-                onPress={() => setSheet(item.sheet as typeof sheet)}
-                style={{ alignItems: 'center', gap: 5, minWidth: 52 }}
-              >
-                <Icon
-                  name={item.icon as import('../components/ui').IconName}
-                  size={23}
-                  color={colors.muted}
-                />
-                <Text style={{ color: colors.muted, fontSize: 10 }}>
-                  {t(item.label as import('../i18n').TextKey)}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-        </View>
-      )}
-      {sheet === 'selection' && selectionEditor && (
-        <PassageSelectionSheet
-          {...sheetProps('selection')}
-          selection={selectionEditor.passage}
-          close={() => {
-            const target = selectionEditor?.returnTo;
-            if (target) setSheet(target);
-          }}
-          onConfirm={(passage) => {
-            if (!selectionEditor) return;
-            const target = selectionEditor.returnTo;
-            if (selectionEditor.bookId === book.id && passageIsCurrent(passage)) {
-              setSelected(passage);
-              setNoteError('');
-            } else setNoteError(t('selectionChanged'));
-            setSheet(target);
-          }}
-        />
-      )}
-      <AssistantSheet
-        book={book}
-        position={current}
-        focus={currentFocus}
-        {...sheetProps('assistant')}
-        close={() => setSheet(null)}
-        open={openCitation}
-        save={(answer, focus) => addNote(answer, focus, false)}
-      />
-      <BookmarksSheet
-        book={book}
-        bookmarks={bookmarks}
-        {...sheetProps('bookmarks')}
-        loading={bookmarksLoading}
-        saving={bookmarkSaving}
-        close={() => setSheet(null)}
-        add={addBookmark}
-        open={openBookmark}
-        rename={async (bookmark, label) => {
-          library.assertCurrent();
-          try {
-            await renameBookmark(library.handle, book, bookmark.id, label, bookmark);
-            if (isReaderCurrent())
-              setBookmarks((items) =>
-                items.map((item) => (item.id === bookmark.id ? { ...item, label } : item)),
-              );
-          } catch (error) {
-            const items = await listBookmarks(library.handle, book);
-            if (isReaderCurrent()) setBookmarks(items);
-            throw error;
-          }
-        }}
-        remove={async (bookmark) => {
-          library.assertCurrent();
-          try {
-            await removeBookmark(library.handle, book, bookmark.id, bookmark);
-            if (isReaderCurrent())
-              setBookmarks((items) => items.filter((item) => item.id !== bookmark.id));
-          } catch (error) {
-            const items = await listBookmarks(library.handle, book);
-            if (isReaderCurrent()) setBookmarks(items);
-            throw error;
-          }
-        }}
-      />
-      {sheet === 'referenceList' && referenceChoices && (
-        <ReferenceListSheet
-          references={referenceChoices}
-          open={(reference) => openReference(reference.id, reference.origin)}
-          {...sheetProps('referenceList')}
-          close={() => setSheet(null)}
-        />
-      )}
-      {sheet === 'referencePreview' && referencePreview && (
-        <ReferencePreviewSheet
-          book={book}
-          target={referencePreview.target}
-          label={referencePreview.label}
-          kind={referencePreview.kind}
-          {...sheetProps('referencePreview')}
-          close={() => setSheet(null)}
-          read={
-            referencePreview.target.location
-              ? () => readReference(referencePreview.target, referencePreview.origin)
-              : undefined
-          }
-        />
-      )}
-      <BookSearchSheet
-        book={book}
-        translations={translations}
-        translationKeys={translationKeys}
-        language={readingLanguage}
-        {...sheetProps('search')}
-        close={() => setSheet(null)}
-        open={openSearchHit}
-        returning={returnBusy}
-        returnToReading={searchOrigin ? returnBeforeSearch : undefined}
-      />
-      {sheet === 'pdfOriginal' && isPdfBook(book) && (
-        <PdfOriginalSheet
-          {...sheetProps('pdfOriginal')}
-          bookId={book.id}
-          title={book.title}
-          sourcePage={chapter.sourcePage || 1}
-          close={() => setSheet(null)}
-          canReadPage={(page) => book.chapters.some((item) => item.sourcePage === page)}
-          onReadPage={(page, evidence) => {
-            if (!isNavigationCurrent()) return;
-            const hit = evidence ? resolvePdfTextEvidence(book, page, evidence) : null;
-            if (hit) {
-              // PDF text offsets belong to its extraction engine. Only a verified
-              // quote in our immutable paragraph may become a reader anchor.
-              void navigate(
-                hit.chapter,
-                hit.paragraph,
-                false,
-                { source: 'original', start: hit.start, end: hit.end },
-                hit.quote,
-              );
-              return;
-            }
-            // Checking this page's source should keep the exact text position and visual page.
-            if (page === chapter.sourcePage) {
-              setSheet(null);
-              return;
-            }
-            const index = book.chapters.findIndex((item) => item.sourcePage === page);
-            const paragraph = book.chapters[index]?.paragraphs[0];
-            if (paragraph) navigate(index, paragraph.id);
-          }}
-        />
-      )}
-      <Sheet {...sheetProps('bookTools')} title={t('more')} close={() => setSheet(null)}>
-        <Text style={{ color: colors.ink, fontSize: 19, fontWeight: '600' }}>{book.title}</Text>
-        <Text style={{ color: colors.muted }}>{book.author}</Text>
-        <Button secondary icon="bookmark-outline" onPress={() => setSheet('bookmarks')}>
-          {t('bookmarks')}
-        </Button>
-        {!!referenceHistory.length && (
-          <ReaderReturnActions busy={returnBusy} onReturn={returnFromReference} onStay={stayHere} />
-        )}
-        {!!availableReferences.length && (
+            {t('aiCompanion')}
+          </Button>
+          <Button icon="search-outline" onPress={() => setSheet('search')}>
+            {t('searchBook')}
+          </Button>
+          {isPdfBook(book) && (
+            <Button secondary icon="document-text-outline" onPress={() => setSheet('pdfOriginal')}>
+              {t('pdfOriginal')}
+            </Button>
+          )}
+          <Button secondary icon="compass-outline" onPress={() => setSheet('progress')}>
+            {t('readingProgress')}
+          </Button>
           <Button
             secondary
-            icon="link-outline"
-            onPress={() => {
-              openReferenceChoices(availableReferences);
-            }}
+            icon="checkmark-circle-outline"
+            onPress={() => void finishReading(true)}
           >
-            {t('bookReferences')}
+            {t('markFinished')}
           </Button>
-        )}
-        <Button
-          icon="sparkles-outline"
-          onPress={() => {
-            setSelected(null);
-            setSheet('assistant');
-          }}
-        >
-          {t('aiCompanion')}
-        </Button>
-        <Button icon="search-outline" onPress={() => setSheet('search')}>
-          {t('searchBook')}
-        </Button>
-        {isPdfBook(book) && (
-          <Button secondary icon="document-text-outline" onPress={() => setSheet('pdfOriginal')}>
-            {t('pdfOriginal')}
-          </Button>
-        )}
-        <Button secondary icon="compass-outline" onPress={() => setSheet('progress')}>
-          {t('readingProgress')}
-        </Button>
-        <Button secondary icon="checkmark-circle-outline" onPress={() => void finishReading(true)}>
-          {t('markFinished')}
-        </Button>
-      </Sheet>
-      <Sheet {...sheetProps('progress')} title={t('readingProgress')} close={() => setSheet(null)}>
-        {sheet === 'progress' && (
-          <ReadingProgressPanel book={book} paragraph={current.paragraph} navigate={navigate} />
-        )}
-        <Button secondary onPress={() => void exit()}>
-          {t('back')}
-        </Button>
-      </Sheet>
-      <ReaderNotesSheet
-        book={book}
-        position={current}
-        notes={notes}
-        {...sheetProps('notes')}
-        close={() => setSheet(null)}
-        add={() => {
-          const paragraph =
-            chapter.paragraphs.find((p) => p.id === latest.current.paragraph) ||
-            chapter.paragraphs[0];
-          const source =
-            readingMode === 'translation' && translations[paragraph.id]
-              ? 'translation'
-              : 'original';
-          const text = source === 'translation' ? translations[paragraph.id] : paragraph.text;
-          setSelected({
-            paragraph,
-            source,
-            text,
-            start: 0,
-            end: text.length,
-            language: readingLanguage,
-            ...(source === 'translation' ? { translationKey: translationKeys[paragraph.id] } : {}),
-          });
-          setNoteText('');
-          setSheet('note');
-        }}
-        open={(note) => {
-          const entry = paragraphIndex.get(note.paragraphId);
-          if (entry) navigate(entry.chapter, note.paragraphId, false, note.anchor, note.quote);
-        }}
-        onSaved={(note) => {
-          if (!isReaderCurrent() || note.bookId !== book.id) return;
-          setNotes((previous) =>
-            previous.map((existing) =>
-              existing.bookId === note.bookId && existing.id === note.id ? note : existing,
-            ),
-          );
-        }}
-      />
-      {sheet === 'contents' && (
-        <ContentsSheet
-          key={book.id}
-          {...sheetProps('contents')}
-          entries={contents}
-          activeKey={activeContentKey}
-          query={chapterQuery}
-          setQuery={setChapterQuery}
-          collapsedKeys={contentsCollapsed.get(contentsScope) || emptyContentsCollapsed}
-          initialLocate={!contentsCollapsed.has(contentsScope)}
-          onCollapsedKeysChange={(keys) => {
-            if (!isNavigationCurrent() || requestedSheet.current !== 'contents') return;
-            setContentsCollapsed((previous) => new Map(previous).set(contentsScope, new Set(keys)));
-          }}
-          hasPdfContents={hasPdfContents}
-          pdfPages={pdfPages}
-          setPdfPages={setPdfPages}
+        </Sheet>
+        <Sheet
+          {...sheetProps('progress')}
+          title={t('readingProgress')}
           close={() => setSheet(null)}
-          bookmarks={() => setSheet('bookmarks')}
-          search={() => setSheet('search')}
-          navigate={navigate}
+        >
+          {sheet === 'progress' && (
+            <ReadingProgressPanel book={book} paragraph={current.paragraph} navigate={navigate} />
+          )}
+          <Button secondary onPress={() => void exit()}>
+            {t('back')}
+          </Button>
+        </Sheet>
+        <ReaderNotesSheet
+          book={book}
+          position={current}
+          notes={notes}
+          {...sheetProps('notes')}
+          close={() => setSheet(null)}
+          add={() => {
+            const paragraph =
+              chapter.paragraphs.find((p) => p.id === latest.current.paragraph) ||
+              chapter.paragraphs[0];
+            const source =
+              readingMode === 'translation' && translations[paragraph.id]
+                ? 'translation'
+                : 'original';
+            const text = source === 'translation' ? translations[paragraph.id] : paragraph.text;
+            setSelected({
+              paragraph,
+              source,
+              text,
+              start: 0,
+              end: text.length,
+              language: readingLanguage,
+              ...(source === 'translation'
+                ? { translationKey: translationKeys[paragraph.id] }
+                : {}),
+            });
+            setNoteText('');
+            setSheet('note');
+          }}
+          open={(note) => {
+            const entry = paragraphIndex.get(note.paragraphId);
+            if (entry) navigate(entry.chapter, note.paragraphId, false, note.anchor, note.quote);
+          }}
+          onSaved={(note) => {
+            if (!isReaderCurrent() || note.bookId !== book.id) return;
+            setNotes((previous) =>
+              previous.map((existing) =>
+                existing.bookId === note.bookId && existing.id === note.id ? note : existing,
+              ),
+            );
+          }}
         />
-      )}
-      {/* Switching among these views reuses the same native presentation. */}
-      <Sheet
-        {...sheetProps('language', 'actions', 'translationVersions')}
-        title={
-          sheet === 'translationVersions'
-            ? prefs.locale.startsWith('zh')
-              ? '这段的译文版本'
-              : 'Saved versions of this passage'
-            : sheet === 'actions'
-              ? t('more')
-              : t('readingMode')
-        }
-        close={() => {
-          if (sheet === 'translationVersions' && versionSelectionBusy.current) return;
-          if (sheet === 'actions' && noteBusy.current) return;
-          setSheet(null);
-        }}
-        tall={sheet === 'translationVersions'}
-        scrollable={sheet !== 'translationVersions'}
-      >
-        {sheet === 'translationVersions' && versionTarget ? (
-          <TranslationVersionsContent
-            key={`${book.id}:${versionTarget.language}:${versionTarget.paragraphId}`}
-            bookId={book.id}
-            paragraphId={versionTarget.paragraphId}
-            language={versionTarget.language}
-            currentKey={translation.savedKeys[versionTarget.language]?.[versionTarget.paragraphId]}
-            choose={chooseVersion}
-            onBusyChange={onVersionBusyChange}
+        {sheet === 'contents' && (
+          <ContentsSheet
+            key={book.id}
+            {...sheetProps('contents')}
+            entries={contents}
+            activeKey={activeContentKey}
+            query={chapterQuery}
+            setQuery={setChapterQuery}
+            collapsedKeys={contentsCollapsed.get(contentsScope) || emptyContentsCollapsed}
+            initialLocate={!contentsCollapsed.has(contentsScope)}
+            onCollapsedKeysChange={(keys) => {
+              if (!isNavigationCurrent() || requestedSheet.current !== 'contents') return;
+              setContentsCollapsed((previous) =>
+                new Map(previous).set(contentsScope, new Set(keys)),
+              );
+            }}
+            hasPdfContents={hasPdfContents}
+            pdfPages={pdfPages}
+            setPdfPages={setPdfPages}
+            close={() => setSheet(null)}
+            bookmarks={() => setSheet('bookmarks')}
+            search={() => setSheet('search')}
+            navigate={navigate}
           />
-        ) : sheet === 'actions' ? (
-          <>
-            <Text
-              numberOfLines={4}
-              style={{ color: colors.muted, fontFamily: 'Georgia', lineHeight: 25 }}
-            >
-              {selected?.text.slice(selected.start, selected.end)}
-            </Text>
-            {!!noteError && (
-              <Text accessibilityRole="alert" style={{ color: colors.error, lineHeight: 22 }}>
-                {noteError}
-              </Text>
-            )}
-            <Button
-              secondary
-              disabled={saving}
-              icon="text-outline"
-              onPress={() => adjustSelection('actions')}
-            >
-              {t('adjustSelection')}
-            </Button>
-            <Button
-              busy={saving}
-              secondary
-              icon="color-wand-outline"
-              onPress={() => void addNote('')}
-            >
-              {t('highlight')}
-            </Button>
-            <Button
-              secondary
-              disabled={saving}
-              icon="sparkles-outline"
-              onPress={() => {
-                if (!noteBusy.current) setSheet('assistant');
-              }}
-            >
-              {t('aiAskPassage')}
-            </Button>
-            <Button
-              disabled={saving}
-              icon="create-outline"
-              onPress={() => {
-                if (!noteBusy.current) setSheet('note');
-              }}
-            >
-              {t('addNote')}
-            </Button>
-            <Button
-              secondary
-              disabled={saving}
-              icon="documents-outline"
-              onPress={() => openVersions(selected || undefined)}
-            >
-              {prefs.locale.startsWith('zh') ? '译文版本' : 'Saved translation versions'}
-            </Button>
-            <Button
-              secondary
-              disabled={saving}
-              icon="volume-medium-outline"
-              onPress={() => void openSpeech(selected || currentFocus)}
-            >
-              {t('listen')}
-            </Button>
-          </>
-        ) : (
-          <>
-            {!!readingOverride && (
-              <Text style={{ color: colors.muted, fontSize: 12, lineHeight: 20 }}>
-                {t('bookmarkTemporaryMode')}
-              </Text>
-            )}
-            <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-              {(['original', 'bilingual', 'translation'] as const).map((mode) => (
-                <Chip
-                  key={mode}
-                  active={prefs.mode === mode}
-                  onPress={() => {
-                    const position = { ...latest.current };
-                    rebaseTranslatedPosition(
-                      position,
-                      mode === 'original'
-                        ? undefined
-                        : translation.saved[prefs.language]?.[position.paragraph],
-                    );
-                    invalidatePositionWork();
-                    stop();
-                    bookmarkSource.current = null;
-                    setRevealedTranslation(null);
-                    setReferenceOriginal(false);
-                    setReadingOverride(null);
-                    latest.current = position;
-                    setCurrent(position);
-                    readyToTrack.current = false;
-                    setJump(position.paragraph);
-                    setJumpRevision((value) => value + 1);
-                    setLayoutRevision((value) => value + 1);
-                    patch({ mode });
-                  }}
-                >
-                  {t(mode)}
-                </Chip>
-              ))}
-            </View>
-            <Button secondary icon="documents-outline" onPress={() => openVersions()}>
-              {prefs.locale.startsWith('zh')
-                ? '当前段落的译文版本'
-                : 'Saved versions of this passage'}
-            </Button>
+        )}
+        {/* Switching among these views reuses the same native presentation. */}
+        <Sheet
+          {...sheetProps('language', 'actions', 'translationVersions')}
+          title={
+            sheet === 'translationVersions'
+              ? prefs.locale.startsWith('zh')
+                ? '这段的译文版本'
+                : 'Saved versions of this passage'
+              : sheet === 'actions'
+                ? t('more')
+                : t('readingLanguage')
+          }
+          close={() => {
+            if (sheet === 'translationVersions' && versionSelectionBusy.current) return;
+            if (sheet === 'actions' && noteBusy.current) return;
+            setSheet(null);
+          }}
+          tall={sheet === 'translationVersions'}
+          scrollable={sheet !== 'translationVersions'}
+        >
+          {sheet === 'translationVersions' && versionTarget ? (
+            <TranslationVersionsContent
+              key={`${book.id}:${versionTarget.language}:${versionTarget.paragraphId}`}
+              bookId={book.id}
+              paragraphId={versionTarget.paragraphId}
+              language={versionTarget.language}
+              currentKey={
+                translation.savedKeys[versionTarget.language]?.[versionTarget.paragraphId]
+              }
+              choose={chooseVersion}
+              onBusyChange={onVersionBusyChange}
+            />
+          ) : sheet === 'actions' ? (
             <>
+              <Text
+                numberOfLines={4}
+                style={{ color: colors.muted, fontFamily: 'Georgia', lineHeight: 25 }}
+              >
+                {selected?.text.slice(selected.start, selected.end)}
+              </Text>
+              {!!noteError && (
+                <Text accessibilityRole="alert" style={{ color: colors.error, lineHeight: 22 }}>
+                  {noteError}
+                </Text>
+              )}
+              <Button
+                secondary
+                disabled={saving}
+                icon="text-outline"
+                onPress={() => adjustSelection('actions')}
+              >
+                {t('adjustSelection')}
+              </Button>
+              <Button
+                busy={saving}
+                secondary
+                icon="color-wand-outline"
+                onPress={() => void addNote('')}
+              >
+                {t('highlight')}
+              </Button>
+              <Button
+                secondary
+                disabled={saving}
+                icon="sparkles-outline"
+                onPress={() => {
+                  if (!noteBusy.current) setSheet('assistant');
+                }}
+              >
+                {t('aiAskPassage')}
+              </Button>
+              <Button
+                disabled={saving}
+                icon="create-outline"
+                onPress={() => {
+                  if (!noteBusy.current) setSheet('note');
+                }}
+              >
+                {t('addNote')}
+              </Button>
+              <Button
+                secondary
+                disabled={saving}
+                icon="documents-outline"
+                onPress={() => openVersions(selected || undefined)}
+              >
+                {prefs.locale.startsWith('zh') ? '译文版本' : 'Saved translation versions'}
+              </Button>
+              <Button
+                secondary
+                disabled={saving}
+                icon="volume-medium-outline"
+                onPress={() => void openSpeech(selected || currentFocus)}
+              >
+                {t('listen')}
+              </Button>
+            </>
+          ) : (
+            <>
+              {!!readingOverride && (
+                <Text style={{ color: colors.muted, fontSize: 12, lineHeight: 20 }}>
+                  {t('bookmarkTemporaryMode')}
+                </Text>
+              )}
+              <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                {(['original', 'bilingual', 'translation'] as const).map((mode) => (
+                  <Chip
+                    key={mode}
+                    active={readingMode === mode}
+                    onPress={() => changeReadingLanguage({ mode })}
+                  >
+                    {t(mode === 'translation' ? 'translationOnly' : mode)}
+                  </Chip>
+                ))}
+              </View>
               <SectionLabel>{t('translationLanguage')}</SectionLabel>
               <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
                 {Object.entries({
@@ -2599,179 +2815,153 @@ export function ReaderScreen({
                 }).map(([language, label]) => (
                   <Chip
                     key={language}
-                    active={prefs.language === language}
-                    onPress={() => {
-                      const position = { ...latest.current };
-                      rebaseTranslatedPosition(
-                        position,
-                        translation.saved[language]?.[position.paragraph],
-                      );
-                      invalidatePositionWork();
-                      stop();
-                      bookmarkSource.current = null;
-                      setRevealedTranslation(null);
-                      setReferenceOriginal(false);
-                      setReadingOverride(null);
-                      latest.current = position;
-                      setCurrent(position);
-                      readyToTrack.current = false;
-                      setJump(position.paragraph);
-                      setJumpRevision((value) => value + 1);
-                      setLayoutRevision((value) => value + 1);
-                      patch({ language });
-                    }}
+                    active={readingLanguage === language}
+                    onPress={() => changeReadingLanguage({ language })}
                   >
                     {label}
                   </Chip>
                 ))}
               </View>
             </>
-            <TranslationPreparation translation={translation} />
-            <Button
-              secondary
-              icon="cloud-outline"
-              onPress={() => {
-                setSelected(null);
-                setSheet('assistant');
-              }}
-            >
-              {t('connection')}
-            </Button>
-          </>
-        )}
-      </Sheet>
-      <Sheet {...sheetProps('appearance')} title={t('typesetting')} close={() => setSheet(null)}>
-        <View
-          style={[
-            styles.spread,
-            { backgroundColor: colors.background, borderRadius: 24, paddingHorizontal: 6 },
-          ]}
-        >
-          <IconButton
-            icon="remove"
-            label={`${t('fontSize')} −`}
-            disabled={prefs.fontSize <= 15}
-            onPress={() =>
-              layoutChanges.change((current) => ({ fontSize: Math.max(15, current.fontSize - 1) }))
-            }
-          />
-          <Text style={{ color: colors.ink, fontSize: 17 }}>
-            {t('fontSize')} · {prefs.fontSize}
-          </Text>
-          <IconButton
-            icon="add"
-            label={`${t('fontSize')} +`}
-            disabled={prefs.fontSize >= 30}
-            onPress={() =>
-              layoutChanges.change((current) => ({ fontSize: Math.min(30, current.fontSize + 1) }))
-            }
-          />
-        </View>
-        <View style={styles.spread}>
-          <Text style={{ color: colors.muted, fontSize: 13 }}>{t('lineHeight')}</Text>
-          <View style={{ flexDirection: 'row', gap: 7 }}>
-            {[1.5, 1.75, 2].map((lineHeight) => (
-              <Chip
-                key={lineHeight}
-                active={prefs.lineHeight === lineHeight}
-                onPress={() => layoutChanges.change({ lineHeight })}
-              >{`${lineHeight}×`}</Chip>
-            ))}
+          )}
+        </Sheet>
+        <Sheet {...sheetProps('appearance')} title={t('typesetting')} close={() => setSheet(null)}>
+          <View
+            style={[
+              styles.spread,
+              { backgroundColor: colors.background, borderRadius: 24, paddingHorizontal: 6 },
+            ]}
+          >
+            <IconButton
+              icon="remove"
+              label={`${t('fontSize')} −`}
+              disabled={prefs.fontSize <= 15}
+              onPress={() =>
+                layoutChanges.change((current) => ({
+                  fontSize: Math.max(15, current.fontSize - 1),
+                }))
+              }
+            />
+            <Text style={{ color: colors.ink, fontSize: 17 }}>
+              {t('fontSize')} · {prefs.fontSize}
+            </Text>
+            <IconButton
+              icon="add"
+              label={`${t('fontSize')} +`}
+              disabled={prefs.fontSize >= 30}
+              onPress={() =>
+                layoutChanges.change((current) => ({
+                  fontSize: Math.min(30, current.fontSize + 1),
+                }))
+              }
+            />
           </View>
-        </View>
-        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-          <Chip active={prefs.serif} onPress={() => layoutChanges.change({ serif: true })}>
-            {t('serif')}
-          </Chip>
-          <Chip active={!prefs.serif} onPress={() => layoutChanges.change({ serif: false })}>
-            {t('sans')}
-          </Chip>
-          <Chip active={prefs.theme === 'paper'} onPress={() => patch({ theme: 'paper' })}>
-            {t('paper')}
-          </Chip>
-          <Chip active={prefs.theme === 'night'} onPress={() => patch({ theme: 'night' })}>
-            {t('night')}
-          </Chip>
-        </View>
-        <ReadingNavigation onChange={layoutChanges.change} />
-      </Sheet>
-      <Sheet {...sheetProps('speech')} title={t('listen')} close={() => setSheet(null)}>
-        <ReaderSpeechPanel
-          speech={speech}
-          plan={speechPlan}
-          scope={speechSetup.scope}
-          source={speechSetup.source}
-          targetLanguage={speechSetup.language}
-          selectionAvailable={!!speechSetup.selection}
-          onScope={(scope) => {
-            stop();
-            setSpeechSetup((setup) => ({ ...setup, scope }));
+          <View style={styles.spread}>
+            <Text style={{ color: colors.muted, fontSize: 13 }}>{t('lineHeight')}</Text>
+            <View style={{ flexDirection: 'row', gap: 7 }}>
+              {[1.5, 1.75, 2].map((lineHeight) => (
+                <Chip
+                  key={lineHeight}
+                  active={prefs.lineHeight === lineHeight}
+                  onPress={() => layoutChanges.change({ lineHeight })}
+                >{`${lineHeight}×`}</Chip>
+              ))}
+            </View>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+            <Chip active={prefs.serif} onPress={() => layoutChanges.change({ serif: true })}>
+              {t('serif')}
+            </Chip>
+            <Chip active={!prefs.serif} onPress={() => layoutChanges.change({ serif: false })}>
+              {t('sans')}
+            </Chip>
+            <Chip active={prefs.theme === 'paper'} onPress={() => patch({ theme: 'paper' })}>
+              {t('paper')}
+            </Chip>
+            <Chip active={prefs.theme === 'night'} onPress={() => patch({ theme: 'night' })}>
+              {t('night')}
+            </Chip>
+          </View>
+          <ReadingNavigation onChange={layoutChanges.change} />
+        </Sheet>
+        <Sheet {...sheetProps('speech')} title={t('listen')} close={() => setSheet(null)}>
+          <ReaderSpeechPanel
+            speech={speech}
+            plan={speechPlan}
+            scope={speechSetup.scope}
+            source={speechSetup.source}
+            targetLanguage={speechSetup.language}
+            selectionAvailable={!!speechSetup.selection}
+            onScope={(scope) => {
+              stop();
+              setSpeechSetup((setup) => ({ ...setup, scope }));
+            }}
+            onSource={(source) => {
+              stop();
+              setSpeechSetup((setup) => ({
+                ...setup,
+                source,
+                ...(source !== setup.source
+                  ? {
+                      selection: undefined,
+                      scope: setup.scope === 'selection' ? 'paragraph' : setup.scope,
+                    }
+                  : {}),
+              }));
+            }}
+            onStart={startSpeech}
+            onShowPassage={showSpeechPassage}
+          />
+        </Sheet>
+        <Sheet
+          {...sheetProps('note')}
+          title={t('addNote')}
+          close={() => {
+            if (!saving) setSheet(null);
           }}
-          onSource={(source) => {
-            stop();
-            setSpeechSetup((setup) => ({
-              ...setup,
-              source,
-              ...(source !== setup.source
-                ? {
-                    selection: undefined,
-                    scope: setup.scope === 'selection' ? 'paragraph' : setup.scope,
-                  }
-                : {}),
-            }));
-          }}
-          onStart={startSpeech}
-          onShowPassage={showSpeechPassage}
-        />
-      </Sheet>
-      <Sheet
-        {...sheetProps('note')}
-        title={t('addNote')}
-        close={() => {
-          if (!saving) setSheet(null);
-        }}
-      >
-        <Text
-          numberOfLines={6}
-          style={{ color: colors.muted, lineHeight: 24, fontFamily: 'Georgia' }}
         >
-          {selected?.text.slice(selected.start, selected.end)}
-        </Text>
-        <Button
-          secondary
-          disabled={saving}
-          icon="text-outline"
-          onPress={() => adjustSelection('note')}
-        >
-          {t('adjustSelection')}
-        </Button>
-        {!!noteError && (
-          <Text accessibilityRole="alert" style={{ color: colors.error, lineHeight: 22 }}>
-            {noteError}
+          <Text
+            numberOfLines={6}
+            style={{ color: colors.muted, lineHeight: 24, fontFamily: 'Georgia' }}
+          >
+            {selected?.text.slice(selected.start, selected.end)}
           </Text>
-        )}
-        <TextInput
-          autoFocus
-          multiline
-          maxLength={50000}
-          value={noteText}
-          onChangeText={setNoteText}
-          placeholder={t('notePlaceholder')}
-          placeholderTextColor={colors.muted}
-          style={[
-            styles.input,
-            {
-              minHeight: 160,
-              color: colors.ink,
-              borderColor: colors.border,
-              textAlignVertical: 'top',
-            },
-          ]}
-        />
-        <Button busy={saving} onPress={() => void addNote(noteText)}>
-          {t('save')}
-        </Button>
-      </Sheet>
-    </View>
+          <Button
+            secondary
+            disabled={saving}
+            icon="text-outline"
+            onPress={() => adjustSelection('note')}
+          >
+            {t('adjustSelection')}
+          </Button>
+          {!!noteError && (
+            <Text accessibilityRole="alert" style={{ color: colors.error, lineHeight: 22 }}>
+              {noteError}
+            </Text>
+          )}
+          <TextInput
+            autoFocus
+            multiline
+            maxLength={50000}
+            value={noteText}
+            onChangeText={setNoteText}
+            placeholder={t('notePlaceholder')}
+            placeholderTextColor={colors.muted}
+            style={[
+              styles.input,
+              {
+                minHeight: 160,
+                color: colors.ink,
+                borderColor: colors.border,
+                textAlignVertical: 'top',
+              },
+            ]}
+          />
+          <Button busy={saving} onPress={() => void addNote(noteText)}>
+            {t('save')}
+          </Button>
+        </Sheet>
+      </View>
+    </AppContext.Provider>
   );
 }

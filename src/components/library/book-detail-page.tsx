@@ -3,8 +3,9 @@
 import { useI18n } from '@/lib/i18n/provider';
 
 import Link from 'next/link';
-import { displayLanguage } from '@/lib/i18n/config';
-import { useState } from 'react';
+import { displayLanguage, readingLanguages } from '@/lib/i18n/config';
+import { useMemo, useState } from 'react';
+import { bookContents, isPdfBook } from '../../../packages/reading-core/src';
 import {
   BookOpen,
   Check,
@@ -15,25 +16,100 @@ import {
   Plus,
   Pin,
   Archive,
+  Smartphone,
 } from 'lucide-react';
+import { setBookSourceLanguage } from '@/lib/storage';
 import { catalog, bookDescription } from '@/lib/catalog';
 import { Modal } from '@/components/reader/reader-dialogs';
 import { cn } from '@/lib/utils';
 import { useLibrary } from './library-provider';
 import { BookCover, Empty, LibraryShell } from './library-ui';
-import { BookTranslationCard } from './book-translation-card';
 
 export function BookDetailPage({ id }: { id: string }) {
   const { t, text: localize, locale } = useI18n();
-  const { allBooks, books, notes, state, positions, readBook, addBook, updateBooks, notify } =
-    useLibrary();
+  const {
+    allBooks,
+    books,
+    notes,
+    bookmarks,
+    state,
+    positions,
+    readBook,
+    addBook,
+    updateBooks,
+    notify,
+    refresh,
+  } = useLibrary();
   const book = allBooks.find((b) => b.id === id) || catalog.find((b) => b.id === id);
   const [tab, setTab] = useState('intro');
   const [expanded, setExpanded] = useState(false);
   const [more, setMore] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [savingLanguage, setSavingLanguage] = useState(false);
+  const [contentsPage, setContentsPage] = useState({ bookId: id, limit: 60, pdfPages: false });
+  const contentsLimit = contentsPage.bookId === id ? contentsPage.limit : 60;
+  const pdfPages = contentsPage.bookId === id && contentsPage.pdfPages;
+  const pdfBook = !!book && isPdfBook(book);
+  const chapterContents = useMemo(() => (book ? bookContents(book) : []), [book]);
+  const pageContents = useMemo(() => (book ? bookContents(book, { pdfPages: true }) : []), [book]);
+  const hasPdfContents =
+    pdfBook &&
+    (chapterContents.length !== pageContents.length ||
+      chapterContents.some(
+        (entry, index) =>
+          entry.title !== pageContents[index]?.title ||
+          entry.paragraphId !== pageContents[index]?.paragraphId,
+      ));
+  const contents = hasPdfContents && pdfPages ? pageContents : chapterContents;
+  const paragraphLocations = useMemo(() => {
+    let order = 0;
+    return new Map(
+      (book?.chapters || []).flatMap((chapter) =>
+        chapter.paragraphs.map(
+          (paragraph) =>
+            [
+              paragraph.id,
+              { chapterId: chapter.id, order: order++, sourcePage: chapter.sourcePage },
+            ] as const,
+        ),
+      ),
+    );
+  }, [book]);
   const owned = books.some((b) => b.id === id);
   const bookNotes = notes.filter((n) => n.bookId === id);
+  const referenceStats = book?.references
+    ? {
+        notes: book.references.links.filter((link) => link.kind === 'footnote').length,
+        links: book.references.links.filter((link) => link.kind === 'internal').length,
+        skipped:
+          book.references.diagnostics.skippedMissing +
+          book.references.diagnostics.skippedUnanchored +
+          book.references.diagnostics.skippedLimit,
+      }
+    : null;
   const position = positions[id];
+  const activeContentsIndex = useMemo(() => {
+    const chapter = position && book?.chapters[position.chapter];
+    if (!chapter) return -1;
+    const current =
+      paragraphLocations.get(position.paragraph) ||
+      paragraphLocations.get(chapter.paragraphs[0]?.id);
+    if (!current) return -1;
+    let active = -1,
+      lastOffset = -1,
+      depth = -1;
+    contents.forEach((entry, index) => {
+      if (!(hasPdfContents && !pdfPages) && entry.chapterId !== chapter.id) return;
+      const offset = paragraphLocations.get(entry.paragraphId)?.order;
+      if (offset === undefined || offset > current.order) return;
+      if (offset > lastOffset || (offset === lastOffset && entry.depth >= depth)) {
+        active = index;
+        lastOffset = offset;
+        depth = entry.depth;
+      }
+    });
+    return active;
+  }, [book, contents, position, paragraphLocations, hasPdfContents, pdfPages]);
   const status = state.books[id]?.status || (position ? 'reading' : 'unread');
   const isChineseUi = locale.startsWith('zh');
   const displayAuthor = book?.sample
@@ -139,8 +215,10 @@ export function BookDetailPage({ id }: { id: string }) {
               <span>{t('字数')}</span>
             </div>
             <div>
-              <strong>{book.chapters.length.toLocaleString(locale)}</strong>
-              <span>{t('章节')}</span>
+              <strong>
+                {(pdfBook ? chapterContents.length : book.chapters.length).toLocaleString(locale)}
+              </strong>
+              <span>{t(pdfBook && !hasPdfContents ? '原页目录' : '章节')}</span>
             </div>
           </div>
           <div className="detail-local-note">
@@ -154,6 +232,25 @@ export function BookDetailPage({ id }: { id: string }) {
               </span>
             )}
           </div>
+          {book.media && (
+            <p className="mb-4 px-1 text-xs leading-6 text-muted-foreground">
+              {t('已保留 {count} 处插图；{skipped} 处图片暂未转换。', {
+                count: book.media.placements.length,
+                skipped: Object.values(book.media.diagnostics).reduce(
+                  (sum, count) => sum + count,
+                  0,
+                ),
+              })}
+            </p>
+          )}
+          {referenceStats && (
+            <p className="mb-4 px-1 text-xs leading-6 text-muted-foreground">
+              {t('{notes} 条注释 · {links} 条书内链接', referenceStats)}
+              {referenceStats.skipped > 0 && (
+                <> · {t('{count} 条引用暂未转换。', { count: referenceStats.skipped })}</>
+              )}
+            </p>
+          )}
           <div className="book-detail-actions">
             <Link href={`/notes/${id}`} className="detail-note-link">
               <NotebookPen size={21} />
@@ -178,7 +275,6 @@ export function BookDetailPage({ id }: { id: string }) {
               {position ? t('继续阅读') : t('阅读')}
             </button>
           </div>
-          {owned && <BookTranslationCard book={book} chapter={position?.chapter || 0} />}
           <div className="detail-tabs" role="tablist" aria-label={t('书籍内容')}>
             {[
               ['intro', t('简介')],
@@ -215,8 +311,45 @@ export function BookDetailPage({ id }: { id: string }) {
                 <dl className="detail-info">
                   <dt>{t('作者')}</dt>
                   <dd>{displayAuthor}</dd>
-                  <dt>{t('语言')}</dt>
-                  <dd>{displayLanguage(book.language, locale) || t('自动识别')}</dd>
+                  <dt>
+                    <label htmlFor="book-source-language">{t('原文语言')}</label>
+                  </dt>
+                  <dd>
+                    <select
+                      id="book-source-language"
+                      className="max-w-full rounded-lg border border-border bg-background p-2 text-sm"
+                      value={book.sourceLanguage || 'auto'}
+                      disabled={savingLanguage}
+                      onChange={async (event) => {
+                        const language = event.target.value;
+                        setSavingLanguage(true);
+                        try {
+                          if (!owned) await addBook(book);
+                          await setBookSourceLanguage(book.id, language);
+                          await refresh();
+                          notify(t('原文语言已更新，现有译文和笔记已保留。'));
+                        } catch (error) {
+                          notify(error instanceof Error ? error.message : t('原文语言保存失败。'));
+                        } finally {
+                          setSavingLanguage(false);
+                        }
+                      }}
+                    >
+                      <option value="auto">
+                        {t('按文件默认：{language}', {
+                          language: displayLanguage(book.language, locale) || t('自动识别'),
+                        })}
+                      </option>
+                      {readingLanguages.map(([code, name]) => (
+                        <option key={code} value={code}>
+                          {displayLanguage(code, locale) || name}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                      {t('识别有误时可手动修改；原文与译文语言相同时直接阅读原文。')}
+                    </p>
+                  </dd>
                   <dt>{t('来源')}</dt>
                   <dd>{book.sample ? t('ByPage · 逐页 原创示例 · MIT 许可') : t('本地导入')}</dd>
                   {book.importedAt > 0 && (
@@ -230,29 +363,75 @@ export function BookDetailPage({ id }: { id: string }) {
                   className="mt-8 flex w-full items-center justify-between rounded-xl bg-muted px-5 py-4 text-sm"
                   onClick={() => setTab('contents')}
                 >
-                  {t('查看目录 · {count} 章', { count: book.chapters.length })}
+                  {pdfBook && !hasPdfContents
+                    ? `${t('原页目录')} · ${t('{count} 个原页', { count: pageContents.length })}`
+                    : t('查看目录 · {count} 章', {
+                        count: pdfBook ? chapterContents.length : book.chapters.length,
+                      })}
                   <ChevronRight size={17} />
                 </button>
               </>
             )}
             {tab === 'contents' && (
               <div>
-                {book.chapters.map((chapter, index) => (
+                {hasPdfContents && (
+                  <div className="mb-4 flex gap-2" role="group" aria-label={t('目录')}>
+                    {[false, true].map((pages) => (
+                      <button
+                        type="button"
+                        key={String(pages)}
+                        aria-pressed={pdfPages === pages}
+                        className={cn(
+                          'rounded-full px-4 py-2 text-sm',
+                          pdfPages === pages ? 'bg-muted text-primary' : 'hover:bg-muted',
+                        )}
+                        onClick={() => setContentsPage({ bookId: id, limit: 60, pdfPages: pages })}
+                      >
+                        {t(pages ? '原页目录' : '章节')}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {contents.slice(0, contentsLimit).map((entry, index) => (
                   <button
                     className="detail-chapter"
-                    key={chapter.id}
-                    onClick={() => void readBook(book, chapter.paragraphs[0]?.id)}
+                    key={`${entry.chapterId}:${entry.paragraphId}:${index}`}
+                    style={{ paddingInlineStart: 2 + Math.min(entry.depth, 5) * 16 }}
+                    aria-current={index === activeContentsIndex ? 'location' : undefined}
+                    onClick={() => void readBook(book, entry.paragraphId)}
                   >
                     <span className="me-5 text-xs tabular-nums text-muted-foreground">
                       {String(index + 1).padStart(2, '0')}
                     </span>
-                    <span className="flex-1">{chapter.title}</span>
-                    {position?.chapter === index && (
+                    <span className={cn('flex-1', entry.depth === 0 && 'font-medium')}>
+                      {entry.title}
+                      {hasPdfContents &&
+                        !pdfPages &&
+                        paragraphLocations.get(entry.paragraphId)?.sourcePage !== undefined && (
+                          <span className="mt-1 block text-xs font-normal text-muted-foreground">
+                            {t('PDF 第 {n} 页', {
+                              n: paragraphLocations.get(entry.paragraphId)!.sourcePage!,
+                            })}
+                          </span>
+                        )}
+                    </span>
+                    {index === activeContentsIndex && (
                       <span className="ms-3 text-xs text-primary">{t('正在读')}</span>
                     )}
                     <ChevronRight size={15} className="ms-3 text-muted-foreground" />
                   </button>
                 ))}
+                {contents.length > contentsLimit && (
+                  <button
+                    type="button"
+                    className="search-more"
+                    onClick={() =>
+                      setContentsPage({ bookId: id, limit: contentsLimit + 60, pdfPages })
+                    }
+                  >
+                    {localize('显示更多结果')}
+                  </button>
+                )}
               </div>
             )}
             {tab === 'notes' &&
@@ -318,6 +497,42 @@ export function BookDetailPage({ id }: { id: string }) {
                 >
                   <Archive size={22} />
                   {t('收起书籍')}
+                </button>
+                <button
+                  className="book-action"
+                  disabled={exporting}
+                  onClick={() => {
+                    setExporting(true);
+                    void import('@/lib/portable-library')
+                      .then(async ({ createPortableLibrary, downloadPortableLibrary }) => {
+                        downloadPortableLibrary(
+                          await createPortableLibrary(
+                            {
+                              format: 'ai-read-books-and-notes',
+                              version: 1,
+                              exportedAt: Date.now(),
+                              books: [book],
+                              notes: bookNotes,
+                              bookmarks: bookmarks.filter((item) => item.bookId === id),
+                              positions: position ? { [id]: position } : {},
+                            },
+                            { includeEmptyCollections: false },
+                          ),
+                        );
+                        notify(t('阅读包已导出，可在 iOS App 中导入。'));
+                      })
+                      .catch((error) =>
+                        notify(
+                          error instanceof Error
+                            ? localize(error.message)
+                            : t('导出失败，请重试。'),
+                        ),
+                      )
+                      .finally(() => setExporting(false));
+                  }}
+                >
+                  <Smartphone size={22} />
+                  {t(exporting ? '正在导出阅读包…' : '导出 iOS 阅读包')}
                 </button>
               </div>
             </Modal>

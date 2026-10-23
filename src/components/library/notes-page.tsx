@@ -7,6 +7,17 @@ import { useState } from 'react';
 import { Download, Search, PencilLine, Trash2, ArrowUpRight, NotebookPen } from 'lucide-react';
 import { storage } from '@/lib/storage';
 import type { Note } from '@/lib/types';
+import type { Book } from '@/lib/types';
+import { normalizeSearch } from '../../../packages/reading-core/src/search';
+import {
+  createNotesExportLocator,
+  MAX_NOTES_EXPORT_BYTES,
+  notesExportLabels,
+  notesMarkdownBook,
+  notesMarkdownEntry,
+  notesMarkdownHeader,
+  type NotesExportLabels,
+} from '../../../packages/reading-core/src/notes-export';
 import { catalog } from '@/lib/catalog';
 import { Modal } from '@/components/reader/reader-dialogs';
 import { Button } from '@/components/ui/button';
@@ -14,26 +25,29 @@ import { Textarea } from '@/components/ui/textarea';
 import { useLibrary } from './library-provider';
 import { BookCover, Empty, LibraryShell, PageHeading } from './library-ui';
 
-function downloadNotes(
-  notes: Note[],
-  title: string,
-  names: Record<string, string>,
-  locale: string,
-  labels: { notes: string; passage: string },
-) {
-  const text =
-    `# ${title}\n\n` +
-    notes
-      .map(
-        (note) =>
-          `## ${names[note.bookId] || labels.notes}\n\n${note.quote
-            .split('\n')
-            .map((line) => `> ${line}`)
-            .join(
-              '\n',
-            )}\n\n${note.text}\n\n${new Date(note.createdAt).toLocaleDateString(locale)} · ${labels.passage} ${note.paragraphId}`,
-      )
-      .join('\n\n---\n\n');
+function downloadNotes(notes: Note[], title: string, books: Book[], labels: NotesExportLabels) {
+  const byId = new Map(books.map((book) => [book.id, book]));
+  const grouped = new Map<string, Note[]>();
+  for (const note of notes) {
+    if (!grouped.has(note.bookId)) grouped.set(note.bookId, []);
+    grouped.get(note.bookId)!.push(note);
+  }
+  const encoder = new TextEncoder();
+  const parts: string[] = [];
+  let bytes = 0;
+  const append = (part: string) => {
+    bytes += encoder.encode(part).byteLength;
+    if (bytes > MAX_NOTES_EXPORT_BYTES) throw new Error('notes_export_too_large');
+    parts.push(part);
+  };
+  append(notesMarkdownHeader(labels));
+  for (const [bookId, entries] of grouped) {
+    const book = byId.get(bookId);
+    const locate = book ? createNotesExportLocator(book) : () => ({});
+    append(notesMarkdownBook(book || { title: labels.title, author: '' }, labels));
+    for (const note of entries) append(notesMarkdownEntry(note, locate(note.paragraphId), labels));
+  }
+  const text = parts.join('');
   const url = URL.createObjectURL(new Blob([text], { type: 'text/markdown;charset=utf-8' }));
   const anchor = document.createElement('a');
   anchor.href = url;
@@ -53,14 +67,13 @@ export function NotesPage({ bookId }: { bookId?: string }) {
   const [saving, setSaving] = useState(false);
   const book = allBooks.find((b) => b.id === bookId) || catalog.find((b) => b.id === bookId);
   const names = Object.fromEntries(allBooks.map((b) => [b.id, b.title]));
+  const needle = normalizeSearch(query.trim());
   const filtered = notes
     .filter(
       (n) =>
         (!bookId || n.bookId === bookId) &&
-        (!query.trim() ||
-          `${n.quote} ${n.text} ${names[n.bookId]}`
-            .toLocaleLowerCase()
-            .includes(query.trim().toLocaleLowerCase())),
+        (!needle ||
+          normalizeSearch(`${n.quote} ${n.text} ${names[n.bookId] || ''}`).includes(needle)),
     )
     .sort((a, b) => b.createdAt - a.createdAt);
   const grouped = Array.from(new Set(filtered.map((n) => n.bookId)))
@@ -102,15 +115,37 @@ export function NotesPage({ bookId }: { bookId?: string }) {
         >
           <button
             disabled={!filtered.length}
-            onClick={() =>
-              downloadNotes(
-                filtered,
-                book ? t('{value0}-笔记', { value0: book.title }) : t('我的阅读笔记'),
-                names,
-                locale,
-                { notes: t('书中笔记'), passage: t('段落') },
-              )
-            }
+            onClick={() => {
+              const title = book ? t('{value0}-笔记', { value0: book.title }) : t('我的阅读笔记');
+              try {
+                downloadNotes(
+                  filtered,
+                  title,
+                  allBooks,
+                  notesExportLabels(locale === 'zh-CN' ? 'zh-CN' : 'en', {
+                    title,
+                    author: t('作者'),
+                    chapter: t('章节'),
+                    source: t('来源'),
+                    unknown: t('来源未记录'),
+                    original: t('原文'),
+                    translation: t('译文'),
+                    paragraph: t('段落'),
+                    date: t('日期'),
+                    thought: t('你的想法'),
+                    pdfPage: t('PDF 原页'),
+                  }),
+                );
+              } catch (error) {
+                notify(
+                  t(
+                    error instanceof Error && error.message === 'notes_export_too_large'
+                      ? '笔记超过 10 MB，请缩小书籍或搜索范围后重试。'
+                      : '导出失败，请重试。',
+                  ),
+                );
+              }
+            }}
             className="flex size-11 items-center justify-center text-muted-foreground disabled:opacity-30"
             aria-label={t('导出笔记')}
           >
@@ -184,7 +219,7 @@ export function NotesPage({ bookId }: { bookId?: string }) {
         ) : (
           <div className="note-list">
             {filtered.map((note) => (
-              <article className="note-card" key={note.id}>
+              <article className="note-card" key={`${note.bookId}:${note.id}`}>
                 <div className="mb-4 flex items-center justify-between text-xs text-muted-foreground">
                   <Link href={`/books/${note.bookId}`}>{names[note.bookId] || t('书中笔记')}</Link>
                   <time>{new Date(note.createdAt).toLocaleDateString(locale)}</time>
@@ -194,6 +229,15 @@ export function NotesPage({ bookId }: { bookId?: string }) {
                     {t('冲突副本')}
                   </span>
                 )}
+                <p className="mb-3 text-xs text-muted-foreground">
+                  {t(
+                    note.anchor?.source === 'translation'
+                      ? '译文'
+                      : note.anchor?.source === 'original'
+                        ? '原文'
+                        : '来源未记录',
+                  )}
+                </p>
                 <blockquote dir="auto">{note.quote}</blockquote>
                 {note.text && (
                   <p className="mt-4 whitespace-pre-wrap text-sm leading-7">{note.text}</p>
@@ -203,10 +247,10 @@ export function NotesPage({ bookId }: { bookId?: string }) {
                     className="me-auto flex min-h-10 items-center gap-1 text-xs text-primary"
                     onClick={() => {
                       const b = allBooks.find((b) => b.id === note.bookId);
-                      if (b) void readBook(b, note.paragraphId);
+                      if (b) void readBook(b, note.paragraphId, note.id);
                     }}
                   >
-                    {t('回到原文')}
+                    {t('回到摘录')}
                     <ArrowUpRight size={14} />
                   </button>
                   <button

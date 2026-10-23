@@ -24,3 +24,9 @@ Full notices for these distributed components are included under `public/license
 Build tooling includes Tailwind CSS and PostCSS (MIT), TypeScript (Apache-2.0), Prettier (MIT), and their dependencies. Their license files are installed with npm. The exact resolved dependency graph is recorded in `package-lock.json`.
 
 Account services additionally use Auth.js / NextAuth and its Prisma adapter (ISC), Prisma Client and PostgreSQL adapter (Apache-2.0), node-postgres (MIT), and dotenv (BSD-2-Clause). Their notices are bundled under `public/licenses/`; Prisma generation/migration tooling retains its installed license. The Google sign-in mark is used to identify the Google login provider.
+
+PDF conversion uses Mozilla PDF.js / pdfjs-dist (Apache-2.0), with its worker, CMaps, standard fonts and WASM assets served from `public/pdfjs/`. The build copies the upstream license alongside those assets; see `/pdfjs/LICENSE`.
+
+The iOS host uses React Native, Expo and Expo modules (MIT), React Native Safe Area Context (MIT), @xmldom/xmldom (MIT), and Ionicons via @expo/vector-icons (MIT). Their installed notices and exact versions are retained in `apps/mobile/package-lock.json` and the dependency directories. Apple PDFKit, Vision and speech APIs are system frameworks, not bundled third-party implementations.
+
+Optional OpenTelemetry tracing uses @opentelemetry/api, resources, sdk-trace and exporter-trace-otlp-http (Apache-2.0); dependency licenses remain with the installed server distribution.

@@ -11,6 +11,7 @@ export type NativePageProps = ViewProps & {
   hasPrevious: boolean;
   hasNext: boolean;
   onPageChange: Event<{ index: number }>;
+  onInteractionChange: Event<{ active: boolean }>;
   onCenterTap: Event<Record<string, never>>;
   onSelect: Event<{
     paragraph: string;

@@ -5,10 +5,6 @@ import { effectiveBookLanguage } from './reading-language';
 
 export const TRANSLATION_PIPELINE = 'chapter-v1';
 export type TranslationProfile = { baseUrl: string; model: string; translationPrompt: string };
-export type Term = { source: string; target: string };
-export type TranslationSegment = { id: string; paragraphId: string; text: string; kind: string };
-export type TranslationChunk = { segments: TranslationSegment[]; context: string };
-export type ChunkResult = { segments: { id: string; text: string }[]; terms: Term[] };
 export type ChapterState = 'missing' | 'queued' | 'running' | 'ready' | 'error';
 export type ChapterProgress = {
   index: number;
@@ -37,16 +33,7 @@ export type ChapterTranslation = {
   sourceHash: string;
   paragraphs: Record<string, string>;
 };
-export type TranslationCommand = {
-  action: 'prepare' | 'new' | 'pause' | 'resume' | 'select';
-  chapter: number;
-  scope?: 'chapter' | 'book';
-  auto?: boolean;
-  prefetch?: boolean;
-  editionId?: string;
-  requestId?: string;
-};
-/** Only reading text enters the translation job. Images, notes and library sync stay separate. */
+/** Canonical source identity for saved chapter artifacts; this does not schedule translation. */
 export function translationBookSource(book: Book): Book {
   return validateBook({
     id: book.id,

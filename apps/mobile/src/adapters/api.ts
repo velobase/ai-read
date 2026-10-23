@@ -3,6 +3,7 @@ import {
   CompletionStream,
   createApiClient,
   type ReadingQuestion,
+  type ReadingTranslation,
 } from '@bypage/api-client';
 import { measured } from './diagnostics';
 
@@ -38,20 +39,24 @@ export function askReading(
   signal: AbortSignal,
   onText: (text: string) => void,
 ) {
-  return readingCompletion(origin, question, signal, onText);
+  return readingCompletion(origin, question, 'ask', signal, onText);
+}
+export function translateReading(origin: string, input: ReadingTranslation, signal: AbortSignal) {
+  return readingCompletion(origin, input, 'translate', signal, () => {});
 }
 async function readingCompletion(
   origin: string,
-  input: ReadingQuestion,
+  input: ReadingQuestion | ReadingTranslation,
+  action: 'ask' | 'translate',
   signal: AbortSignal,
   onText: (text: string) => void,
 ) {
-  return measured('ai.ask', async () => {
+  return measured(action === 'ask' ? 'ai.ask' : 'ai.translate', async () => {
     const scope = requestScope(origin, signal);
     let result: string;
     try {
       const headers = await scope.headers();
-      const response = await nativeFetch(`${scope.origin}/api/mobile/v1/ask`, {
+      const response = await nativeFetch(`${scope.origin}/api/mobile/v1/${action}`, {
         method: 'POST',
         credentials: 'omit',
         redirect: 'error',
@@ -66,9 +71,22 @@ async function readingCompletion(
       });
       await scope.checkStatus(response.status);
       if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
+        const raw = await response.text();
+        let body: unknown = raw;
+        try {
+          body = JSON.parse(raw);
+        } catch {
+          // Keep a non-JSON upstream response intact in the error cause.
+        }
         scope.assertCurrent();
-        throw new Error(typeof body.error === 'string' ? body.error : `HTTP ${response.status}`);
+        const message =
+          body && typeof body === 'object' && 'error' in body && typeof body.error === 'string'
+            ? body.error
+            : `HTTP ${response.status}`;
+        throw Object.assign(new Error(message, { cause: body }), {
+          status: response.status,
+          requestId: response.headers.get('x-request-id'),
+        });
       }
       const reader = response.body?.getReader();
       if (!reader) throw new Error('empty_response');

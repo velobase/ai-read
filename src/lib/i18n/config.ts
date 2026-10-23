@@ -1,3 +1,5 @@
+import { bookSourceLanguages } from '../../../packages/reading-core/src/reading-language';
+
 export const uiLocales = [
   ['en', 'English'],
   ['zh-CN', '简体中文'],
@@ -48,74 +50,8 @@ export function negotiateLocale(value: string | readonly string[]): Locale {
 export const directionFor = (language: string): 'rtl' | 'ltr' =>
   /^(ar|fa|he|ur|ps|sd|yi)(-|$)/i.test(language) ? 'rtl' : 'ltr';
 
-// Content languages are independent of the available interface translations.
-export const readingLanguages = [
-  ['zh-CN', '简体中文'],
-  ['zh-TW', '繁體中文'],
-  ['en', 'English'],
-  ['ja', '日本語'],
-  ['ko', '한국어'],
-  ['es', 'Español'],
-  ['fr', 'Français'],
-  ['de', 'Deutsch'],
-  ['pt', 'Português'],
-  ['pt-BR', 'Português (Brasil)'],
-  ['it', 'Italiano'],
-  ['ru', 'Русский'],
-  ['uk', 'Українська'],
-  ['pl', 'Polski'],
-  ['nl', 'Nederlands'],
-  ['sv', 'Svenska'],
-  ['da', 'Dansk'],
-  ['nb', 'Norsk bokmål'],
-  ['fi', 'Suomi'],
-  ['is', 'Íslenska'],
-  ['cs', 'Čeština'],
-  ['sk', 'Slovenčina'],
-  ['hu', 'Magyar'],
-  ['ro', 'Română'],
-  ['bg', 'Български'],
-  ['el', 'Ελληνικά'],
-  ['tr', 'Türkçe'],
-  ['ar', 'العربية'],
-  ['he', 'עברית'],
-  ['fa', 'فارسی'],
-  ['ur', 'اردو'],
-  ['hi', 'हिन्दी'],
-  ['bn', 'বাংলা'],
-  ['ta', 'தமிழ்'],
-  ['te', 'తెలుగు'],
-  ['mr', 'मराठी'],
-  ['gu', 'ગુજરાતી'],
-  ['pa', 'ਪੰਜਾਬੀ'],
-  ['ne', 'नेपाली'],
-  ['si', 'සිංහල'],
-  ['th', 'ไทย'],
-  ['vi', 'Tiếng Việt'],
-  ['id', 'Bahasa Indonesia'],
-  ['ms', 'Bahasa Melayu'],
-  ['fil', 'Filipino'],
-  ['km', 'ខ្មែរ'],
-  ['lo', 'ລາວ'],
-  ['my', 'မြန်မာ'],
-  ['sw', 'Kiswahili'],
-  ['af', 'Afrikaans'],
-  ['ca', 'Català'],
-  ['eu', 'Euskara'],
-  ['gl', 'Galego'],
-  ['hr', 'Hrvatski'],
-  ['sr', 'Српски'],
-  ['sl', 'Slovenščina'],
-  ['lt', 'Lietuvių'],
-  ['lv', 'Latviešu'],
-  ['et', 'Eesti'],
-  ['ka', 'ქართული'],
-  ['hy', 'Հայերեն'],
-  ['az', 'Azərbaycanca'],
-  ['kk', 'Қазақша'],
-  ['uz', 'Oʻzbekcha'],
-  ['mn', 'Монгол'],
-] as const;
+// Content languages share the same choices on Web and native.
+export const readingLanguages = bookSourceLanguages;
 
 export function displayLanguage(code: string, locale: string) {
   try {

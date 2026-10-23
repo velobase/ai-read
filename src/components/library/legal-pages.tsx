@@ -32,7 +32,9 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' }) {
           <Link
             href="/privacy"
             className={`flex flex-1 items-center justify-center gap-2 rounded-full py-2.5 text-center transition-colors ${
-              isPrivacy ? 'bg-primary text-white font-medium' : 'text-muted-foreground hover:text-foreground'
+              isPrivacy
+                ? 'bg-primary text-white font-medium'
+                : 'text-muted-foreground hover:text-foreground'
             }`}
           >
             <ShieldCheck size={16} />
@@ -41,7 +43,9 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' }) {
           <Link
             href="/terms"
             className={`flex flex-1 items-center justify-center gap-2 rounded-full py-2.5 text-center transition-colors ${
-              !isPrivacy ? 'bg-primary text-white font-medium' : 'text-muted-foreground hover:text-foreground'
+              !isPrivacy
+                ? 'bg-primary text-white font-medium'
+                : 'text-muted-foreground hover:text-foreground'
             }`}
           >
             <FileText size={16} />
@@ -54,27 +58,55 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' }) {
             isZh ? (
               <>
                 <div>
-                  <h2 className="mb-2 text-base font-semibold text-foreground">1. 本地优先的数据存储</h2>
+                  <h2 className="mb-2 text-base font-semibold text-foreground">
+                    1. 本地优先的数据存储
+                  </h2>
                   <p>
-                    {t('ByPage · 逐页')} 采用本地优先（Local-First）架构。你导入的无 DRM EPUB 与 UTF-8 TXT 书籍在浏览器本地完成解析，原始电子书文件不会上传至服务器。提取的正文、阅读位置、划线、想法笔记、自动译文与对话记录默认保存在当前浏览器的 IndexedDB 与 localStorage 中。
+                    {t('ByPage · 逐页')} 采用本地优先（Local-First）架构。你导入的无 DRM EPUB、UTF-8
+                    TXT 与 PDF
+                    书籍在浏览器本地完成解析，原始电子书文件不会上传至服务器。提取的正文、阅读位置、划线、想法笔记、自动译文与对话记录默认保存在当前浏览器的
+                    IndexedDB 与 localStorage 中。
                   </p>
                 </div>
                 <div>
-                  <h2 className="mb-2 text-base font-semibold text-foreground">2. 账号登录与云端同步</h2>
+                  <h2 className="mb-2 text-base font-semibold text-foreground">
+                    2. 账号登录与云端同步
+                  </h2>
                   <p>
-                    你可以始终以游客身份在本地阅读。当你选择使用 Google 账号登录时，我们仅读取你的基本公开资料（昵称、头像与验证邮箱）以创建阅读身份。登录后，已解析的书籍文本、封面、书架状态、阅读进度、笔记、已完成对话与译文缓存会在你的设备与所部署的 PostgreSQL 数据库之间同步。游客书库保持独立，除非你主动选择导入。
+                    你可以始终以游客身份在本地阅读。当你选择使用 Google
+                    账号登录时，我们仅读取你的基本公开资料（昵称、头像与验证邮箱）以创建阅读身份。登录后，已解析的书籍文本、封面、书架状态、阅读进度、笔记、已完成对话与译文缓存会在你的设备与所部署的
+                    PostgreSQL 数据库之间同步。游客书库保持独立，除非你主动选择导入。
                   </p>
                 </div>
                 <div>
-                  <h2 className="mb-2 text-base font-semibold text-foreground">3. AI 模型服务与密钥安全</h2>
+                  <h2 className="mb-2 text-base font-semibold text-foreground">
+                    3. AI 模型服务与密钥安全
+                  </h2>
                   <p>
-                    发起翻译时，本书用于翻译的原文与必要元数据会保存在你的服务端翻译任务中，译文和断点同样保存在服务端，用于持续处理和跨端读取；不包含插图、PDF 原文件、笔记或书签，也不自动开启书库同步。任务在锁屏、退出 App 或退出登录后仍会继续，直到完成、手动暂停或注销账号。登录后，你可以直接使用 LeafRead 提供的翻译与伴读服务，无需填写 API Key。使用这些功能时，选中的段落、参考原文、书名、问题与近期对话会通过 LeafRead 服务器发送到 OpenRouter 及所选模型提供商处理，适用其隐私政策。平台 Key 仅保存在服务器 Secret 中，不发送到手机或浏览器。完整异常及上游错误响应保存在受访问控制保护的服务端日志中，用于排障；错误响应可能包含相关请求内容。
+                    翻译随阅读位置按需进行，相关原文与必要元数据会发送到服务端处理；完整译文保存在本机，开启书库同步时参与同步。切回原文、离开阅读器或将
+                    App
+                    切至后台会停止不再需要的翻译，不会启动整本后台任务，也不会自动开启书库同步。插图、PDF
+                    原文件、笔记与书签不作为翻译请求内容。登录后，你可以直接使用 LeafRead
+                    提供的翻译与伴读服务，无需填写 API
+                    Key。使用这些功能时，选中的段落、参考原文、书名、问题与近期对话会通过 LeafRead
+                    服务器发送到 OpenRouter 及所选模型提供商处理，适用其隐私政策。平台 Key
+                    仅保存在服务器 Secret
+                    中，不发送到手机或浏览器。完整异常及上游错误响应保存在受访问控制保护的服务端日志中，用于排障；错误响应可能包含相关请求内容。
                   </p>
                 </div>
                 <div>
-                  <h2 className="mb-2 text-base font-semibold text-foreground">4. 无追踪与数据自主权</h2>
+                  <h2 className="mb-2 text-base font-semibold text-foreground">
+                    4. 诊断、可选统计与数据自主权
+                  </h2>
                   <p>
-                    本应用不内置第三方广告或行为分析追踪器。你可以随时在“我 → 数据与备份”中导出完整阅读备份（JSON）或将笔记导出为 Markdown，也可随时清除浏览器本地存储或退出登录设备。
+                    本应用不含广告。本次会话的性能和操作诊断只保存在页面内存。部署者可配置 PostHog
+                    匿名统计；只有你在“设置 →
+                    诊断与隐私”主动开启后，操作类型、耗时和错误类别才会发送。统计不含账号、书名、正文、笔记、问题、密钥、完整网址或搜索词，不创建用户画像或录屏；你可随时关闭，浏览器的
+                    DNT/GPC
+                    隐私信号也会阻止发送。服务端排障日志保留完整异常、原因链和上游错误响应，沿用已有访问控制；受保护的运行指标和可选
+                    trace 记录操作分类与耗时。你可以随时在“我 →
+                    数据与备份”中导出完整阅读备份（JSON）或将笔记导出为
+                    Markdown，也可随时清除浏览器本地存储或退出登录设备。
                   </p>
                 </div>
               </>
@@ -85,7 +117,11 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' }) {
                     1. Local-First Data Storage
                   </h2>
                   <p>
-                    {t('ByPage · 逐页')} is built on a local-first architecture. DRM-free EPUB and UTF-8 TXT files you import are parsed directly in your browser; raw ebook files are not uploaded to our servers. Extracted text, reading positions, highlights, notes, translations, and conversations are stored locally in your browser’s IndexedDB and localStorage by default.
+                    {t('ByPage · 逐页')} is built on a local-first architecture. DRM-free EPUB,
+                    UTF-8 TXT and PDF files you import are parsed directly in your browser; raw
+                    ebook files are not uploaded to our servers. Extracted text, reading positions,
+                    highlights, notes, translations, and conversations are stored locally in your
+                    browser’s IndexedDB and localStorage by default.
                   </p>
                 </div>
                 <div>
@@ -93,7 +129,12 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' }) {
                     2. Accounts & Cloud Synchronization
                   </h2>
                   <p>
-                    You may read locally as a guest at any time. If you sign in with Google, we only use your basic profile information (name, avatar photo, and verified email address) to maintain your reader identity and sessions. For signed-in accounts, parsed book text, covers, shelf state, reading positions, notes, completed AI turns, and translations synchronize across your devices. Your guest library remains separate unless you explicitly import it.
+                    You may read locally as a guest at any time. If you sign in with Google, we only
+                    use your basic profile information (name, avatar photo, and verified email
+                    address) to maintain your reader identity and sessions. For signed-in accounts,
+                    parsed book text, covers, shelf state, reading positions, notes, completed AI
+                    turns, and translations synchronize across your devices. Your guest library
+                    remains separate unless you explicitly import it.
                   </p>
                 </div>
                 <div>
@@ -101,15 +142,39 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' }) {
                     3. AI Providers & API Key Security
                   </h2>
                   <p>
-                    Starting translation stores the book’s reading text and necessary metadata in your server-side translation task, together with translation results and checkpoints for continued processing and access across devices. Images, original PDF files, notes and bookmarks are excluded, and library sync is not enabled. Tasks continue after closing the app or signing out, until completion, an explicit pause or account deletion. Signed-in readers can use LeafRead translation and reading assistance without supplying an API key. When you use these features, selected passages, reference text, book titles, questions and recent conversations are sent through LeafRead servers to OpenRouter and the selected model provider. Their privacy policies apply. Platform credentials remain in server Secrets and are never sent to your device. Complete exceptions and upstream error responses are retained in access-controlled server logs for troubleshooting; error responses may include related request content.
+                    Translation follows the reading position and sends the relevant source text and
+                    necessary metadata to the server. Complete translations are saved on this device
+                    and participate in library sync when enabled. Selecting Original, leaving the
+                    reader or backgrounding the app stops unneeded requests. No whole-book
+                    background task is started, and library sync is not enabled automatically.
+                    Images, original PDF files, notes and bookmarks are excluded from translation
+                    requests. Signed-in readers can use LeafRead translation and reading assistance
+                    without supplying an API key. When you use these features, selected passages,
+                    reference text, book titles, questions and recent conversations are sent through
+                    LeafRead servers to OpenRouter and the selected model provider. Their privacy
+                    policies apply. Platform credentials remain in server Secrets and are never sent
+                    to your device. Complete exceptions and upstream error responses are retained in
+                    access-controlled server logs for troubleshooting; error responses may include
+                    related request content.
                   </p>
                 </div>
                 <div>
                   <h2 className="mb-2 text-base font-semibold text-foreground">
-                    4. No Tracking & Data Portability
+                    4. Diagnostics, Optional Analytics & Data Portability
                   </h2>
                   <p>
-                    LeafRead does not bundle third-party advertising or analytics trackers. You can export your books, notes, and reading progress at any time under Me → Data & backups, export notes as Markdown, or revoke active device sessions under Account & security.
+                    LeafRead has no advertising. Session performance and activity diagnostics stay
+                    in page memory. Deployments may configure anonymous PostHog analytics, sent only
+                    after you opt in under Settings → Diagnostics & privacy. Events contain action
+                    types, timings and error categories, excluding accounts, book titles, text,
+                    notes, questions, keys, full URLs and search terms. No person profiles or
+                    session recordings are created. You may turn analytics off at any time; browser
+                    DNT/GPC signals also prevent sending. Server diagnostic logs retain complete
+                    exceptions, cause chains and upstream error responses under the existing access
+                    controls. Protected operational metrics and optional traces record operation
+                    classifications and timings. You can export your books, notes, and reading
+                    progress at any time under Me → Data & backups, export notes as Markdown, or
+                    revoke active device sessions under Account & security.
                   </p>
                 </div>
               </>
@@ -117,27 +182,42 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' }) {
           ) : isZh ? (
             <>
               <div>
-                <h2 className="mb-2 text-base font-semibold text-foreground">1. 服务说明与合理使用</h2>
+                <h2 className="mb-2 text-base font-semibold text-foreground">
+                  1. 服务说明与合理使用
+                </h2>
                 <p>
-                  欢迎使用 {t('ByPage · 逐页')}（官方网站：leafread.ai）。本服务为你提供多语言电子书阅读、双语对照及基于原文引用的 AI 伴读工具。请仅导入你拥有合法阅读权限且无数字版权管理（DRM）限制的 EPUB 或 UTF-8 TXT 文件，切勿利用本工具规避版权保护或进行非法传播。
+                  欢迎使用 {t('ByPage · 逐页')}
+                  （官方网站：leafread.ai）。本服务为你提供多语言电子书阅读、双语对照及基于原文引用的
+                  AI 伴读工具。请仅导入你拥有合法阅读权限且无数字版权管理（DRM）限制的 EPUB、UTF-8
+                  TXT 或 PDF 文件，切勿利用本工具规避版权保护或进行非法传播。
                 </p>
               </div>
               <div>
-                <h2 className="mb-2 text-base font-semibold text-foreground">2. 用户内容与知识产权</h2>
+                <h2 className="mb-2 text-base font-semibold text-foreground">
+                  2. 用户内容与知识产权
+                </h2>
                 <p>
-                  你导入的书籍、撰写的划线与想法笔记均归你本人或原著作权人所有。书城内置的原创短文与示例内容采用 MIT 许可证提供。LeafRead 品牌、界面设计与软件源代码受相关著作权与开源许可保护（© 2026 LeafRead）。
+                  你导入的书籍、撰写的划线与想法笔记均归你本人或原著作权人所有。书城内置的原创短文与示例内容采用
+                  MIT 许可证提供。LeafRead 品牌、界面设计与软件源代码受相关著作权与开源许可保护（©
+                  2026 LeafRead）。
                 </p>
               </div>
               <div>
-                <h2 className="mb-2 text-base font-semibold text-foreground">3. AI 生成内容免责声明</h2>
+                <h2 className="mb-2 text-base font-semibold text-foreground">
+                  3. AI 生成内容免责声明
+                </h2>
                 <p>
-                  自动译文与 AI 伴读回答由所连接的语言模型实时生成，仅供阅读参考。即便回答中包含可点击的段落引用编号，也不代表所引原文必然能够推导出模型的结论。请始终以书籍原文为准，自行核对与判断。
+                  自动译文与 AI
+                  伴读回答由所连接的语言模型实时生成，仅供阅读参考。即便回答中包含可点击的段落引用编号，也不代表所引原文必然能够推导出模型的结论。请始终以书籍原文为准，自行核对与判断。
                 </p>
               </div>
               <div>
-                <h2 className="mb-2 text-base font-semibold text-foreground">4. 数据备份与服务变更</h2>
+                <h2 className="mb-2 text-base font-semibold text-foreground">
+                  4. 数据备份与服务变更
+                </h2>
                 <p>
-                  鉴于浏览器本地存储可能因清理缓存或更换设备而丢失，请妥善保留原始电子书文件并定期使用“数据与备份”功能导出备份。在法律允许的范围内，本服务按“现状（AS IS）”提供，不对因第三方模型服务中断、网络故障或未备份本地数据造成的内容损失承担责任。
+                  鉴于浏览器本地存储可能因清理缓存或更换设备而丢失，请妥善保留原始电子书文件并定期使用“数据与备份”功能导出备份。在法律允许的范围内，本服务按“现状（AS
+                  IS）”提供，不对因第三方模型服务中断、网络故障或未备份本地数据造成的内容损失承担责任。
                 </p>
               </div>
             </>
@@ -148,7 +228,11 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' }) {
                   1. Service Overview & Acceptable Use
                 </h2>
                 <p>
-                  Welcome to {t('ByPage · 逐页')} (official website: leafread.ai). LeafRead provides multilingual ebook reading, bilingual comparison, and source-grounded AI reading companionship. You agree to import only DRM-free EPUB or UTF-8 TXT files that you have the legal right to read, and not to use the service to bypass technological protection measures or infringe copyright.
+                  Welcome to {t('ByPage · 逐页')} (official website: leafread.ai). LeafRead provides
+                  multilingual ebook reading, bilingual comparison, and source-grounded AI reading
+                  companionship. You agree to import only DRM-free EPUB, UTF-8 TXT or PDF files that
+                  you have the legal right to read, and not to use the service to bypass
+                  technological protection measures or infringe copyright.
                 </p>
               </div>
               <div>
@@ -156,7 +240,10 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' }) {
                   2. Your Content & Intellectual Property
                 </h2>
                 <p>
-                  Books you import and notes or highlights you create remain yours or their respective copyright holders’. Built-in sample essays are original works provided under the MIT License. The LeafRead name, interface design, and software are protected by copyright and applicable open-source licenses (© 2026 LeafRead).
+                  Books you import and notes or highlights you create remain yours or their
+                  respective copyright holders’. Built-in sample essays are original works provided
+                  under the MIT License. The LeafRead name, interface design, and software are
+                  protected by copyright and applicable open-source licenses (© 2026 LeafRead).
                 </p>
               </div>
               <div>
@@ -164,7 +251,10 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' }) {
                   3. AI-Generated Content Disclaimer
                 </h2>
                 <p>
-                  Translations and AI companion responses are generated by language models and may contain inaccuracies or omissions. The presence of a clickable passage citation verifies only that the passage exists in the book, not that it entails the model’s claim. Always verify important information against the original text.
+                  Translations and AI companion responses are generated by language models and may
+                  contain inaccuracies or omissions. The presence of a clickable passage citation
+                  verifies only that the passage exists in the book, not that it entails the model’s
+                  claim. Always verify important information against the original text.
                 </p>
               </div>
               <div>
@@ -172,7 +262,10 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' }) {
                   4. Backups & Limitation of Liability
                 </h2>
                 <p>
-                  Because browser storage can be cleared by device or browser actions, please keep your original ebook files and regularly export backups from Me → Data & backups. To the maximum extent permitted by law, LeafRead is provided “AS IS” without warranties of any kind.
+                  Because browser storage can be cleared by device or browser actions, please keep
+                  your original ebook files and regularly export backups from Me → Data & backups.
+                  To the maximum extent permitted by law, LeafRead is provided “AS IS” without
+                  warranties of any kind.
                 </p>
               </div>
             </>
@@ -196,14 +289,15 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' }) {
                 <Mail size={14} />
                 {SUPPORT_EMAIL}
               </a>
-              <Link href="/me/about" className="inline-flex items-center gap-1.5 text-primary hover:underline">
+              <Link
+                href="/me/about"
+                className="inline-flex items-center gap-1.5 text-primary hover:underline"
+              >
                 <BookOpen size={14} />
                 {t('关于 ByPage · 逐页')}
               </Link>
             </div>
-            <p className="text-muted-foreground/80">
-              © 2026 LeafRead. All rights reserved.
-            </p>
+            <p className="text-muted-foreground/80">© 2026 LeafRead. All rights reserved.</p>
           </div>
         </div>
       </main>

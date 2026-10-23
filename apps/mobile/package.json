@@ -1,7 +1,7 @@
 {
   "name": "@bypage/mobile",
   "private": true,
-  "version": "1.0.4",
+  "version": "1.0.5",
   "main": "index.ts",
   "scripts": {
     "dev": "EXPO_NO_TELEMETRY=1 expo start",

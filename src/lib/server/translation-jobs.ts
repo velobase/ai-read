@@ -1,33 +1,98 @@
+import {
+  TRANSLATION_SOURCE_SCHEME,
+  translationChapterFingerprint,
+} from '../../../packages/reading-core/src';
 import 'server-only';
 import { database } from './database';
-import { publicAIConfig } from './ai-config';
-import { normalizeAIUrl } from './ai-endpoint';
-import type { Prisma } from '@/generated/prisma/client';
 import type { Book } from '../types';
 import {
-  translationProfile,
-  translationBookSource,
   translationSource,
-  planChapter,
   type TranslationEdition,
   type TranslationManifest,
   type TranslationProfile,
   type ChapterState,
+  type ChapterTranslation,
 } from '../translation-edition';
-import { validSyncId } from '../reading-validation';
 
-const json = (value: unknown) => value as Prisma.InputJsonValue;
 export class TranslationRequestError extends Error {
   constructor(
     public code: string,
     message: string,
     public status = 400,
-    options?: ErrorOptions,
   ) {
-    super(message, options);
+    super(message);
     this.name = 'TranslationRequestError';
   }
 }
+type SourceIdentity = { hash: string; chapters: string[]; chapterFingerprints: string[] };
+const sourceIdentities = new Map<string, SourceIdentity>();
+async function translationSourceIdentity(userId: string, editionId: string, sourceHash: string) {
+  const key = JSON.stringify([userId, editionId, sourceHash]);
+  const cached = sourceIdentities.get(key);
+  if (cached) {
+    sourceIdentities.delete(key);
+    sourceIdentities.set(key, cached);
+    return cached;
+  }
+  // Edition sources are immutable. Ownership is checked on every manifest/chapter read;
+  // keep only bounded hashes between reads, never book content or provider credentials.
+  const row = await database.translationEdition.findFirst({
+    where: { id: editionId, userId, sourceHash },
+    select: { source: true },
+  });
+  if (!row) return;
+  const source = row.source as unknown as Book;
+  const identity = await translationSource(source);
+  if (identity.hash !== sourceHash) return;
+  const value = {
+    ...identity,
+    chapterFingerprints: source.chapters.map(translationChapterFingerprint),
+  };
+  sourceIdentities.set(key, value);
+  while (sourceIdentities.size > 16) sourceIdentities.delete(sourceIdentities.keys().next().value!);
+  return value;
+}
+
+export async function readTranslationChapter(
+  userId: string,
+  bookId: string,
+  language: string,
+  editionId: string,
+  index: number,
+): Promise<ChapterTranslation> {
+  const chapter = await database.translationChapter.findFirst({
+    where: {
+      editionId,
+      chapterIndex: index,
+      state: 'ready',
+      edition: { userId, bookId, targetLanguage: language },
+    },
+    include: { edition: { select: { sourceHash: true } } },
+  });
+  if (!chapter)
+    throw new TranslationRequestError(
+      'translation_chapter_not_ready',
+      '这段已保存译文暂时不可用。',
+      404,
+    );
+  const source = await translationSourceIdentity(userId, editionId, chapter.edition.sourceHash);
+  if (!source || source.chapters[index] !== chapter.sourceHash)
+    throw new TranslationRequestError(
+      'translation_source_changed',
+      '这段已保存译文与当前原文不匹配。',
+      409,
+    );
+  return {
+    editionId,
+    bookId,
+    index,
+    sourceHash: chapter.sourceHash,
+    sourceScheme: TRANSLATION_SOURCE_SCHEME,
+    sourceFingerprint: source.chapterFingerprints[index],
+    paragraphs: chapter.paragraphs as Record<string, string>,
+  };
+}
+
 export async function translationManifest(
   userId: string,
   bookId: string,
@@ -52,6 +117,8 @@ export async function translationManifest(
           completedChunks: true,
           totalChunks: true,
           error: true,
+          attempts: true,
+          retryAt: true,
         },
       },
     },
@@ -59,218 +126,43 @@ export async function translationManifest(
   const selection = await database.translationSelection.findUnique({
     where: { userId_bookId_targetLanguage: { userId, bookId, targetLanguage: language } },
   });
+  const sources = await Promise.all(
+    rows.map((row) => translationSourceIdentity(userId, row.id, row.sourceHash)),
+  );
+  // Only attach portable proof after the original artifact's legacy identity
+  // matches the stored source. Computing a new hash alone proves no provenance.
   return {
     selectedId: rows.some((r) => r.id === selection?.editionId) ? selection!.editionId : null,
-    editions: rows.map((row): TranslationEdition => ({
-      id: row.id,
-      bookId,
-      language,
-      sourceHash: row.sourceHash,
-      profile: row.profile as TranslationProfile,
-      state: row.state as TranslationEdition['state'],
-      error: row.error || undefined,
-      createdAt: row.createdAt.getTime(),
-      chapters: row.chapters.map((c) => ({
-        index: c.chapterIndex,
-        sourceHash: c.sourceHash,
-        state: c.state as ChapterState,
-        completedChunks: c.completedChunks,
-        totalChunks: c.totalChunks,
-        error: c.error || undefined,
-      })),
-    })),
+    editions: rows.map((row, index): TranslationEdition => {
+      const source = sources[index];
+      return {
+        id: row.id,
+        bookId,
+        language,
+        sourceHash: row.sourceHash,
+        // Canonical SHA includes the effective source language. The stored source
+        // cannot prove the book's original import-language portable fingerprint.
+        profile: row.profile as TranslationProfile,
+        state: row.state as TranslationEdition['state'],
+        error: row.error || undefined,
+        createdAt: row.createdAt.getTime(),
+        chapters: row.chapters.map((c) => ({
+          index: c.chapterIndex,
+          sourceHash: c.sourceHash,
+          ...(source?.chapters[c.chapterIndex] === c.sourceHash
+            ? {
+                sourceScheme: TRANSLATION_SOURCE_SCHEME,
+                sourceFingerprint: source.chapterFingerprints[c.chapterIndex],
+              }
+            : {}),
+          state: c.state as ChapterState,
+          completedChunks: c.completedChunks,
+          totalChunks: c.totalChunks,
+          error: c.error || undefined,
+          attempts: c.attempts,
+          retryAt: c.retryAt?.getTime(),
+        })),
+      };
+    }),
   };
-}
-
-export async function changeTranslation(userId: string, body: Record<string, unknown>) {
-  const bookId = String(body.bookId || ''),
-    language = String(body.language || '');
-  if (!/^[\w-]{2,30}$/.test(language))
-    throw new TranslationRequestError('translation_request_invalid', '请选择翻译语言。');
-  const action = body.action;
-  if (!['prepare', 'new', 'pause', 'resume', 'select'].includes(String(action)))
-    throw new TranslationRequestError('translation_request_invalid', '翻译操作无效。');
-  if (!validSyncId(bookId))
-    throw new TranslationRequestError('translation_request_invalid', '书籍编号无效。');
-  let submitted: Book | undefined;
-  if (action === 'prepare' || action === 'new') {
-    try {
-      submitted = translationBookSource(body.book as Book);
-    } catch (cause) {
-      throw new TranslationRequestError(
-        'translation_request_invalid',
-        '请提交完整的书籍原文。',
-        400,
-        { cause },
-      );
-    }
-    if (submitted.id !== bookId)
-      throw new TranslationRequestError('translation_request_invalid', '书籍编号不一致。');
-  }
-  const submittedHash = submitted ? await translationSource(submitted) : null;
-  const index = Number(body.chapter ?? 0);
-  const config = await publicAIConfig(userId);
-  const scope = body.scope === 'book' ? 'book' : 'chapter';
-  const auto = body.auto === true;
-  const newId = body.requestId;
-  if (action === 'new' && (!validSyncId(newId) || newId.length > 80))
-    throw new TranslationRequestError('translation_request_invalid', '翻译任务编号无效。');
-  await database.$transaction(
-    async (tx) => {
-      // Serialize edition creation and selection for the account, including retried requests.
-      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${userId} FOR UPDATE`;
-      const key = { userId, bookId, targetLanguage: language };
-      const selection = await tx.translationSelection.findUnique({
-        where: { userId_bookId_targetLanguage: key },
-      });
-      let edition = await tx.translationEdition.findFirst({
-        where: {
-          ...key,
-          id:
-            action === 'new'
-              ? String(newId)
-              : typeof body.editionId === 'string'
-                ? body.editionId
-                : selection?.editionId || '',
-        },
-      });
-      const book = submitted || (edition?.source as unknown as Book | undefined);
-      if (!book)
-        throw new TranslationRequestError(
-          'translation_edition_not_found',
-          '没有找到这个译本。',
-          404,
-        );
-      if (!Number.isInteger(index) || index < 0 || index >= book.chapters.length)
-        throw new TranslationRequestError('translation_request_invalid', '章节编号无效。');
-      const source = submittedHash || (await translationSource(book));
-      if (!edition && (action === 'prepare' || action === 'new')) {
-        if (!config.baseUrl || !config.model || !config.hasKey)
-          throw new TranslationRequestError(
-            'translation_platform_unavailable',
-            '平台翻译服务暂时不可用，请稍后重试。',
-            503,
-          );
-        const profile = translationProfile({ ...config, baseUrl: normalizeAIUrl(config.baseUrl) });
-        edition = await tx.translationEdition.create({
-          data: {
-            ...key,
-            id: action === 'new' ? String(newId) : crypto.randomUUID(),
-            sourceHash: source.hash,
-            source: json(book),
-            profile: json(profile),
-            chapters: {
-              create: book.chapters.map((chapter, chapterIndex) => ({
-                chapterIndex,
-                sourceHash: source.chapters[chapterIndex],
-                totalChunks: planChapter(chapter).length,
-              })),
-            },
-          },
-        });
-        if (!selection)
-          await tx.translationSelection.create({ data: { ...key, editionId: edition.id } });
-        if (action === 'new')
-          await tx.translationEdition.updateMany({
-            where: { ...key, id: { not: edition.id }, state: 'active' },
-            data: { state: 'paused' },
-          });
-      }
-      if (!edition)
-        throw new TranslationRequestError(
-          'translation_edition_not_found',
-          '没有找到这个译本。',
-          404,
-        );
-      // Match the worker's edition-before-chapter lock order. In particular,
-      // reprioritizing a chapter must not deadlock its checkpoint transaction.
-      await tx.$queryRaw`SELECT "id" FROM "TranslationEdition" WHERE "id" = ${edition.id} FOR UPDATE`;
-      if (action !== 'pause' && !submitted && body.sourceHash !== edition.sourceHash)
-        throw new TranslationRequestError(
-          'translation_source_changed',
-          '原文已变化，请创建新译本。',
-          409,
-        );
-      if (action === 'select') {
-        if (edition.sourceHash !== source.hash)
-          throw new TranslationRequestError(
-            'translation_source_changed',
-            '这个译本的原文版本已变化。',
-            409,
-          );
-        const pending = await tx.translationChapter.count({
-          where: { editionId: edition.id, state: { not: 'ready' } },
-        });
-        const selected = selection
-          ? await tx.translationEdition.findUnique({ where: { id: selection.editionId } })
-          : null;
-        if (
-          selected &&
-          selected.id !== edition.id &&
-          edition.createdAt >= selected.createdAt &&
-          pending
-        )
-          throw new TranslationRequestError(
-            'translation_edition_not_complete',
-            '新译本完成后即可切换，当前译本仍可阅读。',
-          );
-        await tx.translationSelection.upsert({
-          where: { userId_bookId_targetLanguage: key },
-          create: { ...key, editionId: edition.id },
-          update: { editionId: edition.id },
-        });
-        return;
-      }
-      if (action === 'pause') {
-        await tx.translationEdition.update({
-          where: { id: edition.id },
-          data: { state: 'paused' },
-        });
-        return;
-      }
-      if (edition.sourceHash !== source.hash)
-        throw new TranslationRequestError(
-          'translation_source_changed',
-          '原文已变化，请创建新译本。',
-          409,
-        );
-      // Automatic reading never silently resumes a user-paused or failed job.
-      if (auto && ['paused', 'error'].includes(edition.state)) return;
-      const indices =
-        action === 'new' || scope === 'book'
-          ? book.chapters.map((_, i) => i)
-          : [index, ...(body.prefetch === false ? [] : [index + 1])].filter(
-              (i) => i < book.chapters.length,
-            );
-      if (action === 'resume') {
-        const failed = await tx.translationChapter.findMany({
-          where: { editionId: edition.id, state: 'error' },
-          select: { chapterIndex: true },
-        });
-        indices.push(...failed.map((c) => c.chapterIndex));
-      }
-      await tx.translationChapter.updateMany({
-        where: {
-          editionId: edition.id,
-          chapterIndex: { in: indices },
-          state: { in: ['missing', ...(auto ? [] : ['error'])] },
-        },
-        data: { state: 'queued', attempts: 0, retryAt: null, error: null },
-      });
-      // Navigation prioritizes the current chapter without abandoning in-flight work.
-      await tx.translationChapter.updateMany({
-        where: { editionId: edition.id, chapterIndex: index },
-        data: { priority: (Date.now() / 1000) | 0 },
-      });
-      const pending = await tx.translationChapter.count({
-        where: { editionId: edition.id, state: { in: ['queued', 'running'] } },
-      });
-      await tx.translationEdition.update({
-        where: { id: edition.id },
-        data: { state: pending ? 'active' : 'idle', error: null },
-      });
-    },
-    { timeout: 30000 },
-  );
-  return translationManifest(userId, bookId, language);
 }

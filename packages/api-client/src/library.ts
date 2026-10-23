@@ -60,7 +60,9 @@ export function createLibraryApiClient(transport: LibraryTransport) {
         (!body.authenticated && permissions.length > 0) ||
         (body.authenticated && !permissions.includes('account_ai'))
       )
-        throw new Error('unsupported_server_response');
+        throw Object.assign(new Error('unsupported_server_response', { cause: response.body }), {
+          status: response.status,
+        });
       return {
         version: 2,
         product: 'bypage',
@@ -77,6 +79,10 @@ export function createLibraryApiClient(transport: LibraryTransport) {
           : {}),
         ...(typeof body.aiContextKey === 'string' && /^[a-f0-9]{64}$/.test(body.aiContextKey)
           ? { aiContextKey: body.aiContextKey }
+          : {}),
+        ...(typeof body.translationContextKey === 'string' &&
+        /^[a-f0-9]{64}$/.test(body.translationContextKey)
+          ? { translationContextKey: body.translationContextKey }
           : {}),
       };
     },

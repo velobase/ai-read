@@ -22,7 +22,6 @@ import { type ShelfBook } from '../adapters/database';
 import { useApp } from '../context';
 import { Cover } from '../components/book-card';
 import { BookSourceLanguage } from '../components/book-source-language';
-import { BookTranslationPreparation } from '../components/translation-preparation';
 import { Button, Chip, Icon, IconButton, styles, type IconName } from '../components/ui';
 import { SearchEntry } from './library-screens';
 
@@ -259,7 +258,6 @@ export function BookDetailScreen({
           ))}
           <BookSourceLanguage book={book} update={onShelf ? updateSourceLanguage : undefined} />
         </View>
-        {onShelf && <BookTranslationPreparation book={book} />}
         <View style={{ backgroundColor: colors.surface, padding: 20, borderRadius: 14, gap: 14 }}>
           <Text style={[styles.subtitle, { color: colors.ink }]}>{t('intro')}</Text>
           <Text style={{ fontSize: 15, lineHeight: 26, color: colors.ink }}>

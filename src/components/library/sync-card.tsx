@@ -3,7 +3,7 @@ import { Cloud, Download, RefreshCw } from 'lucide-react';
 import { useSync, syncNow } from '@/components/auth/sync-provider';
 import { useIdentity } from '@/components/auth/identity-provider';
 import { useI18n } from '@/lib/i18n/provider';
-import { recoveryBackup } from '@/lib/sync-storage';
+import { recoveryPortableLibrary } from '@/lib/sync-storage';
 import { Button } from '@/components/ui/button';
 import { useLibrary } from './library-provider';
 export function SyncCard() {
@@ -22,7 +22,7 @@ export function SyncCard() {
   } as const;
   const recover = async () => {
     try {
-      const backup = await recoveryBackup();
+      const backup = await recoveryPortableLibrary();
       const url = URL.createObjectURL(
         new Blob([JSON.stringify(backup)], { type: 'application/json' }),
       );

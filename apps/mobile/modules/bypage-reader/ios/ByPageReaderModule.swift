@@ -14,6 +14,7 @@ private struct Illustration: Decodable {
 }
 private struct Fragment: Decodable {
   let image: Illustration?
+  let placeholder: Bool
   let text: String
   let paragraph: String?
   let source: String
@@ -170,7 +171,7 @@ private final class ReadingPageController: UIViewController {
       let links = fragment.source == "original" ? (fragment.links ?? []).filter { $0.start >= 0 && $0.end > $0.start && $0.end <= (fragment.text as NSString).length } : []
       let label: UILabel = links.isEmpty ? UILabel() : ReadingReferenceLabel(frame: .zero)
       label.numberOfLines = 0
-      label.isUserInteractionEnabled = true
+      label.isUserInteractionEnabled = !fragment.placeholder
       label.tag = index
       label.accessibilityLabel = fragment.text
       label.accessibilityTraits = .staticText
@@ -224,6 +225,7 @@ private final class ReadingPageController: UIViewController {
   }
   @objc private func longPress(_ gesture: UILongPressGestureRecognizer) {
     guard gesture.state == .began, let tag = gesture.view?.tag, let page, page.fragments.indices.contains(tag) else { return }
+    guard !page.fragments[tag].placeholder else { return }
     select?(page.fragments[tag])
   }
 }
@@ -232,6 +234,7 @@ final class ByPageReaderView: ExpoView, UIPageViewControllerDataSource, UIPageVi
   let onPageChange = EventDispatcher()
   let onCenterTap = EventDispatcher()
   let onSelect = EventDispatcher()
+  let onInteractionChange = EventDispatcher()
   let onBoundary = EventDispatcher()
   let onImagePress = EventDispatcher()
   let onImageError = EventDispatcher()
@@ -289,8 +292,8 @@ final class ByPageReaderView: ExpoView, UIPageViewControllerDataSource, UIPageVi
     guard pages[wanted] != nil else { return }
     if wanted != currentIndex {
       let direction: UIPageViewController.NavigationDirection = wanted > currentIndex ? .forward : .reverse
-      currentIndex = wanted; turning = true
-      controller.setViewControllers([makePage(wanted)], direction: direction, animated: effect != "none" && !UIAccessibility.isReduceMotionEnabled) { [weak self] _ in self?.turning = false; self?.update() }
+      currentIndex = wanted; turning = true; onInteractionChange(["active": true])
+      controller.setViewControllers([makePage(wanted)], direction: direction, animated: effect != "none" && !UIAccessibility.isReduceMotionEnabled) { [weak self] _ in self?.turning = false; self?.onInteractionChange(["active": false]); self?.update() }
     } else if let shown = controller.viewControllers?.first as? ReadingPageController, shown.index == currentIndex {
       shown.update(pages[currentIndex])
     }
@@ -350,9 +353,10 @@ final class ByPageReaderView: ExpoView, UIPageViewControllerDataSource, UIPageVi
     if index == -1 && hasPrevious || index == totalPages && hasNext { return makePage(index) }
     return pages[index] != nil ? makePage(index) : nil
   }
-  func pageViewController(_ pageViewController: UIPageViewController, willTransitionTo pendingViewControllers: [UIViewController]) { turning = true }
+  func pageViewController(_ pageViewController: UIPageViewController, willTransitionTo pendingViewControllers: [UIViewController]) { turning = true; onInteractionChange(["active": true]) }
   func pageViewController(_ pageViewController: UIPageViewController, didFinishAnimating finished: Bool, previousViewControllers: [UIViewController], transitionCompleted completed: Bool) {
     turning = false
+    onInteractionChange(["active": false])
     guard completed, let shown = pageViewController.viewControllers?.first as? ReadingPageController else { update(); return }
     if shown.index < 0 || shown.index >= totalPages {
       pageViewController.setViewControllers([makePage(currentIndex)], direction: .forward, animated: false)
@@ -613,7 +617,7 @@ public final class ByPageReaderModule: Module {
     Name("ByPageReader")
     Constants(["mediaVersion": 1, "referencesVersion": 1, "selectionVersion": 1, "progressSliderVersion": 1])
     View(ByPageReaderView.self) {
-      Events("onPageChange", "onCenterTap", "onSelect", "onBoundary", "onImagePress", "onImageError", "onReferencePress")
+      Events("onPageChange", "onInteractionChange", "onCenterTap", "onSelect", "onBoundary", "onImagePress", "onImageError", "onReferencePress")
       Prop("pagesJSON") { (view: ByPageReaderView, value: String) in view.pagesJSON = value }
       Prop("pageIndex") { (view: ByPageReaderView, value: Int) in view.targetIndex = value }
       Prop("totalPages") { (view: ByPageReaderView, value: Int) in view.totalPages = max(1, value) }
