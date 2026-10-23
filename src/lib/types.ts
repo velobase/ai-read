@@ -1,58 +1,26 @@
 import { DEFAULT_TRANSLATION_PROMPT } from './translation-prompt';
 import { readingLanguages } from './i18n/config';
-export type Paragraph = { id: string; text: string; kind: 'text' | 'heading' | 'quote' | 'code' };
-export type Chapter = { id: string; title: string; paragraphs: Paragraph[] };
-export type Book = {
-  id: string;
-  title: string;
-  author: string;
-  language: string;
-  chapters: Chapter[];
-  importedAt: number;
-  sample?: boolean;
-  subtitle?: string;
-  description?: string;
-  category?: string;
-  cover?: string;
-  pageDirection?: 'ltr' | 'rtl';
-};
-// Display metadata is also used for recommendations that do not contain a book file.
-export type BookDisplay = Pick<
+import type {
   Book,
-  'id' | 'title' | 'author' | 'language' | 'sample' | 'subtitle' | 'cover'
-> & { publisher?: string; listingOnly?: true };
-export type Position = {
-  chapter: number;
-  paragraph: string;
-  farthest: number;
-  /** Approximate original-text fraction; retained for older progress records. */
-  offset?: number;
-  textOffset?: number;
-  textSource?: 'original' | 'translation';
-  textQuote?: string;
-};
-export type NoteAnchor = {
-  source: 'original' | 'translation';
-  start: number;
-  end: number;
-  translationKey?: string;
-};
-export type Note = {
-  id: string;
-  bookId: string;
-  paragraphId: string;
-  quote: string;
-  anchor?: NoteAnchor;
-  text: string;
-  createdAt: number;
-};
-export type Message = {
-  turnId?: string;
-  createdAt?: number;
-  role: 'user' | 'assistant';
-  content: string;
-  sources?: string[];
-  partial?: boolean;
+  Paragraph,
+  Chapter,
+  Position,
+  Bookmark,
+  Note,
+  NoteAnchor,
+  BookDisplay,
+  Message,
+} from '../../packages/reading-core/src/types';
+export type {
+  Book,
+  Paragraph,
+  Chapter,
+  Position,
+  Bookmark,
+  Note,
+  NoteAnchor,
+  BookDisplay,
+  Message,
 };
 export type Settings = {
   baseUrl: string;

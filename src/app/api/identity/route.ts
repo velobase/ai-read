@@ -1,5 +1,5 @@
 import { auth } from '@/lib/server/auth';
-import { authEnabled } from '@/lib/server/auth-config';
+import { authEnabled, authProviders } from '@/lib/server/auth-config';
 import { database } from '@/lib/server/database';
 
 export const runtime = 'nodejs';
@@ -23,7 +23,11 @@ export async function GET() {
       })
     : null;
   return Response.json(
-    { enabled, user: user ? { ...user, name: user.name || '读书的人' } : null },
+    {
+      enabled,
+      providers: authProviders(),
+      user: user ? { ...user, name: user.name || '读书的人' } : null,
+    },
     { headers: { 'Cache-Control': 'no-store' } },
   );
 }

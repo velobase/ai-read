@@ -24,6 +24,7 @@ model User {
   preferencesMutation String?
   books               Book[]
   aiConnection        AIConnection?
+  mobileAuthorizations MobileAuthorization[]
 }
 
 model AIConnection {
@@ -52,6 +53,7 @@ model Book {
   user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   progress     ReadingProgress?
   notes        Note[]
+  bookmarks    Bookmark[]
   chats        ChatTurn[]
   translations TranslationCache[]
   translationEditions TranslationEdition[]
@@ -88,6 +90,21 @@ model Note {
   updatedAt   DateTime  @updatedAt
   deletedAt   DateTime?
   book        Book      @relation(fields: [userId, bookId], references: [userId, id], onDelete: Cascade)
+
+  @@id([userId, bookId, id])
+}
+
+model Bookmark {
+  userId     String
+  bookId     String
+  id         String
+  body       Json
+  createdAt  DateTime
+  version    Int       @default(1)
+  mutationId String
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+  book       Book      @relation(fields: [userId, bookId], references: [userId, id], onDelete: Cascade)
 
   @@id([userId, bookId, id])
 }
@@ -187,6 +204,7 @@ model Account {
   type              String
   provider          String
   providerAccountId String
+  encryptedAppleRefreshToken String?
   user              User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
@@ -200,8 +218,31 @@ model Session {
   expires      DateTime
   createdAt    DateTime @default(now())
   device       String   @default("浏览器")
+  kind         String   @default("web")
+  origin       String?
+  permissions  String[] @default(["account_ai"])
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mobileAuthorizations MobileAuthorization[]
 
   @@index([userId])
   @@index([expires])
+}
+
+// Short-lived browser-to-app handoff. Raw codes, verifiers and session tokens are never stored.
+model MobileAuthorization {
+  codeHash      String   @id
+  codeChallenge String
+  stateHash     String
+  origin        String
+  permissions   String[] @default(["account_ai"])
+  userId        String
+  webSessionId  String
+  createdAt     DateTime @default(now())
+  expires       DateTime
+  user          User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  webSession    Session @relation(fields: [webSessionId], references: [id], onDelete: Cascade)
+
+  @@index([expires])
+  @@index([userId])
+  @@index([webSessionId])
 }

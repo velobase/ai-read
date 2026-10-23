@@ -31,7 +31,9 @@ export function AccountPage() {
   const [data, setData] = useState<AccountData | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [confirmation, setConfirmation] = useState<'signout' | 'others' | Session | null>(null);
+  const [confirmation, setConfirmation] = useState<
+    'signout' | 'others' | 'delete' | Session | null
+  >(null);
   const load = useCallback(async () => {
     try {
       const response = await fetch('/api/account', { cache: 'no-store' });
@@ -53,6 +55,21 @@ export function AccountPage() {
     if (!confirmation || busy) return;
     setBusy(true);
     try {
+      if (confirmation === 'delete' && user) {
+        const response = await fetch('/api/account', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ confirmation: user.id }),
+        });
+        if (!response.ok) throw new Error('account_deletion_retry');
+        // Guest storage is deliberately preserved. Close this document before any further sync.
+        for (const key of Object.keys(localStorage)) {
+          if (key.endsWith(`:user:${user.id}`)) localStorage.removeItem(key);
+        }
+        indexedDB.deleteDatabase(`ai-read:user:${user.id}`);
+        window.location.replace('/');
+        return;
+      }
       if (confirmation === 'signout') {
         await signOut({ redirectTo: '/me' });
         return;
@@ -61,7 +78,9 @@ export function AccountPage() {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
-          confirmation === 'others' ? { scope: 'others' } : { id: confirmation.id },
+          confirmation === 'others'
+            ? { scope: 'others' }
+            : { id: typeof confirmation === 'object' ? confirmation.id : '' },
         ),
       });
       if (response.status === 401) {
@@ -144,18 +163,24 @@ export function AccountPage() {
             <section className="settings-form-card mt-4">
               <h2 className="mb-5 font-medium">{t('登录方式')}</h2>
               <div className="flex items-center gap-3">
-                <GoogleMark />
-                <span className="text-sm">Google</span>
+                {data?.accounts.some((a) => a.provider === 'apple') ? (
+                  <span aria-hidden>●</span>
+                ) : (
+                  <GoogleMark />
+                )}
+                <span className="text-sm">
+                  {data?.accounts
+                    .map((a) => (a.provider === 'apple' ? 'Apple' : 'Google'))
+                    .join(', ') || '…'}
+                </span>
                 <span className="ms-auto text-xs text-muted-foreground">
-                  {data?.accounts.some((a) => a.provider === 'google')
-                    ? t('已连接')
-                    : t('正在读取…')}
+                  {!!data?.accounts.length ? t('已连接') : t('正在读取…')}
                 </span>
               </div>
               <p className="mt-5 text-xs leading-6 text-muted-foreground">
-                {t(
-                  '邮箱由 Google 验证。更改昵称不会影响登录；ByPage · 逐页不会保存你的 Google 密码。',
-                )}
+                {locale.startsWith('zh')
+                  ? '登录由所选服务验证，叶子阅读不会保存你的 Apple 或 Google 密码。'
+                  : 'Your sign-in provider verifies your identity. LeafRead never stores your Apple or Google password.'}
               </p>
             </section>
             <section className="settings-form-card mt-4">
@@ -241,19 +266,41 @@ export function AccountPage() {
               <LogOut size={17} />
               {t('退出当前账号')}
             </Button>
+            <Button
+              variant="ghost"
+              className="mt-3 w-full text-destructive"
+              disabled={busy}
+              onClick={() => setConfirmation('delete')}
+            >
+              {locale.startsWith('zh') ? '注销账号' : 'Delete account'}
+            </Button>
           </>
         )}
         {confirmation && (
           <Modal
-            title={confirmation === 'signout' ? t('退出当前账号？') : t('退出登录设备？')}
+            title={
+              confirmation === 'delete'
+                ? locale.startsWith('zh')
+                  ? '永久注销账号？'
+                  : 'Permanently delete account?'
+                : confirmation === 'signout'
+                  ? t('退出当前账号？')
+                  : t('退出登录设备？')
+            }
             close={() => {
               if (!busy) setConfirmation(null);
             }}
           >
             <p className="mt-4 text-sm leading-7 text-muted-foreground">
-              {confirmation === 'signout'
-                ? t('本机书籍和笔记会保留在这个账号的阅读空间。退出后，打开的是原有游客书库。')
-                : t('所选会话将立即失效，这些设备需要重新登录才能继续使用账号。当前设备不受影响。')}
+              {confirmation === 'delete'
+                ? locale.startsWith('zh')
+                  ? '这会永久删除云端资料、书籍、笔记、书签、译文、对话和 AI 配置，并撤销所有登录。游客书库和单独导出的备份不会删除。此操作无法撤销。'
+                  : 'This permanently deletes your cloud profile, books, notes, bookmarks, translations, conversations and AI settings, and revokes all sessions. Guest books and exported backups are retained. This cannot be undone.'
+                : confirmation === 'signout'
+                  ? t('本机书籍和笔记会保留在这个账号的阅读空间。退出后，打开的是原有游客书库。')
+                  : t(
+                      '所选会话将立即失效，这些设备需要重新登录才能继续使用账号。当前设备不受影响。',
+                    )}
             </p>
             <div className="mt-7 flex gap-3">
               <Button
@@ -265,7 +312,17 @@ export function AccountPage() {
                 {t('取消')}
               </Button>
               <Button className="flex-1 rounded-full" disabled={busy} onClick={() => void act()}>
-                {busy ? t('正在退出…') : t('确认退出')}
+                {confirmation === 'delete'
+                  ? locale.startsWith('zh')
+                    ? busy
+                      ? '正在注销…'
+                      : '永久注销'
+                    : busy
+                      ? 'Deleting…'
+                      : 'Delete permanently'
+                  : busy
+                    ? t('正在退出…')
+                    : t('确认退出')}
               </Button>
             </div>
           </Modal>

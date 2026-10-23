@@ -1,3 +1,4 @@
+import { deleteAccount, accountDeletionFailure } from '@/lib/server/account-deletion';
 import { auth, hashSession } from '@/lib/server/auth';
 import { database } from '@/lib/server/database';
 import { accountBody, unauthorized } from '@/lib/server/account-request';
@@ -60,4 +61,26 @@ export async function PATCH(request: Request) {
     data: { name: name.trim(), bio: bio.trim(), color },
   });
   return Response.json({ ok: true });
+}
+
+export async function DELETE(request: Request) {
+  const session = await auth();
+  const jar = await cookies();
+  const token = jar.get(sessionCookieName)?.value;
+  if (!session?.user?.id || !token) return unauthorized();
+  let body;
+  try {
+    body = await accountBody(request);
+  } catch {
+    return Response.json({ error: 'invalid_request' }, { status: 400 });
+  }
+  if (body.confirmation !== session.user.id)
+    return Response.json({ error: 'confirmation_required' }, { status: 400 });
+  try {
+    await deleteAccount({ userId: session.user.id, sessionToken: hashSession(token), kind: 'web' });
+    jar.delete(sessionCookieName);
+    return Response.json({ ok: true });
+  } catch (error) {
+    return accountDeletionFailure(error);
+  }
 }
