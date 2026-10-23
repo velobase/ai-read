@@ -127,9 +127,7 @@ export async function handleAI(request: Request, server: ServerAIConfig): Promis
     let instruction;
     if (action === 'translate') {
       const translationPrompt = effectiveTranslationPrompt(
-        server.accountManaged
-          ? server.translationPrompt
-          : str(body.translationPrompt, MAX_TRANSLATION_PROMPT_LENGTH),
+        server.translationPrompt,
       );
       const fingerprint = translationFingerprint({ baseUrl, model, translationPrompt });
       // A second device may have changed the prompt/model since this page loaded.

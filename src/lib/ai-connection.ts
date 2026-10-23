@@ -40,11 +40,9 @@ export async function saveAIConnection(
 export function applyAIConnection(settings: Settings, config: AIConnection): Settings {
   return {
     ...settings,
-    baseUrl: config.accountManaged ? config.baseUrl : settings.baseUrl || config.baseUrl,
-    model: config.accountManaged ? config.model : settings.model || config.model,
-    apiKey: config.accountManaged ? '' : settings.apiKey,
-    translationPrompt: config.accountManaged
-      ? effectiveTranslationPrompt(config.translationPrompt)
-      : effectiveTranslationPrompt(settings.translationPrompt),
+    baseUrl: config.baseUrl,
+    model: config.model,
+    apiKey: '',
+    translationPrompt: effectiveTranslationPrompt(config.translationPrompt),
   };
 }
