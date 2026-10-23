@@ -1,0 +1,21 @@
+{
+  "cli": { "version": ">= 25.3.0", "appVersionSource": "remote" },
+  "build": {
+    "development": { "developmentClient": false, "distribution": "internal", "ios": { "simulator": true }, "env": { "BYPAGE_MOBILE_ENV": "development" } },
+    "preview": { "distribution": "internal", "env": { "BYPAGE_MOBILE_ENV": "production" } },
+    "production": {
+      "autoIncrement": true,
+      "ios": { "image": "sdk-57" },
+      "env": {
+        "BYPAGE_MOBILE_ENV": "production",
+        "EXPO_NO_DOTENV": "1",
+        "EXPO_NO_CLIENT_ENV_VARS": "1"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": { "ascAppId": "6826089760", "appleTeamId": "9BMSHUC3V6" }
+    }
+  }
+}

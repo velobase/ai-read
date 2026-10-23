@@ -1,0 +1,46 @@
+{
+  "name": "@bypage/mobile",
+  "private": true,
+  "version": "1.0.0",
+  "main": "index.ts",
+  "scripts": {
+    "dev": "EXPO_NO_TELEMETRY=1 expo start",
+    "ios": "EXPO_NO_TELEMETRY=1 expo run:ios",
+    "prebuild:ios": "EXPO_NO_TELEMETRY=1 expo prebuild --platform ios --no-install",
+    "typecheck": "tsc --noEmit",
+    "build": "EXPO_NO_TELEMETRY=1 expo export --platform ios --output-dir dist --max-workers 2",
+    "config": "EXPO_NO_TELEMETRY=1 expo config --type public"
+  },
+  "dependencies": {
+    "@bypage/reading-core": "file:../../packages/reading-core",
+    "@expo/vector-icons": "^15.0.2",
+    "@xmldom/xmldom": "^0.8.11",
+    "expo": "~57.0.31",
+    "expo-constants": "~57.0.22",
+    "expo-crypto": "~57.0.4",
+    "expo-document-picker": "~57.0.3",
+    "expo-file-system": "~57.0.7",
+    "expo-font": "~57.0.4",
+    "expo-localization": "~57.0.2",
+    "expo-sharing": "~57.0.24",
+    "expo-speech": "~57.0.3",
+    "expo-sqlite": "~57.0.4",
+    "expo-status-bar": "~57.0.1",
+    "fflate": "^0.8.3",
+    "react": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-safe-area-context": "~5.7.0",
+    "@bypage/api-client": "file:../../packages/api-client",
+    "expo-modules-core": "~57.0.9"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.15",
+    "typescript": "~5.9.3",
+    "babel-preset-expo": "~57.0.7"
+  },
+  "expo": {
+    "autolinking": {
+      "nativeModulesDir": "./modules"
+    }
+  }
+}

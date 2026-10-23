@@ -1,0 +1,32 @@
+# EAS reads this file from the Git root instead of every .gitignore.
+.git
+node_modules/
+.expo/
+dist/
+.next/
+out/
+next-env.d.ts
+*.log
+*.tsbuildinfo
+.DS_Store
+
+# Local configuration, credentials, and private reading/verification files.
+.env
+.env.*
+.npmrc
+gha-creds-*.json
+credentials.json
+*.p8
+*.p12
+*.mobileprovision
+*.ipa
+*.xcarchive/
+work/
+
+# Regenerate the app host in the production build. Keep modules/*/ios sources.
+/apps/mobile/ios/
+/apps/mobile/android/
+
+# Generated Web-only output.
+/src/generated/prisma/
+/public/pdfjs/
