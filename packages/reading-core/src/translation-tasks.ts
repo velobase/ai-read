@@ -20,7 +20,8 @@ export type TranslationEdition = {
   language: string;
   sourceHash: string;
   profile: TranslationProfile;
-  state: 'idle' | 'active' | 'paused' | 'error';
+  state: 'idle' | 'active' | 'paused' | 'ready' | 'error';
+  progress: { completed: number; total: number };
   chapters: ChapterProgress[];
   createdAt: number;
   error?: string;

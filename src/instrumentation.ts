@@ -5,6 +5,8 @@ export async function register() {
   ) {
     const { startCatalogWorker } = await import('./lib/server/catalog-worker');
     startCatalogWorker();
+    const { startTranslationWorker } = await import('./lib/server/translation-worker');
+    startTranslationWorker();
     const { registerTracing } = await import('./lib/server/tracing');
     const { logEvent } = await import('./lib/server/observability');
     try {

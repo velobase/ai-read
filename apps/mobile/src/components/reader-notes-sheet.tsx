@@ -248,14 +248,16 @@ function Notebook({
             />
           )}
         </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          {searching && <ActivityIndicator size="small" color={colors.accent} />}
-          <Text accessibilityLiveRegion="polite" style={{ color: colors.muted, fontSize: 12 }}>
-            {searching
-              ? t('searchingNotes')
-              : t('readerNotesResults', { count: filtered.length, total: scoped.length })}
-          </Text>
-        </View>
+        {(searching || !!query.trim()) && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            {searching && <ActivityIndicator size="small" color={colors.accent} />}
+            <Text accessibilityLiveRegion="polite" style={{ color: colors.muted, fontSize: 12 }}>
+              {searching
+                ? t('searchingNotes')
+                : t('readerNotesResults', { count: filtered.length, total: scoped.length })}
+            </Text>
+          </View>
+        )}
       </View>
       <FlatList
         ref={list}

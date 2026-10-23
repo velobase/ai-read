@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, ScrollView, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, Text } from 'react-native';
 import { useApp } from '../context';
 import { useLibrary } from '../library-context';
 import { accountSnapshot } from '../adapters/account';
@@ -115,25 +115,29 @@ export function DeviceBookCopy() {
           contentContainerStyle={{ gap: 12, paddingVertical: 14 }}
         >
           {books.map((book) => (
-            <View key={book.id} style={{ gap: 6 }}>
-              <Text style={{ color: colors.ink, fontWeight: '600' }}>{book.title}</Text>
-              <Button
-                secondary
-                disabled={busy}
-                onPress={() =>
-                  Alert.alert(
-                    zh ? '复制并同步这本书？' : 'Copy and sync this book?',
-                    `${book.title}\n${accountSnapshot().session?.user.email || ''}\n${library.handle.kind === 'account' ? library.handle.origin : ''}`,
-                    [
-                      { text: zh ? '取消' : 'Cancel', style: 'cancel' },
-                      { text: zh ? '复制' : 'Copy', onPress: () => void copy(book) },
-                    ],
-                  )
-                }
-              >
-                {zh ? '选择这本书' : 'Select this book'}
-              </Button>
-            </View>
+            <Pressable
+              key={book.id}
+              accessibilityRole="button"
+              disabled={busy}
+              style={{
+                minHeight: 48,
+                paddingVertical: 14,
+                borderBottomWidth: 0.5,
+                borderColor: colors.border,
+              }}
+              onPress={() =>
+                Alert.alert(
+                  zh ? '复制并同步这本书？' : 'Copy and sync this book?',
+                  `${book.title}\n${accountSnapshot().session?.user.email || ''}\n${library.handle.kind === 'account' ? library.handle.origin : ''}`,
+                  [
+                    { text: zh ? '取消' : 'Cancel', style: 'cancel' },
+                    { text: zh ? '复制' : 'Copy', onPress: () => void copy(book) },
+                  ],
+                )
+              }
+            >
+              <Text style={{ color: colors.ink, fontSize: 16 }}>{book.title}</Text>
+            </Pressable>
           ))}
         </ScrollView>
         {busy && <Text style={{ color: colors.muted }}>{zh ? '正在保存…' : 'Saving…'}</Text>}

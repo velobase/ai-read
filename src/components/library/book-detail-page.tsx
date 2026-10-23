@@ -7,12 +7,10 @@ import { displayLanguage, readingLanguages } from '@/lib/i18n/config';
 import { useMemo, useState } from 'react';
 import { bookContents, isPdfBook } from '../../../packages/reading-core/src';
 import {
-  BookOpen,
-  Check,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   MoreHorizontal,
-  NotebookPen,
   Plus,
   Pin,
   Archive,
@@ -77,16 +75,15 @@ export function BookDetailPage({ id }: { id: string }) {
   }, [book]);
   const owned = books.some((b) => b.id === id);
   const bookNotes = notes.filter((n) => n.bookId === id);
-  const referenceStats = book?.references
-    ? {
-        notes: book.references.links.filter((link) => link.kind === 'footnote').length,
-        links: book.references.links.filter((link) => link.kind === 'internal').length,
-        skipped:
-          book.references.diagnostics.skippedMissing +
-          book.references.diagnostics.skippedUnanchored +
-          book.references.diagnostics.skippedLimit,
-      }
-    : null;
+  const skippedMedia = Object.values(book?.media?.diagnostics || {}).reduce(
+    (sum, count) => sum + count,
+    0,
+  );
+  const skippedReferences = book?.references
+    ? book.references.diagnostics.skippedMissing +
+      book.references.diagnostics.skippedUnanchored +
+      book.references.diagnostics.skippedLimit
+    : 0;
   const position = positions[id];
   const activeContentsIndex = useMemo(() => {
     const chapter = position && book?.chapters[position.chapter];
@@ -134,11 +131,6 @@ export function BookDetailPage({ id }: { id: string }) {
       : book
         ? bookDescription(book)
         : '';
-  const chars =
-    book?.chapters.reduce(
-      (sum, c) => sum + c.paragraphs.reduce((n, p) => n + p.text.length, 0),
-      0,
-    ) || 0;
   return (
     <LibraryShell hideNavigation>
       {!book ? (
@@ -157,7 +149,6 @@ export function BookDetailPage({ id }: { id: string }) {
             >
               <ChevronLeft size={25} />
             </Link>
-            <span className="text-sm text-muted-foreground">{t('书籍详情')}</span>
             <button
               onClick={() => setMore(true)}
               aria-label={t('更多书籍操作')}
@@ -169,108 +160,27 @@ export function BookDetailPage({ id }: { id: string }) {
           <section className="book-detail-hero">
             <BookCover book={book} />
             <div className="book-detail-heading">
-              <p className="mb-3 text-xs tracking-wide text-muted-foreground">
-                {book.category ? localize(book.category) : t('我的藏书')}
-              </p>
               <h1>{book.title}</h1>
               <p className="mt-5 text-sm text-primary">{displayAuthor}</p>
               {book.subtitle && (
                 <p className="mt-3 text-sm leading-7 text-muted-foreground">{book.subtitle}</p>
               )}
-              <p className="mt-5 hidden max-w-xl text-sm leading-7 text-muted-foreground sm:block">
-                {displayDescription.slice(0, 150)}
-              </p>
             </div>
           </section>
-          <div className="detail-metrics">
-            <button
-              onClick={() => {
-                if (!owned) {
-                  void addBook(book)
-                    .then(() => updateBooks([id], { status: 'reading' }))
-                    .catch((e) => notify(e.message));
-                } else
-                  updateBooks([id], { status: status === 'finished' ? 'reading' : 'finished' });
-              }}
-            >
-              <strong>
-                {status === 'finished' ? t('已读完') : status === 'reading' ? t('在读') : t('未读')}
-              </strong>
-              <span>
-                {t('我的阅读')}
-                <ChevronRight size={12} />
-              </span>
-            </button>
-            <Link href={`/notes/${id}`}>
-              <strong>{bookNotes.length.toLocaleString(locale)}</strong>
-              <span>{t('笔记与划线')}</span>
-            </Link>
-            <div>
-              <strong>
-                {new Intl.NumberFormat(locale, {
-                  notation: 'compact',
-                  maximumFractionDigits: 1,
-                }).format(chars)}
-              </strong>
-              <span>{t('字数')}</span>
-            </div>
-            <div>
-              <strong>
-                {(pdfBook ? chapterContents.length : book.chapters.length).toLocaleString(locale)}
-              </strong>
-              <span>{t(pdfBook && !hasPdfContents ? '原页目录' : '章节')}</span>
-            </div>
-          </div>
-          <div className="detail-local-note">
-            <BookOpen size={18} className="text-primary" />
-            <span>
-              {book.sample ? t('ByPage · 逐页 原创 · 可完整阅读') : t('本地书籍 · 继续你的阅读')}
-            </span>
-            {position && (
-              <span className="ms-auto hidden truncate text-xs text-muted-foreground sm:block">
-                {t('读到：{value0}', { value0: book.chapters[position.chapter]?.title })}
-              </span>
-            )}
-          </div>
-          {book.media && (
-            <p className="mb-4 px-1 text-xs leading-6 text-muted-foreground">
-              {t('已保留 {count} 处插图；{skipped} 处图片暂未转换。', {
-                count: book.media.placements.length,
-                skipped: Object.values(book.media.diagnostics).reduce(
-                  (sum, count) => sum + count,
-                  0,
-                ),
-              })}
-            </p>
-          )}
-          {referenceStats && (
-            <p className="mb-4 px-1 text-xs leading-6 text-muted-foreground">
-              {t('{notes} 条注释 · {links} 条书内链接', referenceStats)}
-              {referenceStats.skipped > 0 && (
-                <> · {t('{count} 条引用暂未转换。', { count: referenceStats.skipped })}</>
-              )}
-            </p>
-          )}
           <div className="book-detail-actions">
-            <Link href={`/notes/${id}`} className="detail-note-link">
-              <NotebookPen size={21} />
-              <span>{t('笔记')}</span>
-            </Link>
-            <button
-              className="detail-shelf-button"
-              onClick={() => {
-                if (owned) {
-                  notify(t('已在你的书架中。'));
-                  return;
-                }
-                void addBook(book)
-                  .then(() => notify(t('已加入书架。')))
-                  .catch((e) => notify(e.message));
-              }}
-            >
-              {owned ? <Check size={18} /> : <Plus size={18} />}
-              {owned ? t('已在书架') : t('加入书架')}
-            </button>
+            {!owned && (
+              <button
+                className="detail-shelf-button"
+                onClick={() => {
+                  void addBook(book)
+                    .then(() => notify(t('已加入书架。')))
+                    .catch((e) => notify(e.message));
+                }}
+              >
+                <Plus size={18} />
+                {t('加入书架')}
+              </button>
+            )}
             <button className="library-primary flex-1" onClick={() => void readBook(book)}>
               {position ? t('继续阅读') : t('阅读')}
             </button>
@@ -279,7 +189,7 @@ export function BookDetailPage({ id }: { id: string }) {
             {[
               ['intro', t('简介')],
               ['contents', t('目录')],
-              ['notes', t('笔记 {value0}', { value0: bookNotes.length || '' })],
+              ['notes', t('笔记')],
             ].map(([value, label]) => (
               <button
                 role="tab"
@@ -295,7 +205,6 @@ export function BookDetailPage({ id }: { id: string }) {
           <section className="detail-body" role="tabpanel">
             {tab === 'intro' && (
               <>
-                <h2>{t('内容简介')}</h2>
                 <p className={cn('whitespace-pre-wrap', !expanded && 'line-clamp-5')}>
                   {displayDescription}
                 </p>
@@ -307,10 +216,21 @@ export function BookDetailPage({ id }: { id: string }) {
                     {expanded ? t('收起') : t('展开全部')}
                   </button>
                 )}
+                {skippedMedia > 0 && (
+                  <p className="mt-5 text-xs text-muted-foreground">
+                    {t('已保留 {count} 处插图；{skipped} 处图片暂未转换。', {
+                      count: book.media?.placements.length || 0,
+                      skipped: skippedMedia,
+                    })}
+                  </p>
+                )}
+                {skippedReferences > 0 && (
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    {t('{count} 条引用暂未转换。', { count: skippedReferences })}
+                  </p>
+                )}
                 <h2 className="mt-9">{t('书籍信息')}</h2>
                 <dl className="detail-info">
-                  <dt>{t('作者')}</dt>
-                  <dd>{displayAuthor}</dd>
                   <dt>
                     <label htmlFor="book-source-language">{t('原文语言')}</label>
                   </dt>
@@ -346,9 +266,6 @@ export function BookDetailPage({ id }: { id: string }) {
                         </option>
                       ))}
                     </select>
-                    <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                      {t('识别有误时可手动修改；原文与译文语言相同时直接阅读原文。')}
-                    </p>
                   </dd>
                   <dt>{t('来源')}</dt>
                   <dd>{book.sample ? t('ByPage · 逐页 原创示例 · MIT 许可') : t('本地导入')}</dd>
@@ -359,17 +276,6 @@ export function BookDetailPage({ id }: { id: string }) {
                     </>
                   )}
                 </dl>
-                <button
-                  className="mt-8 flex w-full items-center justify-between rounded-xl bg-muted px-5 py-4 text-sm"
-                  onClick={() => setTab('contents')}
-                >
-                  {pdfBook && !hasPdfContents
-                    ? `${t('原页目录')} · ${t('{count} 个原页', { count: pageContents.length })}`
-                    : t('查看目录 · {count} 章', {
-                        count: pdfBook ? chapterContents.length : book.chapters.length,
-                      })}
-                  <ChevronRight size={17} />
-                </button>
               </>
             )}
             {tab === 'contents' && (
@@ -456,13 +362,9 @@ export function BookDetailPage({ id }: { id: string }) {
                 </>
               ) : (
                 <Empty
-                  title={t('想法，从阅读开始')}
+                  title={t('{count} 条笔记', { count: 0 })}
                   description={t('阅读时选中文字，可以划线或记下自己的想法。')}
-                >
-                  <button onClick={() => void readBook(book)} className="library-primary">
-                    {t('开始阅读')}
-                  </button>
-                </Empty>
+                />
               ))}
           </section>
           {more && (
@@ -482,10 +384,23 @@ export function BookDetailPage({ id }: { id: string }) {
                   <Pin size={22} />
                   {state.books[id]?.pinned ? t('取消置顶') : t('置顶')}
                 </button>
-                <Link className="book-action" href={`/notes/${id}`}>
-                  <NotebookPen size={22} />
-                  {t('查看笔记')}
-                </Link>
+                <button
+                  className="book-action"
+                  onClick={() => {
+                    const update = () => {
+                      updateBooks([id], { status: status === 'finished' ? 'reading' : 'finished' });
+                      setMore(false);
+                    };
+                    if (owned) update();
+                    else
+                      void addBook(book)
+                        .then(update)
+                        .catch((error) => notify(error.message));
+                  }}
+                >
+                  <CheckCircle2 size={22} />
+                  {status === 'finished' ? t('标记在读') : t('标记读完')}
+                </button>
                 <button
                   className="book-action"
                   disabled={!owned}

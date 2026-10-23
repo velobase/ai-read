@@ -132,7 +132,6 @@ export function NotesExportSheet({
   return (
     <Sheet visible={scope !== null} title={t('notesExport')} close={dismiss}>
       <View style={{ gap: 8 }}>
-        <Text style={{ color: colors.muted, fontSize: 12 }}>{t('notesExportScope')}</Text>
         <Text style={{ color: colors.ink, fontSize: 16, lineHeight: 24 }}>
           {scope?.bookId ? snapshot?.bookTitle || t('notes') : t('notesAllBooks')}
         </Text>
@@ -162,7 +161,7 @@ export function NotesExportSheet({
         </Text>
       )}
       {snapshot ? (
-        <Button busy={sharing} icon="share-outline" onPress={() => void share()}>
+        <Button busy={sharing} onPress={() => void share()}>
           {t('notesExportShare')}
         </Button>
       ) : error ? (
@@ -170,9 +169,6 @@ export function NotesExportSheet({
           {t('retry')}
         </Button>
       ) : null}
-      <Button secondary disabled={sharing} onPress={dismiss}>
-        {t('cancel')}
-      </Button>
     </Sheet>
   );
 }

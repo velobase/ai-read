@@ -1,15 +1,29 @@
-import { Linking, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { useApp } from '../context';
-import { privacyContent, privacyUpdated, privacyUrl, supportUrl } from '../content/privacy';
-import { Button, Sheet } from './ui';
+import { privacyContent, privacyUpdated } from '../content/privacy';
+import { Sheet } from './ui';
 
-export function PrivacySheet({ visible, close }: { visible: boolean; close: () => void }) {
-  const { preferences, colors, t, notify } = useApp();
-  const open = (url: string) => {
-    void Linking.openURL(url).catch(() => notify(t('error')));
-  };
+export function PrivacySheet({
+  visible,
+  close,
+  onShow,
+  onDismiss,
+}: {
+  visible: boolean;
+  close: () => void;
+  onShow: () => void;
+  onDismiss: () => void;
+}) {
+  const { preferences, colors, t } = useApp();
   return (
-    <Sheet title={t('privacyPolicy')} visible={visible} close={close} tall>
+    <Sheet
+      title={t('privacyPolicy')}
+      visible={visible}
+      close={close}
+      onShow={onShow}
+      onDismiss={onDismiss}
+      tall
+    >
       <Text style={{ color: colors.muted }}>{t('privacyUpdated', { date: privacyUpdated })}</Text>
       {privacyContent[preferences.locale].map(([title, body]) => (
         <View key={title} style={{ gap: 9 }}>
@@ -24,12 +38,6 @@ export function PrivacySheet({ visible, close }: { visible: boolean; close: () =
           </Text>
         </View>
       ))}
-      <Button secondary icon="open-outline" onPress={() => open(privacyUrl)}>
-        {t('privacyOnline')}
-      </Button>
-      <Button secondary icon="help-circle-outline" onPress={() => open(supportUrl)}>
-        {t('helpSupport')}
-      </Button>
     </Sheet>
   );
 }

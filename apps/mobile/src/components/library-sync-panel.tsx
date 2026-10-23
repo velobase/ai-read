@@ -233,30 +233,9 @@ export function LibrarySyncPanel() {
             : ` · ${status.pending} pending`
           : ''}
       </Text>
-      {status.countsState !== 'ready' && (
-        <Text style={{ color: colors.muted, lineHeight: 22 }}>
-          {status.countsState === 'loading'
-            ? zh
-              ? '正在读取本机待同步数量…'
-              : 'Reading local pending changes…'
-            : zh
-              ? '待同步数量暂时无法读取，未将其视为零。'
-              : 'The pending count is unavailable; changes may still be waiting.'}
-        </Text>
-      )}
-      {status.state === 'syncing' && (
-        <Text style={{ color: colors.muted }}>
-          {status.phase === 'uploading'
-            ? zh
-              ? '正在发送本机修改'
-              : 'Sending local changes'
-            : status.phase === 'downloading'
-              ? zh
-                ? '正在接收云端修改'
-                : 'Receiving remote changes'
-              : zh
-                ? '正在检查同步队列'
-                : 'Checking the sync queue'}
+      {status.countsState === 'error' && (
+        <Text accessibilityRole="alert" style={{ color: colors.error, lineHeight: 22 }}>
+          {zh ? '暂时无法读取待同步数量。' : 'Could not read pending changes.'}
         </Text>
       )}
       {status.state === 'error' && status.error?.retryable && status.retryAt && (
@@ -295,7 +274,13 @@ export function LibrarySyncPanel() {
           })
         }
       >
-        {zh ? '立即同步 / 重试' : 'Sync now / retry'}
+        {status.state === 'error' || status.blocked > 0
+          ? zh
+            ? '重试同步'
+            : 'Retry sync'
+          : zh
+            ? '立即同步'
+            : 'Sync now'}
       </Button>
       <Button
         secondary
@@ -307,7 +292,7 @@ export function LibrarySyncPanel() {
           setVisible(true);
         }}
       >
-        {zh ? '查看冲突与删除恢复副本' : 'View conflict and deletion copies'}
+        {zh ? '恢复副本' : 'Recovery copies'}
       </Button>
       <Sheet
         visible={visible}

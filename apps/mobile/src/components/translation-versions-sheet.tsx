@@ -189,11 +189,6 @@ export function TranslationVersionsContent({
       contentContainerStyle={{ padding: 22, gap: 16 }}
       ListHeaderComponent={
         <View style={{ gap: 16 }}>
-          <Text style={{ color: colors.muted, lineHeight: 22 }}>
-            {zh
-              ? '选择这段要显示的译文。已有笔记和书签仍指向保存时的版本。'
-              : 'Choose the text to read here. Existing notes and bookmarks keep their saved version.'}
-          </Text>
           {pending && <ActivityIndicator color={colors.accent} />}
           {visibleError && (
             <View style={{ gap: 12 }}>
@@ -218,7 +213,7 @@ export function TranslationVersionsContent({
               )}
             </View>
           )}
-          {!pending && !visibleError && visibleItems.length > 0 && (
+          {!pending && !visibleError && visibleItems.length > data.length && (
             <Text style={{ color: colors.muted, fontSize: 12 }}>
               {zh
                 ? `显示 ${data.length} / ${visibleItems.length} 个版本`

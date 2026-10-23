@@ -1,10 +1,5 @@
 import { fetch as nativeFetch } from 'expo/fetch';
-import {
-  CompletionStream,
-  createApiClient,
-  type ReadingQuestion,
-  type ReadingTranslation,
-} from '@bypage/api-client';
+import { CompletionStream, createApiClient, type ReadingQuestion } from '@bypage/api-client';
 import { measured } from './diagnostics';
 
 export { apiOrigin, normalizeServerOrigin } from './server-origin';
@@ -41,17 +36,14 @@ export function askReading(
 ) {
   return readingCompletion(origin, question, 'ask', signal, onText);
 }
-export function translateReading(origin: string, input: ReadingTranslation, signal: AbortSignal) {
-  return readingCompletion(origin, input, 'translate', signal, () => {});
-}
 async function readingCompletion(
   origin: string,
-  input: ReadingQuestion | ReadingTranslation,
-  action: 'ask' | 'translate',
+  input: ReadingQuestion,
+  action: 'ask',
   signal: AbortSignal,
   onText: (text: string) => void,
 ) {
-  return measured(action === 'ask' ? 'ai.ask' : 'ai.translate', async () => {
+  return measured('ai.ask', async () => {
     const scope = requestScope(origin, signal);
     let result: string;
     try {

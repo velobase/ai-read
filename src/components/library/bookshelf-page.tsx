@@ -14,8 +14,6 @@ import {
   Archive,
   MoreHorizontal,
   RotateCcw,
-  Grid2X2,
-  List,
   BookOpen,
   NotebookPen,
 } from 'lucide-react';
@@ -39,6 +37,7 @@ export function BookshelfPage() {
   const filter = search.get('filter') || 'all';
   const group = search.get('group') || '';
   const [selecting, setSelecting] = useState(false);
+  const [optionsOpen, setOptionsOpen] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const list = search.get('view') === 'list';
   const [menu, setMenu] = useState<Book | null>(null);
@@ -96,7 +95,6 @@ export function BookshelfPage() {
           title={
             selecting ? t('选择书籍') : group || (filter === 'hidden' ? t('已收起的书') : t('书架'))
           }
-          subtitle={!selecting ? t('{count} 本书', { count: visible.length }) : undefined}
         >
           {selecting ? (
             <>
@@ -114,51 +112,23 @@ export function BookshelfPage() {
             </>
           ) : (
             <>
-              <ImportButton />
+              {(visible.length > 0 || filter !== 'all' || group) && <ImportButton />}
               <button
-                onClick={() => setSelecting(true)}
-                className="flex min-h-11 items-center gap-1.5 text-sm text-muted-foreground"
+                onClick={() => setOptionsOpen(true)}
+                aria-label={locale.startsWith('zh') ? '书架选项' : 'Shelf options'}
+                className="flex size-11 items-center justify-center text-muted-foreground"
               >
-                <CheckCircle2 size={17} />
-                {t('选择')}
+                <MoreHorizontal size={22} />
               </button>
             </>
           )}
         </PageHeading>
-        <div className="shelf-toolbar">
-          <div className="shelf-sort">
-            {[
-              ['default', t('默认')],
-              ['imported', t('最近加入')],
-              ['progress', t('进度')],
-              ['title', t('书名')],
-              ['category', t('分类')],
-            ].map(([value, label]) => (
-              <button
-                aria-pressed={sort === value}
-                key={value}
-                onClick={() => change('sort', value)}
-                className={sort === value ? 'is-active' : ''}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <button
-            className="flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-white"
-            aria-label={list ? t('切换为网格') : t('切换为列表')}
-            onClick={() => change('view', list ? 'grid' : 'list')}
-          >
-            {list ? <Grid2X2 size={18} /> : <List size={19} />}
-          </button>
-        </div>
         <div className="shelf-filters">
           {[
             ['all', t('全部')],
             ['reading', t('在读')],
             ['finished', t('读完')],
             ['unread', t('未读')],
-            ['hidden', t('已收起')],
           ].map(([value, label]) => (
             <button
               key={value}
@@ -174,13 +144,6 @@ export function BookshelfPage() {
               {group} ×
             </button>
           )}
-          <Link
-            href="/collections"
-            className="ms-auto flex shrink-0 items-center gap-1 text-xs text-muted-foreground"
-          >
-            {t('分组')}
-            <FolderPlus size={14} />
-          </Link>
         </div>
         {visible.length ? (
           <div className={cn('shelf-grid', list && 'shelf-list')}>
@@ -205,9 +168,6 @@ export function BookshelfPage() {
                         {selected.includes(book.id) ? <Check size={18} /> : <Circle size={24} />}
                       </span>
                     )}
-                    {state.books[book.id]?.status === 'finished' && (
-                      <span className="book-finished">{t('读完')}</span>
-                    )}
                     {state.books[book.id]?.pinned && (
                       <span className="book-pinned">
                         <Pin size={12} />
@@ -217,13 +177,15 @@ export function BookshelfPage() {
                   <span className="shelf-book-info">
                     <strong>{book.title}</strong>
                     {list && <span>{book.author}</span>}
-                    <span className="shelf-book-status">
-                      {state.books[book.id]?.status === 'finished'
-                        ? t('已读完')
-                        : positions[book.id]
-                          ? book.chapters[positions[book.id]!.chapter]?.title
-                          : t('还没开始阅读')}
-                    </span>
+                    {(state.books[book.id]?.status === 'finished' || positions[book.id]) && (
+                      <span className="shelf-book-status">
+                        {state.books[book.id]?.status === 'finished'
+                          ? t('已读完')
+                          : positions[book.id]
+                            ? book.chapters[positions[book.id]!.chapter]?.title
+                            : ''}
+                      </span>
+                    )}
                   </span>
                 </button>
                 {!selecting && (
@@ -240,11 +202,9 @@ export function BookshelfPage() {
           </div>
         ) : (
           <Empty
-            title={filter === 'all' ? t('书架等你放上第一本书') : t('这里还没有书')}
+            title={t('这里还没有书')}
             description={
-              filter === 'hidden'
-                ? t('从书架收起的书仍保留笔记和阅读位置。')
-                : t('导入喜欢的书，或去书城发现一篇原创短文。')
+              filter === 'hidden' ? t('从书架收起的书仍保留笔记和阅读位置。') : undefined
             }
           >
             {filter !== 'all' || group ? (
@@ -264,15 +224,65 @@ export function BookshelfPage() {
             </Link>
           </Empty>
         )}
-        {!selecting && visible.length > 0 && (
-          <p className="shelf-end">
-            {t('— {value0} 本书，都是与你的相遇 —', { value0: visible.length }).replace(
-              /^— 1 books,/,
-              '— 1 book,',
-            )}
-          </p>
-        )}
       </main>
+      {optionsOpen && (
+        <Modal title={t('书架')} mobileSheet close={() => setOptionsOpen(false)}>
+          <div className="mt-5">
+            <label className="settings-row">
+              <span className="flex-1">{locale.startsWith('zh') ? '排序' : 'Sort books'}</span>
+              <select
+                aria-label={locale.startsWith('zh') ? '排序' : 'Sort books'}
+                value={sort}
+                onChange={(event) => change('sort', event.target.value)}
+                className="min-h-11 max-w-[65%] bg-transparent text-end text-sm text-muted-foreground"
+              >
+                {[
+                  ['default', t('默认')],
+                  ['imported', t('最近加入')],
+                  ['progress', t('进度')],
+                  ['title', t('书名')],
+                  ['category', t('分类')],
+                ].map(([value, label]) => (
+                  <option value={value} key={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              className="settings-row"
+              onClick={() => {
+                change('view', list ? 'grid' : 'list');
+                setOptionsOpen(false);
+              }}
+            >
+              {list ? t('切换为网格') : t('切换为列表')}
+            </button>
+            <Link href="/collections" className="settings-row">
+              {t('分组')}
+            </Link>
+            <button
+              className="settings-row"
+              disabled={!visible.length}
+              onClick={() => {
+                setOptionsOpen(false);
+                setSelecting(true);
+              }}
+            >
+              {t('选择')}
+            </button>
+            <button
+              className="settings-row"
+              onClick={() => {
+                change('filter', 'hidden');
+                setOptionsOpen(false);
+              }}
+            >
+              {t('已收起的书')}
+            </button>
+          </div>
+        </Modal>
+      )}
       {selecting && (
         <div className="shelf-batch-bar">
           <span className="hidden text-sm text-muted-foreground sm:block">
@@ -309,10 +319,6 @@ export function BookshelfPage() {
           aria-describedby={undefined}
           className="rounded-2xl p-6 max-sm:top-auto max-sm:left-0 max-sm:bottom-0 max-sm:w-full max-sm:max-w-none max-sm:translate-x-0 max-sm:translate-y-0 max-sm:rounded-b-none max-sm:pb-[max(28px,env(safe-area-inset-bottom))]"
         >
-          <div
-            className="mx-auto mb-5 h-1 w-9 rounded-full bg-muted sm:hidden"
-            aria-hidden="true"
-          />
           <DialogTitle className="pe-6 text-lg">{menu?.title}</DialogTitle>
           {menu && (
             <div className="mt-5 grid grid-cols-3 gap-3 text-center text-sm">

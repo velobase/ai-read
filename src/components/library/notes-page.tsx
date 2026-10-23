@@ -4,7 +4,7 @@ import { useI18n } from '@/lib/i18n/provider';
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { Download, Search, PencilLine, Trash2, ArrowUpRight, NotebookPen } from 'lucide-react';
+import { Download, Search, PencilLine, Trash2, ArrowUpRight } from 'lucide-react';
 import { storage } from '@/lib/storage';
 import type { Note } from '@/lib/types';
 import type { Book } from '@/lib/types';
@@ -67,6 +67,7 @@ export function NotesPage({ bookId }: { bookId?: string }) {
   const [saving, setSaving] = useState(false);
   const book = allBooks.find((b) => b.id === bookId) || catalog.find((b) => b.id === bookId);
   const names = Object.fromEntries(allBooks.map((b) => [b.id, b.title]));
+  const hasNotes = notes.some((note) => !bookId || note.bookId === bookId);
   const needle = normalizeSearch(query.trim());
   const filtered = notes
     .filter(
@@ -103,73 +104,70 @@ export function NotesPage({ bookId }: { bookId?: string }) {
       <main className="library-container notes-page">
         <PageHeading
           title={bookId ? book?.title || t('书中笔记') : t('笔记')}
-          subtitle={
-            bookId
-              ? t('{count} 条笔记', { count: filtered.length })
-              : t('{notes} 条笔记 · {books} 本书', {
-                  notes: filtered.length,
-                  books: grouped.length,
-                })
-          }
           back={bookId ? '/notes' : undefined}
         >
-          <button
-            disabled={!filtered.length}
-            onClick={() => {
-              const title = book ? t('{value0}-笔记', { value0: book.title }) : t('我的阅读笔记');
-              try {
-                downloadNotes(
-                  filtered,
-                  title,
-                  allBooks,
-                  notesExportLabels(locale === 'zh-CN' ? 'zh-CN' : 'en', {
+          {filtered.length > 0 && (
+            <button
+              onClick={() => {
+                const title = book ? t('{value0}-笔记', { value0: book.title }) : t('我的阅读笔记');
+                try {
+                  downloadNotes(
+                    filtered,
                     title,
-                    author: t('作者'),
-                    chapter: t('章节'),
-                    source: t('来源'),
-                    unknown: t('来源未记录'),
-                    original: t('原文'),
-                    translation: t('译文'),
-                    paragraph: t('段落'),
-                    date: t('日期'),
-                    thought: t('你的想法'),
-                    pdfPage: t('PDF 原页'),
-                  }),
-                );
-              } catch (error) {
-                notify(
-                  t(
-                    error instanceof Error && error.message === 'notes_export_too_large'
-                      ? '笔记超过 10 MB，请缩小书籍或搜索范围后重试。'
-                      : '导出失败，请重试。',
-                  ),
-                );
-              }
-            }}
-            className="flex size-11 items-center justify-center text-muted-foreground disabled:opacity-30"
-            aria-label={t('导出笔记')}
-          >
-            <Download size={20} />
-          </button>
+                    allBooks,
+                    notesExportLabels(locale === 'zh-CN' ? 'zh-CN' : 'en', {
+                      title,
+                      author: t('作者'),
+                      chapter: t('章节'),
+                      source: t('来源'),
+                      unknown: t('来源未记录'),
+                      original: t('原文'),
+                      translation: t('译文'),
+                      paragraph: t('段落'),
+                      date: t('日期'),
+                      thought: t('你的想法'),
+                      pdfPage: t('PDF 原页'),
+                    }),
+                  );
+                } catch (error) {
+                  notify(
+                    t(
+                      error instanceof Error && error.message === 'notes_export_too_large'
+                        ? '笔记超过 10 MB，请缩小书籍或搜索范围后重试。'
+                        : '导出失败，请重试。',
+                    ),
+                  );
+                }
+              }}
+              className="flex size-11 items-center justify-center text-muted-foreground disabled:opacity-30"
+              aria-label={t('导出笔记')}
+            >
+              <Download size={20} />
+            </button>
+          )}
         </PageHeading>
-        <label className="notes-search">
-          <Search size={18} className="text-muted-foreground" />
-          <input
-            aria-label={t('搜索笔记')}
-            placeholder={t('搜索笔记、想法或书名')}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </label>
-        {!bookId && (
+        {hasNotes && (
+          <label className="notes-search">
+            <Search size={18} className="text-muted-foreground" />
+            <input
+              aria-label={t('搜索笔记')}
+              placeholder={t('搜索笔记、想法或书名')}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </label>
+        )}
+        {!bookId && hasNotes && (
           <div className="shelf-sort mb-6 mt-6">
             <button
+              aria-pressed={view === 'books'}
               className={view === 'books' ? 'is-active' : ''}
               onClick={() => setView('books')}
             >
               {t('按书查看')}
             </button>
             <button
+              aria-pressed={view === 'recent'}
               className={view === 'recent' ? 'is-active' : ''}
               onClick={() => setView('recent')}
             >
@@ -179,12 +177,8 @@ export function NotesPage({ bookId }: { bookId?: string }) {
         )}
         {!filtered.length ? (
           <Empty
-            title={query ? t('没有找到相关笔记') : t('让每一次阅读留下回响')}
-            description={
-              query
-                ? t('试试另一段文字，或清空搜索。')
-                : t('在阅读中选中文字，划线、写想法；你的笔记会在这里按书整理。')
-            }
+            title={query ? t('没有找到相关笔记') : t('{count} 条笔记', { count: 0 })}
+            description={query ? undefined : t('阅读时选中文字，可以划线或记下自己的想法。')}
           >
             {query ? (
               <button className="library-primary" onClick={() => setQuery('')}>
@@ -201,18 +195,25 @@ export function NotesPage({ bookId }: { bookId?: string }) {
             )}
           </Empty>
         ) : !bookId && view === 'books' ? (
-          <div className="notes-book-grid">
-            {grouped.map(({ book: b, notes: bn }) => (
-              <Link key={b!.id} href={`/notes/${b!.id}`} className="notes-book-card">
-                <div>
-                  <strong>
-                    {bn.length.toLocaleString(locale)}
-                    <span>{t('个笔记')}</span>
-                  </strong>
-                  <h2>《{b!.title}》</h2>
-                  <time>{new Date(bn[0].createdAt).toLocaleDateString(locale)}</time>
+          <div className="divide-y divide-border">
+            {grouped.map(({ book: entry, notes: entries }) => (
+              <Link
+                key={entry!.id}
+                href={`/notes/${entry!.id}`}
+                className="flex items-center gap-4 py-5"
+              >
+                <div className="w-12 shrink-0">
+                  <BookCover book={entry!} />
                 </div>
-                <BookCover book={b!} />
+                <div className="min-w-0 flex-1">
+                  <h2 className="truncate text-base font-medium">{entry!.title}</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {t('{count} 条笔记', { count: entries.length })}
+                  </p>
+                </div>
+                <time className="text-xs text-muted-foreground">
+                  {new Date(entries[0].createdAt).toLocaleDateString(locale)}
+                </time>
               </Link>
             ))}
           </div>
@@ -221,23 +222,29 @@ export function NotesPage({ bookId }: { bookId?: string }) {
             {filtered.map((note) => (
               <article className="note-card" key={`${note.bookId}:${note.id}`}>
                 <div className="mb-4 flex items-center justify-between text-xs text-muted-foreground">
-                  <Link href={`/books/${note.bookId}`}>{names[note.bookId] || t('书中笔记')}</Link>
-                  <time>{new Date(note.createdAt).toLocaleDateString(locale)}</time>
+                  {!bookId && (
+                    <Link href={`/books/${note.bookId}`}>
+                      {names[note.bookId] || t('书中笔记')}
+                    </Link>
+                  )}
+                  <span className="ms-auto">
+                    {t(
+                      note.anchor?.source === 'translation'
+                        ? '译文'
+                        : note.anchor?.source === 'original'
+                          ? '原文'
+                          : '来源未记录',
+                    )}
+                  </span>
+                  <time className="ms-3">
+                    {new Date(note.createdAt).toLocaleDateString(locale)}
+                  </time>
                 </div>
                 {note.id.startsWith('conflict-') && (
                   <span className="mb-3 inline-block rounded bg-amber-50 px-2 py-1 text-xs text-amber-800">
                     {t('冲突副本')}
                   </span>
                 )}
-                <p className="mb-3 text-xs text-muted-foreground">
-                  {t(
-                    note.anchor?.source === 'translation'
-                      ? '译文'
-                      : note.anchor?.source === 'original'
-                        ? '原文'
-                        : '来源未记录',
-                  )}
-                </p>
                 <blockquote dir="auto">{note.quote}</blockquote>
                 {note.text && (
                   <p className="mt-4 whitespace-pre-wrap text-sm leading-7">{note.text}</p>

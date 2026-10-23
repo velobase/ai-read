@@ -458,7 +458,6 @@ export function PdfImportSheet({
           <Text numberOfLines={2} style={{ color: colors.ink, fontSize: 15, fontWeight: '500' }}>
             {file.name}
           </Text>
-          <Text style={{ color: colors.muted, fontSize: 12, lineHeight: 21 }}>{t('pdfIntro')}</Text>
           {!!error && (
             <Text accessibilityRole="alert" style={{ color: colors.error, lineHeight: 22 }}>
               {error}

@@ -257,13 +257,12 @@ export function ReadingAppearance({
             key={value}
             value={value}
             className={cn(
-              'relative flex h-20 flex-col gap-1 rounded-xl border bg-muted/40 text-muted-foreground data-[state=on]:border-primary data-[state=on]:bg-accent data-[state=on]:text-primary data-[state=on]:shadow-none',
+              'relative flex h-11 gap-2 rounded-xl border text-muted-foreground data-[state=on]:border-primary data-[state=on]:bg-accent data-[state=on]:text-primary data-[state=on]:shadow-none',
               value === 'serif' && 'font-serif',
             )}
             aria-label={label}
           >
-            <span className="text-xl">{t('阅读 Aa')}</span>
-            <span className="text-xs">{label}</span>
+            <span className="text-sm">{label}</span>
             {settings.fontFamily === value && (
               <Check size={12} className="absolute right-2 top-2" />
             )}
@@ -362,9 +361,6 @@ export function ReadingAppearance({
           </Button>
         ))}
       </div>
-      <p className="text-xs leading-6 text-muted-foreground">
-        {t('调整会立即应用，关闭面板后继续阅读。')}
-      </p>
     </div>
   );
 }
@@ -400,35 +396,20 @@ export function ReadingLanguage({
           </ToggleGroupItem>
         ))}
       </ToggleGroup>
-      <p className="my-5 min-h-12 text-xs leading-6 text-muted-foreground">
-        {settings.readingMode === 'original'
-          ? locale.startsWith('zh')
-            ? '阅读书籍原文。'
-            : 'Read in the book’s original language.'
-          : settings.readingMode === 'bilingual'
-            ? t('原文在上，译文在下，逐段对照阅读。')
-            : locale.startsWith('zh')
-              ? '只显示译文，尚未翻译的位置会在阅读时自动补齐。'
-              : 'Read only the translation. Missing passages translate as you read.'}
-      </p>
-      <label className="mb-3 block text-xs text-muted-foreground">{t('翻译语言')}</label>
-      <Select value={settings.language} onValueChange={(language) => update({ language })}>
-        <SelectTrigger aria-label={t('翻译语言')} className="h-11 w-full rounded-xl">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {languages.map(([value, label]) => (
-            <SelectItem value={value} key={value}>
-              <ContentLanguageLabel code={value} nativeName={label} />
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <p className="mt-4 text-xs leading-6 text-muted-foreground">
-        {locale.startsWith('zh')
-          ? '选择后立即生效，并记住这本书的阅读语言。'
-          : 'Changes apply immediately and are remembered for this book.'}
-      </p>
+      <div className="mt-5">
+        <Select value={settings.language} onValueChange={(language) => update({ language })}>
+          <SelectTrigger aria-label={t('翻译语言')} className="h-11 w-full rounded-xl">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {languages.map(([value, label]) => (
+              <SelectItem value={value} key={value}>
+                <ContentLanguageLabel code={value} nativeName={label} />
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
     </div>
   );
 }
@@ -485,8 +466,7 @@ export function ReadingProgress({
           if (passages[value]) navigate(passages[value].id);
         }}
       />
-      <div className="mt-4 flex justify-between text-xs text-muted-foreground">
-        <span>{t('按段落定位 · 松开后跳转')}</span>
+      <div className="mt-4 flex justify-end text-xs text-muted-foreground">
         <span>
           {Math.min(
             99,

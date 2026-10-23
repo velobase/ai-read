@@ -3,83 +3,58 @@
 import { useI18n } from '@/lib/i18n/provider';
 
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
 import { useState } from 'react';
-import { FolderPlus, ChevronRight, Plus } from 'lucide-react';
-import { Storefront } from './storefront';
+import { ChevronRight, Plus } from 'lucide-react';
 import { useLibrary } from './library-provider';
-import { BookCover, LibraryShell, PageHeading } from './library-ui';
+import { LibraryShell, PageHeading } from './library-ui';
 import { Modal } from '@/components/reader/reader-dialogs';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 
-export function CategoriesPage() {
-  const { t } = useI18n();
-  const params = useSearchParams();
-  return (
-    <LibraryShell>
-      <main className="library-container">
-        <PageHeading title={t('分类')} back="/" />
-        <Storefront initialCategory={params.get('category') || ''} />
-      </main>
-    </LibraryShell>
-  );
-}
-
 export function CollectionsPage() {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const { state, books, createGroup } = useLibrary();
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
   return (
     <LibraryShell>
       <main className="library-container">
-        <PageHeading title={t('书单与分组')} back="/me">
-          <button
-            onClick={() => setAdding(true)}
-            className="flex size-11 items-center justify-center text-primary"
-            aria-label={t('新建分组')}
-          >
-            <Plus size={22} />
-          </button>
+        <PageHeading title={t('分组')} back="/library">
+          {state.groups.length > 0 && (
+            <button
+              onClick={() => setAdding(true)}
+              className="flex size-11 items-center justify-center text-primary"
+              aria-label={t('新建分组')}
+            >
+              <Plus size={22} />
+            </button>
+          )}
         </PageHeading>
-        <p className="mb-7 text-sm text-muted-foreground">{t('把想一起读的书，放在一起。')}</p>
-        <div className="collection-grid">
+        <div className="divide-y divide-border">
           {state.groups.map((group) => {
-            const items = books.filter((b) => state.books[b.id]?.group === group);
+            const count = books.filter((book) => state.books[book.id]?.group === group).length;
             return (
               <Link
                 key={group}
                 href={`/library?group=${encodeURIComponent(group)}`}
-                className="collection-card"
+                className="flex min-h-16 items-center gap-4 py-4"
               >
-                <div className="collection-covers">
-                  {items.slice(0, 3).map((book) => (
-                    <BookCover key={book.id} book={book} />
-                  ))}
-                  {!items.length && (
-                    <FolderPlus
-                      size={38}
-                      strokeWidth={1}
-                      className="m-auto text-muted-foreground/40"
-                    />
-                  )}
-                </div>
-                <h2>{group}</h2>
-                <p>
-                  {items.length.toLocaleString(locale)}
-                  {t('本书')}
-                  <ChevronRight size={15} />
-                </p>
+                <h2 className="min-w-0 flex-1 truncate text-base">{group}</h2>
+                <span className="text-sm text-muted-foreground">
+                  {t('{count} 本书', { count })}
+                </span>
+                <ChevronRight size={17} className="text-muted-foreground" aria-hidden="true" />
               </Link>
             );
           })}
-          <button onClick={() => setAdding(true)} className="new-collection-card">
-            <FolderPlus size={29} strokeWidth={1.4} />
-            <span>{t('新建分组')}</span>
-          </button>
+          {!state.groups.length && (
+            <div className="py-12 text-center">
+              <button onClick={() => setAdding(true)} className="library-primary">
+                {t('新建分组')}
+              </button>
+            </div>
+          )}
         </div>
-        <Storefront collectionMode />
         {adding && (
           <Modal title={t('新建分组')} close={() => setAdding(false)}>
             <form

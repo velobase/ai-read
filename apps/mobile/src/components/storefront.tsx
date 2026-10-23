@@ -115,6 +115,7 @@ export function Storefront({
     }
   }
   const collectionEntry = data?.collections.find((c) => c.id === collection);
+  const categories = [...new Set(data?.books.map((book) => book.category))];
   const books = (
     data?.books.filter(
       (b) =>
@@ -130,19 +131,12 @@ export function Storefront({
   );
   return (
     <View style={{ gap: 18 }}>
-      <View style={{ gap: 7 }}>
-        <Text
-          accessibilityRole="header"
-          style={{ fontSize: 23, fontWeight: '600', color: colors.ink }}
-        >
-          {zh ? '免费经典书城' : 'The classics, yours to read'}
-        </Text>
-        <Text style={{ color: colors.muted, fontSize: 12, lineHeight: 20 }}>
-          {zh
-            ? '完整原文 · 下载后离线阅读 · 登录即可翻译'
-            : 'Complete editions · Offline reading · Sign in to translate'}
-        </Text>
-      </View>
+      <Text
+        accessibilityRole="header"
+        style={{ fontSize: 28, fontWeight: '700', color: colors.ink }}
+      >
+        {zh ? '书城' : 'Bookstore'}
+      </Text>
       <TextInput
         accessibilityLabel={zh ? '搜索书城' : 'Search bookstore'}
         placeholder={zh ? '搜索书名或作者' : 'Search title or author'}
@@ -157,17 +151,19 @@ export function Storefront({
           fontSize: 14,
         }}
       />
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ gap: 8 }}
-      >
-        {['', ...new Set(data?.books.map((b) => b.category))].map((c) => (
-          <Chip key={c} active={category === c} onPress={() => setCategory(c)}>
-            {c || (zh ? '全部' : 'All')}
-          </Chip>
-        ))}
-      </ScrollView>
+      {categories.length > 1 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ gap: 8 }}
+        >
+          {['', ...categories].map((c) => (
+            <Chip key={c} active={category === c} onPress={() => setCategory(c)}>
+              {c || (zh ? '全部' : 'All')}
+            </Chip>
+          ))}
+        </ScrollView>
+      )}
       {!!data?.collections.length && (
         <ScrollView
           horizontal
@@ -203,7 +199,7 @@ export function Storefront({
             <Pressable
               key={book.id}
               accessibilityRole="button"
-              accessibilityLabel={`${book.title}, ${zh ? '免费' : 'free'}`}
+              accessibilityLabel={book.title}
               onPress={() => {
                 setSelected(book);
                 setDownloadError('');
@@ -223,15 +219,11 @@ export function Storefront({
               <Text numberOfLines={1} style={{ color: colors.muted, fontSize: 10 }}>
                 {book.author}
               </Text>
-              <Text style={{ color: colors.accent, fontSize: 10 }}>
-                {savedIds.includes(book.editionId)
-                  ? zh
-                    ? '已下载'
-                    : 'Downloaded'
-                  : zh
-                    ? '免费 · 完整版'
-                    : 'Free · Complete'}
-              </Text>
+              {savedIds.includes(book.editionId) && (
+                <Text style={{ color: colors.muted, fontSize: 11 }}>
+                  {zh ? '已下载' : 'Downloaded'}
+                </Text>
+              )}
             </Pressable>
           ))}
         </View>
@@ -289,7 +281,7 @@ export function Storefront({
                   {downloadError}
                 </Text>
               )}
-              <Button icon="download-outline" busy={busy} onPress={() => void getBook(selected)}>
+              <Button busy={busy} onPress={() => void getBook(selected)}>
                 {busy
                   ? `${zh ? '下载中' : 'Downloading'} ${Math.round(progress * 100)}%`
                   : savedIds.includes(selected.editionId)
@@ -297,21 +289,9 @@ export function Storefront({
                       ? '打开书籍'
                       : 'Open book'
                     : zh
-                      ? '免费下载并打开'
+                      ? '下载并打开'
                       : 'Download & open'}
               </Button>
-              <View
-                style={{ backgroundColor: colors.surface, padding: 18, gap: 8, borderRadius: 12 }}
-              >
-                <Text style={{ color: colors.ink, fontWeight: '600' }}>
-                  {zh ? '登录即可翻译' : 'Sign in to translate'}
-                </Text>
-                <Text style={{ color: colors.muted, fontSize: 13, lineHeight: 22 }}>
-                  {zh
-                    ? '下载后，在书籍详情的「翻译准备」中开始翻译。支持双语对照，已完成的译文保存在本地。'
-                    : 'After downloading, use Translation preparation in book details. Read side by side; completed translations are saved on your device.'}
-                </Text>
-              </View>
             </ScrollView>
           )}
         </View>

@@ -27,6 +27,7 @@ import { ReadingNavigation } from '../components/reading-navigation';
 import { NotesExportSheet, type NotesExportScope } from '../components/notes-export-sheet';
 import { NoteEditorSheet } from '../components/note-editor-sheet';
 import { NoteExcerpt } from '../components/note-excerpt';
+import { useSheetPresentation } from '../components/use-sheet-presentation';
 import { PrivacySheet } from '../components/privacy-sheet';
 import { supportUrl } from '../content/privacy';
 import { BookTile, Cover } from '../components/book-card';
@@ -66,39 +67,6 @@ type BookActions = {
   open: (id: string, paragraph?: string, target?: ReadingTarget) => void;
   more: (book: ShelfBook) => void;
 };
-export function SearchEntry({ search, discover }: { search: () => void; discover: () => void }) {
-  const { colors, t } = useApp();
-  return (
-    <View
-      style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: colors.background === '#17181C' ? colors.surface : '#EBEBF0',
-        borderRadius: 24,
-        height: 40,
-        paddingHorizontal: 14,
-      }}
-    >
-      <Pressable
-        accessibilityRole="button"
-        onPress={search}
-        style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 9 }}
-      >
-        <Icon name="search-outline" size={18} color={colors.muted} />
-        <Text numberOfLines={1} style={{ fontSize: 12, color: colors.muted, flex: 1 }}>
-          {t('searchHint')}
-        </Text>
-      </Pressable>
-      <Pressable
-        onPress={discover}
-        accessibilityRole="button"
-        style={{ borderLeftWidth: 0.5, borderColor: colors.border, paddingLeft: 12, marginLeft: 8 }}
-      >
-        <Text style={{ fontSize: 13, color: colors.ink }}>{t('bookstore')}</Text>
-      </Pressable>
-    </View>
-  );
-}
 export function LibraryScreen({
   books,
   open,
@@ -106,7 +74,6 @@ export function LibraryScreen({
   importBook,
   busy,
   search,
-  discover,
   refresh,
   route,
   onRouteChange,
@@ -114,7 +81,6 @@ export function LibraryScreen({
   importBook: () => void;
   busy: boolean;
   search: () => void;
-  discover: () => void;
   refresh: () => Promise<void>;
   route: LibraryRoute;
   onRouteChange: (route: LibraryRoute) => void;
@@ -133,7 +99,10 @@ export function LibraryScreen({
   const workingRef = useRef(false);
   const mounted = useRef(true);
   const [moving, setMoving] = useState<string[] | null>(null);
-  const [managing, setManaging] = useState(false);
+  const panels = useSheetPresentation<'options' | 'collections'>({
+    library,
+    group: (sheet) => sheet,
+  });
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -248,39 +217,6 @@ export function LibraryScreen({
       });
   };
   const blocked = working || moving !== null;
-  const groupChip = (id: string | null | undefined, title: string, count: number) => (
-    <Pressable
-      key={id === undefined ? 'all' : id === null ? 'ungrouped' : id}
-      disabled={blocked || (id !== undefined && (loadingCollections || collectionsFailed))}
-      accessibilityRole="button"
-      accessibilityState={{
-        selected: collectionId === id,
-        disabled: blocked || (id !== undefined && (loadingCollections || collectionsFailed)),
-      }}
-      onPress={() => changeRoute({ collectionId: id })}
-      style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 5,
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        borderRadius: 16,
-        backgroundColor: collectionId === id ? colors.soft : colors.surface,
-      }}
-    >
-      <Text
-        numberOfLines={1}
-        style={{
-          maxWidth: 180,
-          fontSize: 13,
-          color: collectionId === id ? colors.accent : colors.ink,
-        }}
-      >
-        {title}
-      </Text>
-      <Text style={{ fontSize: 11, color: colors.muted }}>{count}</Text>
-    </Pressable>
-  );
   return (
     <View style={{ flex: 1 }}>
       <FlatList
@@ -319,131 +255,83 @@ export function LibraryScreen({
           />
         )}
         ListHeaderComponent={
-          <View style={{ gap: 22, paddingBottom: 24 }}>
-            <SearchEntry
-              search={() => {
-                if (!workingRef.current && !moving) search();
-              }}
-              discover={() => {
-                if (!workingRef.current && !moving) discover();
-              }}
-            />
+          <View style={{ gap: 16, paddingBottom: 24 }}>
             <View style={styles.spread}>
               <Text
                 accessibilityRole="header"
-                style={{ fontSize: 23, fontWeight: '600', color: colors.ink }}
+                style={{ fontSize: 28, fontWeight: '700', color: colors.ink, flex: 1 }}
               >
                 {selection ? t('selectedCount', { n: selectedIds.length }) : t('library')}
               </Text>
-              <View style={{ flexDirection: 'row', gap: 20 }}>
-                <Pressable
-                  disabled={busy || selection || blocked}
-                  onPress={importBook}
-                  accessibilityRole="button"
-                  style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
-                >
-                  <Icon name="add" size={17} color={colors.muted} />
-                  <Text style={{ fontSize: 14, color: colors.muted }}>{t('import')}</Text>
-                </Pressable>
-                <Pressable
-                  disabled={blocked}
-                  onPress={() => (selection ? finishSelection() : setSelection(true))}
-                  accessibilityRole="button"
-                  style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
-                >
-                  <Icon name="checkmark-circle-outline" size={17} color={colors.muted} />
-                  <Text style={{ fontSize: 14, color: colors.muted }}>
-                    {t(selection ? 'cancel' : 'select')}
-                  </Text>
-                </Pressable>
-              </View>
-            </View>
-            <View style={{ gap: 12 }}>
-              <View style={styles.spread}>
-                <Text style={{ color: colors.muted, fontSize: 12 }}>{t('collectionsTitle')}</Text>
-                <Pressable
-                  disabled={blocked}
-                  accessibilityRole="button"
-                  onPress={() => {
-                    if (!library.isCurrent() || workingRef.current || moving) return;
-                    finishSelection();
-                    setManaging(true);
-                  }}
-                  style={{ minHeight: 32, justifyContent: 'center' }}
-                >
-                  <Text style={{ color: colors.accent, fontSize: 13 }}>
-                    {t('collectionsManage')}
-                  </Text>
-                </Pressable>
-              </View>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ gap: 8 }}
-              >
-                {groupChip(undefined, t('collectionsAll'), books.length)}
-                {snapshot &&
-                  groupChip(
-                    null,
-                    t('collectionsUngrouped'),
-                    books.filter((book) => !membership(book.id)).length,
-                  )}
-                {snapshot?.groups.map((group) => groupChip(group.id, group.name, group.bookCount))}
-              </ScrollView>
-              {loadingCollections && !snapshot && <ActivityIndicator color={colors.accent} />}
-              {collectionsFailed && (
-                <View style={{ gap: 8 }}>
-                  <Text accessibilityRole="alert" style={{ color: colors.error, fontSize: 13 }}>
-                    {t('collectionsLoadError')}
-                  </Text>
-                  <Button secondary disabled={blocked} onPress={() => void collections.refresh()}>
-                    {t('retry')}
-                  </Button>
+              {selection ? (
+                <Button secondary disabled={blocked} onPress={finishSelection}>
+                  {t('cancel')}
+                </Button>
+              ) : (
+                <View style={{ flexDirection: 'row' }}>
+                  <IconButton
+                    icon="search-outline"
+                    label={t('search')}
+                    disabled={blocked}
+                    onPress={search}
+                  />
+                  <IconButton
+                    icon="add"
+                    label={t('import')}
+                    disabled={busy || blocked}
+                    onPress={importBook}
+                  />
+                  <IconButton
+                    icon="ellipsis-horizontal"
+                    label={t('more')}
+                    disabled={blocked}
+                    onPress={() => panels.request('options')}
+                  />
                 </View>
               )}
             </View>
-            <View
-              style={{ flexDirection: 'row', justifyContent: 'space-between', paddingRight: 10 }}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ gap: 4 }}
             >
-              {(['sortDefault', 'sortRecent', 'sortProgress', 'sortTitle'] as const).map((key) => (
-                <Pressable
-                  key={key}
-                  disabled={blocked}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: sort === key }}
-                  onPress={() => changeRoute({ sort: key })}
-                >
-                  <Text
-                    style={{ color: sort === key ? colors.accent : colors.muted, fontSize: 13 }}
-                  >
-                    {t(key)}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-            <View style={{ flexDirection: 'row', gap: 14 }}>
               {(['all', 'reading', 'finished', 'unread'] as const).map((key) => (
-                <Pressable
+                <Chip
                   key={key}
+                  active={filter === key}
                   disabled={blocked}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: filter === key }}
                   onPress={() => changeRoute({ filter: key })}
-                  style={{
-                    paddingHorizontal: 8,
-                    paddingVertical: 5,
-                    borderRadius: 14,
-                    backgroundColor: filter === key ? colors.soft : 'transparent',
-                  }}
                 >
-                  <Text
-                    style={{ fontSize: 11, color: filter === key ? colors.accent : colors.muted }}
-                  >
-                    {t(key)}
-                  </Text>
-                </Pressable>
+                  {t(key)}
+                </Chip>
               ))}
-            </View>
+            </ScrollView>
+            {collectionId !== undefined && (
+              <Pressable
+                accessibilityRole="button"
+                disabled={blocked}
+                onPress={() => panels.request('options')}
+                style={styles.spread}
+              >
+                <Text style={{ color: colors.muted, fontSize: 14 }}>
+                  {collectionId === null
+                    ? t('collectionsUngrouped')
+                    : snapshot?.groups.find((group) => group.id === collectionId)?.name ||
+                      t('collectionsTitle')}
+                </Text>
+                <Icon name="chevron-down" size={16} color={colors.muted} />
+              </Pressable>
+            )}
+            {collectionsFailed && (
+              <View style={{ gap: 8 }}>
+                <Text accessibilityRole="alert" style={{ color: colors.error, fontSize: 13 }}>
+                  {t('collectionsLoadError')}
+                </Text>
+                <Button secondary disabled={blocked} onPress={() => void collections.refresh()}>
+                  {t('retry')}
+                </Button>
+              </View>
+            )}
           </View>
         }
         ListEmptyComponent={
@@ -456,13 +344,8 @@ export function LibraryScreen({
                     ? 'collectionsGroupEmpty'
                     : 'noResults',
               )}
-              description={t(
-                collectionId !== undefined && !collectionBooks.length
-                  ? 'collectionsEmptyHint'
-                  : 'emptyHint',
-              )}
             >
-              {collectionId === undefined ? (
+              {!books.length ? (
                 <Button onPress={importBook} busy={busy} disabled={blocked}>
                   {t('import')}
                 </Button>
@@ -478,14 +361,78 @@ export function LibraryScreen({
             </Empty>
           )
         }
-        ListFooterComponent={
-          filtered.length ? (
-            <Text style={{ textAlign: 'center', fontSize: 11, color: colors.muted, marginTop: 22 }}>
-              {t('shelfFooter', { n: filtered.length })}
-            </Text>
-          ) : null
-        }
       />
+      <Sheet
+        visible={panels.sheet === 'options' && panels.visible}
+        title={t('more')}
+        close={() => panels.request(null)}
+        onShow={panels.onShow}
+        onDismiss={panels.onDismiss}
+      >
+        <View style={{ gap: 4 }}>
+          {(['sortDefault', 'sortRecent', 'sortProgress', 'sortTitle'] as const).map((key) => (
+            <Pressable
+              key={key}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: sort === key }}
+              disabled={blocked}
+              onPress={() => {
+                changeRoute({ sort: key });
+                panels.request(null);
+              }}
+              style={[styles.spread, { minHeight: 44 }]}
+            >
+              <Text style={{ color: colors.ink, fontSize: 16 }}>{t(key)}</Text>
+              {sort === key && <Icon name="checkmark" color={colors.accent} />}
+            </Pressable>
+          ))}
+        </View>
+        <SectionLabel>{t('collectionsTitle')}</SectionLabel>
+        <View style={{ gap: 4 }}>
+          {[
+            { id: undefined, name: t('collectionsAll') },
+            { id: null, name: t('collectionsUngrouped') },
+            ...(snapshot?.groups || []),
+          ].map((group) => (
+            <Pressable
+              key={group.id ?? String(group.id)}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: collectionId === group.id }}
+              disabled={
+                blocked || (group.id !== undefined && (loadingCollections || collectionsFailed))
+              }
+              onPress={() => {
+                changeRoute({ collectionId: group.id });
+                panels.request(null);
+              }}
+              style={[styles.spread, { minHeight: 44 }]}
+            >
+              <Text style={{ color: colors.ink, fontSize: 16 }}>{group.name}</Text>
+              {collectionId === group.id && <Icon name="checkmark" color={colors.accent} />}
+            </Pressable>
+          ))}
+        </View>
+        <Button
+          secondary
+          disabled={blocked}
+          onPress={() => {
+            finishSelection();
+            panels.request('collections');
+          }}
+        >
+          {t('collectionsManage')}
+        </Button>
+        <Button
+          secondary
+          disabled={blocked || !filtered.length}
+          onPress={() => {
+            panels.request(null);
+            setSelection(true);
+          }}
+        >
+          {t('select')}
+        </Button>
+      </Sheet>
       {selection && (
         <View
           style={{
@@ -573,7 +520,12 @@ export function LibraryScreen({
           }
         }}
       />
-      <CollectionManagerSheet visible={managing} close={() => setManaging(false)} />
+      <CollectionManagerSheet
+        visible={panels.sheet === 'collections' && panels.visible}
+        close={() => panels.request(null)}
+        onShow={panels.onShow}
+        onDismiss={panels.onDismiss}
+      />
     </View>
   );
 }
@@ -811,7 +763,7 @@ export function NotesScreen({
     }
   };
   const pagination = () =>
-    !showBooks ? (
+    !showBooks && (page > 0 || !!nextCursor) ? (
       <View style={{ gap: 10, paddingVertical: 12 }}>
         <Text style={{ color: colors.muted, fontSize: 12 }} accessibilityLiveRegion="polite">
           {pending || hasError
@@ -843,22 +795,6 @@ export function NotesScreen({
     ) : null;
   return (
     <>
-      {bookId && (
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10 }}>
-          <IconButton
-            icon="chevron-back"
-            label={t('back')}
-            disabled={busy}
-            onPress={() => setBookId(undefined)}
-          />
-          <Text
-            numberOfLines={1}
-            style={{ color: colors.ink, fontSize: 16, fontWeight: '600', flex: 1 }}
-          >
-            {bookMap.get(bookId)?.title || t('notes')}
-          </Text>
-        </View>
-      )}
       <FlatList<Note | ShelfBook>
         ref={list}
         data={showBooks ? notebookBooks : visibleNotes}
@@ -873,8 +809,20 @@ export function NotesScreen({
         ListHeaderComponent={
           <View style={{ gap: 16, paddingBottom: showBooks ? 4 : 0 }}>
             <View style={styles.spread}>
-              <Text accessibilityRole="header" style={[styles.title, { color: colors.ink }]}>
-                {t('notes')}
+              {bookId && (
+                <IconButton
+                  icon="chevron-back"
+                  label={t('back')}
+                  disabled={busy}
+                  onPress={() => setBookId(undefined)}
+                />
+              )}
+              <Text
+                accessibilityRole="header"
+                numberOfLines={2}
+                style={[styles.title, { color: colors.ink, flex: 1 }]}
+              >
+                {bookId ? bookMap.get(bookId)?.title || t('notes') : t('notes')}
               </Text>
               <IconButton
                 icon="share-outline"
@@ -914,14 +862,6 @@ export function NotesScreen({
               placeholderTextColor={colors.muted}
               style={[styles.input, { color: colors.ink, borderColor: colors.border }]}
             />
-            {showBooks && (
-              <Text style={{ fontSize: 12, color: colors.muted }}>
-                {t('notesSummary', {
-                  n: books.reduce((n, book) => n + book.noteCount, 0),
-                  books: notebookBooks.length,
-                })}
-              </Text>
-            )}
             {pending && (
               <View style={styles.row}>
                 <ActivityIndicator color={colors.accent} />
@@ -935,7 +875,6 @@ export function NotesScreen({
                 {t('retry')}
               </Button>
             )}
-            {pagination()}
           </View>
         }
         renderItem={({ item }) =>
@@ -944,9 +883,9 @@ export function NotesScreen({
               accessibilityRole="button"
               onPress={() => setBookId(item.id)}
               style={{
-                backgroundColor: colors.surface,
-                borderRadius: 14,
-                padding: 22,
+                paddingVertical: 20,
+                borderBottomWidth: 0.5,
+                borderColor: colors.border,
                 flexDirection: 'row',
                 gap: 20,
                 alignItems: 'center',
@@ -954,14 +893,14 @@ export function NotesScreen({
               }}
             >
               <View style={{ flex: 1, gap: 12 }}>
-                <Text style={{ fontSize: 22, fontWeight: '500', color: colors.ink }}>
-                  {t('notesCount', { n: item.noteCount })}
+                <Text style={{ fontSize: 17, fontWeight: '500', color: colors.ink }}>
+                  {item.title}
                 </Text>
                 <Text
                   numberOfLines={2}
                   style={{ color: colors.muted, fontSize: 14, lineHeight: 21 }}
                 >
-                  《{item.title}》
+                  {t('notesCount', { n: item.noteCount })}
                 </Text>
               </View>
               <Cover book={item} width={65} />
@@ -969,10 +908,8 @@ export function NotesScreen({
           ) : (
             <View
               style={{
-                backgroundColor: colors.surface,
-                padding: 20,
-                borderRadius: 18,
-                borderWidth: 1,
+                paddingVertical: 20,
+                borderBottomWidth: 0.5,
                 borderColor: colors.border,
                 marginTop: 15,
                 gap: 14,
@@ -1032,11 +969,7 @@ export function NotesScreen({
         }
         ListEmptyComponent={
           !pending && !hasError ? (
-            <Empty
-              title={t(needle || page > 0 ? 'noResults' : 'notesEmpty')}
-              description={!needle && page === 0 ? t('notesEmptyHint') : undefined}
-              icon="create-outline"
-            />
+            <Empty title={t(needle || page > 0 ? 'noResults' : 'notesEmpty')} />
           ) : null
         }
         ListFooterComponent={pagination()}
@@ -1054,11 +987,22 @@ export function NotesScreen({
     </>
   );
 }
-export function SettingsScreen({ importBook }: { importBook: () => void }) {
+export function SettingsContent({ importBook }: { importBook: () => void }) {
   const { colors, preferences, patch, t, notify } = useApp();
   const library = useLibrary();
+  const zh = preferences.locale === 'zh-CN';
   const [busy, setBusy] = useState(false);
-  const [privacyVisible, setPrivacyVisible] = useState(false);
+  const panels = useSheetPresentation<'language' | 'reading' | 'data' | 'diagnostics' | 'privacy'>({
+    library,
+    group: (sheet) => (sheet === 'privacy' ? 'privacy' : 'settings'),
+  });
+  const afterDismiss = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    if (panels.sheet !== null || !afterDismiss.current) return;
+    const action = afterDismiss.current;
+    afterDismiss.current = null;
+    if (library.isCurrent()) action();
+  }, [panels.sheet, library]);
   const run = (action: () => Promise<unknown>) => {
     if (!library.isCurrent()) return;
     setBusy(true);
@@ -1070,70 +1014,127 @@ export function SettingsScreen({ importBook }: { importBook: () => void }) {
         if (library.isCurrent()) setBusy(false);
       });
   };
+  const readingTitle = zh ? '阅读偏好' : 'Reading preferences';
+  const row = (label: string, action: () => void, value?: string) => (
+    <Pressable
+      accessibilityRole="button"
+      onPress={action}
+      style={[styles.spread, { minHeight: 54, borderBottomWidth: 0.5, borderColor: colors.border }]}
+    >
+      <Text style={{ color: colors.ink, fontSize: 16, flex: 1 }}>{label}</Text>
+      {!!value && <Text style={{ color: colors.muted, fontSize: 14 }}>{value}</Text>}
+      <Icon name="chevron-forward" size={16} color={colors.muted} />
+    </Pressable>
+  );
   return (
-    <ScrollView contentContainerStyle={styles.page}>
-      <Text accessibilityRole="header" style={[styles.title, { color: colors.ink }]}>
-        {t('settings')}
-      </Text>
-      <View style={{ backgroundColor: colors.soft, padding: 22, borderRadius: 20, gap: 12 }}>
-        <Icon name="leaf-outline" color={colors.accent} size={28} />
-        <Text style={[styles.subtitle, { color: colors.ink }]}>{t('localFirst')}</Text>
-        <Text style={[styles.description, { color: colors.muted }]}>{t('localFirstHint')}</Text>
+    <>
+      <View>
+        {row(t('language'), () => panels.request('language'), zh ? '简体中文' : 'English')}
+        {row(readingTitle, () => panels.request('reading'))}
+        {row(t('transfer'), () => panels.request('data'))}
+        {row(t('privacyPolicy'), () => panels.request('privacy'))}
+        {row(
+          t('helpSupport'),
+          () => void Linking.openURL(supportUrl).catch(() => notify(t('error'))),
+        )}
+        {row(t('diagnostics'), () => panels.request('diagnostics'))}
       </View>
-      <SectionLabel>{t('language')}</SectionLabel>
-      <View style={styles.row}>
-        <Chip active={preferences.locale === 'en'} onPress={() => patch({ locale: 'en' })}>
-          English
-        </Chip>
-        <Chip active={preferences.locale === 'zh-CN'} onPress={() => patch({ locale: 'zh-CN' })}>
-          简体中文
-        </Chip>
-      </View>
-      <SectionLabel>{t('theme')}</SectionLabel>
-      <View style={styles.row}>
-        <Chip active={preferences.theme === 'paper'} onPress={() => patch({ theme: 'paper' })}>
-          {t('paper')}
-        </Chip>
-        <Chip active={preferences.theme === 'night'} onPress={() => patch({ theme: 'night' })}>
-          {t('night')}
-        </Chip>
-      </View>
-      <ReadingNavigation />
-      <SectionLabel>{t('transfer')}</SectionLabel>
-      <Button secondary icon="add" onPress={importBook}>
-        {t('import')}
-      </Button>
-      <Button
-        secondary
-        busy={busy}
-        icon="share-outline"
-        onPress={() => run(() => shareLibrary(library))}
+      <Sheet
+        visible={panels.sheet !== 'privacy' && panels.visible}
+        title={
+          panels.sheet === 'language'
+            ? t('language')
+            : panels.sheet === 'reading'
+              ? readingTitle
+              : panels.sheet === 'diagnostics'
+                ? t('diagnostics')
+                : t('transfer')
+        }
+        close={() => {
+          if (!busy) panels.request(null);
+        }}
+        onShow={panels.onShow}
+        onDismiss={panels.onDismiss}
       >
-        {t('export')}
-      </Button>
-      <Text style={[styles.description, { color: colors.muted }]}>{t('exportHint')}</Text>
-      <SectionLabel>{t('privacy')}</SectionLabel>
-      <Button secondary icon="shield-checkmark-outline" onPress={() => setPrivacyVisible(true)}>
-        {t('privacyPolicy')}
-      </Button>
-      <Button
-        secondary
-        icon="help-circle-outline"
-        onPress={() => void Linking.openURL(supportUrl).catch(() => notify(t('error')))}
-      >
-        {t('helpSupport')}
-      </Button>
-      <Text style={[styles.description, { color: colors.muted }]}>{t('diagnosticsHint')}</Text>
-      <Button secondary busy={busy} icon="pulse-outline" onPress={() => run(shareDiagnostics)}>
-        {t('diagnostics')}
-      </Button>
-      <View style={{ paddingVertical: 25, gap: 6, alignItems: 'center' }}>
-        <Text style={{ color: colors.accent, fontFamily: 'Georgia', fontSize: 20 }}>
-          {t('about')}
-        </Text>
-        <Text style={{ color: colors.muted, fontSize: 11 }}>{t('version')}</Text>
-      </View>
-      <PrivacySheet visible={privacyVisible} close={() => setPrivacyVisible(false)} />
-    </ScrollView>
+        {panels.sheet === 'language' && (
+          <View style={{ gap: 4 }}>
+            {(
+              [
+                ['en', 'English'],
+                ['zh-CN', '简体中文'],
+              ] as const
+            ).map(([locale, label]) => (
+              <Pressable
+                key={locale}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: preferences.locale === locale }}
+                onPress={() => {
+                  patch({ locale });
+                  panels.request(null);
+                }}
+                style={[styles.spread, { minHeight: 48 }]}
+              >
+                <Text style={{ color: colors.ink, fontSize: 16 }}>{label}</Text>
+                {preferences.locale === locale && <Icon name="checkmark" color={colors.accent} />}
+              </Pressable>
+            ))}
+          </View>
+        )}
+        {panels.sheet === 'reading' && (
+          <>
+            <SectionLabel>{t('theme')}</SectionLabel>
+            <View style={styles.row}>
+              <Chip
+                active={preferences.theme === 'paper'}
+                onPress={() => patch({ theme: 'paper' })}
+              >
+                {t('paper')}
+              </Chip>
+              <Chip
+                active={preferences.theme === 'night'}
+                onPress={() => patch({ theme: 'night' })}
+              >
+                {t('night')}
+              </Chip>
+            </View>
+            <ReadingNavigation />
+          </>
+        )}
+        {panels.sheet === 'data' && (
+          <>
+            <Button
+              secondary
+              onPress={() => {
+                afterDismiss.current = importBook;
+                panels.request(null);
+              }}
+            >
+              {t('import')}
+            </Button>
+            <Button secondary busy={busy} onPress={() => run(() => shareLibrary(library))}>
+              {t('export')}
+            </Button>
+            <Text style={[styles.description, { color: colors.muted }]}>{t('exportHint')}</Text>
+          </>
+        )}
+        {panels.sheet === 'diagnostics' && (
+          <>
+            <Text style={[styles.description, { color: colors.muted }]}>
+              {t('diagnosticsHint')}
+            </Text>
+            <Button secondary busy={busy} onPress={() => run(shareDiagnostics)}>
+              {t('diagnostics')}
+            </Button>
+            <Text style={{ color: colors.muted, fontSize: 12 }}>{t('version')}</Text>
+          </>
+        )}
+      </Sheet>
+      <PrivacySheet
+        visible={panels.sheet === 'privacy' && panels.visible}
+        close={() => panels.request(null)}
+        onShow={panels.onShow}
+        onDismiss={panels.onDismiss}
+      />
+    </>
   );
 }

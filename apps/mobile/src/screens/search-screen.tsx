@@ -195,9 +195,6 @@ export function SearchScreen({
         keyboardShouldPersistTaps="handled"
         ListHeaderComponent={
           <View style={{ gap: 16 }}>
-            <Text accessibilityRole="header" style={[styles.title, { color: colors.ink }]}>
-              {t('search')}
-            </Text>
             <View
               style={[
                 styles.row,
@@ -253,7 +250,9 @@ export function SearchScreen({
                 setFilterOpen(true);
               }}
             >
-              {`${t('searchBookFilter')} · ${route.bookId ? books.find((book) => book.id === route.bookId)?.title || t('searchBookFilter') : t('searchAllBooks')}`}
+              {route.bookId
+                ? books.find((book) => book.id === route.bookId)?.title || t('searchBookFilter')
+                : t('searchAllBooks')}
             </Button>
             {route.source === 'translation' && (
               <>
@@ -282,9 +281,6 @@ export function SearchScreen({
                 )}
               </>
             )}
-            <Text style={{ color: colors.muted, fontSize: 12, lineHeight: 19 }}>
-              {t(route.source === 'translation' ? 'searchSavedTranslationsHint' : 'searchPrivacy')}
-            </Text>
             {metadata.map((book) => (
               <BookCard
                 key={book.id}
@@ -304,12 +300,6 @@ export function SearchScreen({
                 {t('retry')}
               </Button>
             )}
-            {!!matches.length && (
-              <Text style={{ color: colors.muted, fontSize: 12 }}>
-                {t('searchResultsPage', { page: route.page + 1, count: matches.length })}
-              </Text>
-            )}
-            {pagination()}
           </View>
         }
         renderItem={({ item }) => (
@@ -327,19 +317,14 @@ export function SearchScreen({
               open(item.bookId, item.paragraph, { anchor: item.anchor, quote: item.quote });
             }}
             style={{
-              padding: 18,
-              borderRadius: 16,
-              backgroundColor: colors.surface,
-              borderWidth: 1,
+              paddingVertical: 20,
+              borderBottomWidth: 0.5,
               borderColor: colors.border,
               marginBottom: 12,
               gap: 9,
             }}
           >
-            <Text
-              numberOfLines={1}
-              style={{ color: colors.accent, fontSize: 12, fontWeight: '600' }}
-            >
+            <Text numberOfLines={1} style={{ color: colors.ink, fontSize: 13, fontWeight: '600' }}>
               {item.title}
             </Text>
             <Text numberOfLines={2} style={{ color: colors.muted, fontSize: 11 }}>
@@ -364,7 +349,6 @@ export function SearchScreen({
                   ? 'searchNoSavedTranslations'
                   : 'noResults',
               )}
-              icon="search-outline"
             />
           ) : null
         }

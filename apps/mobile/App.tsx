@@ -65,7 +65,6 @@ import { Button, Empty, Icon, Sheet, styles, type IconName } from './src/compone
 import {
   LibraryScreen,
   NotesScreen,
-  SettingsScreen,
   type LibraryRoute,
   type NotesRoute,
   type ReadingTarget,
@@ -74,7 +73,7 @@ import { AccountScreen } from './src/screens/account-screen';
 import { SearchScreen, type SearchRoute } from './src/screens/search-screen';
 import { initializeAccount, refreshAccount } from './src/adapters/account';
 import { readBookReadingPreferences } from './src/adapters/book-reading-preferences';
-import { invalidateReadingTranslationBook } from './src/adapters/translation-queue';
+import { invalidateBookTranslationDisplay } from './src/adapters/translation-display';
 import { PdfImportSheet } from './src/components/pdf-import-sheet';
 import { discardPdf } from './src/adapters/pdf';
 import { useSheetPresentation } from './src/components/use-sheet-presentation';
@@ -147,7 +146,7 @@ function Main() {
   const [books, setBooks] = useState<ShelfBook[]>([]);
   const [boot, setBoot] = useState<'loading' | 'ready' | 'error'>('loading');
   const [tab, setTab] = useState<'home' | 'library' | 'notes' | 'profile'>('home');
-  const [page, setPage] = useState<'search' | 'settings' | 'discover' | 'account' | null>(null);
+  const [page, setPage] = useState<'search' | 'account' | null>(null);
   const [detail, setDetail] = useState<Book | null>(null);
   const [notesRoute, setNotesRoute] = useState<NotesRoute>({
     query: '',
@@ -711,18 +710,6 @@ function Main() {
           hidden={!!reader && !readerTools}
           style={preferences.theme === 'night' ? 'light' : 'dark'}
         />
-        {!reader && library.handle.kind === 'account' && (
-          <Pressable
-            accessibilityRole="button"
-            onPress={openAccount}
-            style={{ paddingHorizontal: 22, paddingVertical: 7, backgroundColor: colors.soft }}
-          >
-            <Text style={{ color: colors.accent, fontSize: 12 }}>
-              {preferences.locale === 'zh-CN' ? '账号书库' : 'Account library'} ·{' '}
-              {library.handle.origin}
-            </Text>
-          </Pressable>
-        )}
         {boot === 'ready' && !reader && !detail && !page && inbox.items.length > 0 && (
           <Pressable
             accessibilityRole="button"
@@ -771,7 +758,7 @@ function Main() {
             open={(paragraph) => void open(detail.id, paragraph)}
             updateSourceLanguage={async (language) => {
               library.assertCurrent();
-              invalidateReadingTranslationBook(library.handle, detail.id);
+              invalidateBookTranslationDisplay(library.handle, detail.id);
               const updated = await setBookSourceLanguage(library.handle, detail.id, language);
               library.assertCurrent();
               setDetail((current) => (current?.id === updated.id ? updated : current));
@@ -791,10 +778,7 @@ function Main() {
           />
         ) : page ? (
           <View style={{ flex: 1 }}>
-            <PageHeader
-              title={t(page === 'discover' ? 'bookstore' : page)}
-              back={() => setPage(null)}
-            />
+            <PageHeader title={t(page)} back={() => setPage(null)} />
             {page === 'search' ? (
               <SearchScreen
                 {...actions}
@@ -802,27 +786,8 @@ function Main() {
                 onRouteChange={setSearchRoute}
                 revision={revision}
               />
-            ) : page === 'account' ? (
-              <AccountScreen />
-            ) : page === 'settings' ? (
-              <SettingsScreen importBook={() => void importBook()} />
             ) : (
-              <HomeScreen
-                downloaded={async (book) => {
-                  if (!library.isCurrent()) return;
-                  await addBook(library.handle, book);
-                  if (!library.isCurrent()) return;
-                  await refresh();
-                  if (library.isCurrent()) setDetail(book);
-                }}
-                books={books}
-                search={() => setPage('search')}
-                detail={(id) => void showDetail(id)}
-                open={(id) => void open(id)}
-                importBook={() => void importBook()}
-                notes={() => showNotes()}
-                discover
-              />
+              <AccountScreen />
             )}
           </View>
         ) : (
@@ -838,11 +803,8 @@ function Main() {
                     if (library.isCurrent()) setDetail(book);
                   }}
                   books={books}
-                  search={() => setPage('search')}
                   detail={(id) => void showDetail(id)}
                   open={(id) => void open(id)}
-                  importBook={() => void importBook()}
-                  notes={() => showNotes()}
                 />
               )}
               {tab === 'library' && (
@@ -853,7 +815,6 @@ function Main() {
                   importBook={() => void importBook()}
                   busy={busy}
                   search={() => setPage('search')}
-                  discover={() => setPage('discover')}
                   refresh={refresh}
                 />
               )}
@@ -866,15 +827,7 @@ function Main() {
                   onChanged={refresh}
                 />
               )}
-              {tab === 'profile' && (
-                <ProfileScreen
-                  books={books}
-                  settings={() => setPage('settings')}
-                  notes={() => showNotes()}
-                  library={() => setTab('library')}
-                  importBook={() => void importBook()}
-                />
-              )}
+              {tab === 'profile' && <ProfileScreen importBook={() => void importBook()} />}
             </View>
             <View
               style={{
@@ -1040,13 +993,9 @@ function Main() {
                     ? '打开本机书库'
                     : 'Open device library'}
               </Button>
-              <Button secondary disabled={busy} onPress={cancelImport}>
-                {t('close')}
-              </Button>
             </>
           ) : (
             <>
-              <Icon name="documents-outline" size={38} color={colors.accent} />
               <Text style={[styles.subtitle, { color: colors.ink }]}>
                 {pending?.kind === 'book'
                   ? pending.book.title
@@ -1172,15 +1121,6 @@ function Main() {
                   {importSaveError}
                 </Text>
               )}
-              <Button
-                secondary
-                disabled={busy}
-                onPress={() => {
-                  if (!importSaving.current) cancelImport();
-                }}
-              >
-                {t('cancel')}
-              </Button>
             </>
           )}
         </Sheet>
@@ -1191,7 +1131,11 @@ function Main() {
           title={t('inboxTitle')}
           close={() => !busy && setInboxOpen(false)}
         >
-          <Text style={[styles.description, { color: colors.muted }]}>{t('inboxHint')}</Text>
+          <Text style={[styles.description, { color: colors.muted }]}>
+            {preferences.locale === 'zh-CN'
+              ? '移除只删除待导入副本，原文件保留。'
+              : 'Removing a pending copy keeps the original file.'}
+          </Text>
           {!!inboxError && (
             <Text accessibilityLiveRegion="polite" style={{ color: colors.error }}>
               {inboxError}
@@ -1247,7 +1191,6 @@ function Main() {
           ) : (
             <>
               <Button
-                icon="book-outline"
                 onPress={() => {
                   const id = selected!.id;
                   setSelected(null);
@@ -1258,7 +1201,6 @@ function Main() {
               </Button>
               <Button
                 secondary
-                icon="information-circle-outline"
                 onPress={() => {
                   const id = selected!.id;
                   setSelected(null);
@@ -1270,7 +1212,6 @@ function Main() {
               <Button
                 secondary
                 disabled={busy}
-                icon="folder-outline"
                 onPress={() => setCollectionMove(true)}
               >
                 {t('collectionsMove')}
@@ -1278,7 +1219,6 @@ function Main() {
               <Button
                 secondary
                 disabled={busy}
-                icon="checkmark-circle-outline"
                 onPress={() => {
                   if (!library.isCurrent() || !selected) return;
                   setBusy(true);
@@ -1298,7 +1238,6 @@ function Main() {
               <Button
                 secondary
                 busy={busy}
-                icon="share-outline"
                 onPress={() => {
                   if (!library.isCurrent() || !selected) return;
                   setBusy(true);
@@ -1315,7 +1254,6 @@ function Main() {
                 secondary
                 danger
                 disabled={busy}
-                icon="trash-outline"
                 onPress={() => {
                   if (!library.isCurrent() || !selected) return;
                   const target = selected;
@@ -1327,7 +1265,7 @@ function Main() {
                       onPress: () => {
                         if (!library.isCurrent()) return;
                         setBusy(true);
-                        invalidateReadingTranslationBook(library.handle, target.id);
+                        invalidateBookTranslationDisplay(library.handle, target.id);
                         void removeBook(library.handle, target.id)
                           .then(async () => {
                             await refresh();

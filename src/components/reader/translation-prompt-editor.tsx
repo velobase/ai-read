@@ -66,15 +66,9 @@ export function TranslationPromptEditor({
           </SelectContent>
         </Select>
       </div>
-      <p id={`${id}-help`} className="text-xs leading-6 text-muted-foreground">
-        {zh
-          ? '直接编辑翻译要求，可用中文写风格、术语或例句。原文、书名和相邻段落会自动提供，留空使用默认要求。'
-          : 'Edit the instructions in any language, including style, terminology or examples. The source, book title and nearby passages are provided automatically. Leave blank to use the default.'}
-      </p>
       <Textarea
         id={id}
         name="translationPrompt"
-        aria-describedby={`${id}-help`}
         value={value}
         placeholder={DEFAULT_TRANSLATION_PROMPT}
         disabled={disabled}
@@ -99,10 +93,8 @@ export function TranslationPromptEditor({
           {zh ? '恢复默认' : 'Reset to default'}
         </Button>
       </div>
-      <p className="text-xs leading-6 text-muted-foreground">
-        {zh
-          ? '保存后用于新建译本。正在阅读的译本保持原有风格；可在“书籍译本”中按最新设置重译，旧版和笔记保留。'
-          : 'Saved instructions apply to new editions. Your current edition keeps its style. Retranslate from Book translation to use the latest settings; old editions and notes are retained.'}
+      <p className="text-xs text-muted-foreground">
+        {zh ? '应用于新译本' : 'Applies to new editions'}
       </p>
     </section>
   );

@@ -4,11 +4,16 @@ export type TranslationStatus = 'idle' | 'loading' | 'offline' | 'error';
 export function TranslationStatus({
   status,
   retry,
+  progress,
+  canRetry,
 }: {
   status: TranslationStatus;
   retry: () => void;
+  canRetry: boolean;
+  progress?: { completed: number; total: number } | null;
 }) {
   const { colors, t } = useApp();
+  if (status === 'idle') return null;
   const failed = status === 'offline' || status === 'error';
   return (
     <View
@@ -32,8 +37,11 @@ export function TranslationStatus({
               ? 'translationReadError'
               : 'translationLoading',
         )}
+        {progress && progress.total > 0
+          ? ` · ${Math.floor((progress.completed / progress.total) * 100)}%`
+          : ''}
       </Text>
-      {status === 'error' && (
+      {status === 'error' && canRetry && (
         <Pressable accessibilityRole="button" onPress={retry} style={{ padding: 10 }}>
           <Text style={{ color: colors.accent, fontSize: 13 }}>{t('retry')}</Text>
         </Pressable>

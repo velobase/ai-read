@@ -83,15 +83,15 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' }) {
                     3. AI 模型服务与密钥安全
                   </h2>
                   <p>
-                    翻译随阅读位置按需进行，相关原文与必要元数据会发送到服务端处理；完整译文保存在本机，开启书库同步时参与同步。切回原文、离开阅读器或将
+                    登录后打开书籍时，提取的整本正文与书名、源语言等必要元数据会上传为服务端翻译任务，并分批发送给模型处理。服务端保存翻译进度和已完成译文，设备读取并缓存译文供阅读。切回原文、离开阅读器或将
                     App
-                    切至后台会停止不再需要的翻译，不会启动整本后台任务，也不会自动开启书库同步。插图、PDF
-                    原文件、笔记与书签不作为翻译请求内容。登录后，你可以直接使用 LeafRead
+                    切至后台后，任务仍会继续；再次打开书籍即可读取最新进度。此流程不会自动开启书库同步。插图、封面、PDF
+                    原文件、笔记与书签不作为翻译任务的上传内容。登录后，你可以直接使用 LeafRead
                     提供的翻译与伴读服务，无需填写 API
-                    Key。使用这些功能时，选中的段落、参考原文、书名、问题与近期对话会通过 LeafRead
+                    Key。使用伴读功能时，选中的段落、参考原文、书名、问题与近期对话会通过 LeafRead
                     服务器发送到 OpenRouter 及所选模型提供商处理，适用其隐私政策。平台 Key
                     仅保存在服务器 Secret
-                    中，不发送到手机或浏览器。完整异常及上游错误响应保存在受访问控制保护的服务端日志中，用于排障；错误响应可能包含相关请求内容。
+                    中，不发送到手机或浏览器。翻译批次的请求与响应、完整异常及上游错误响应保存在受访问控制保护的服务端日志中，用于排障。
                   </p>
                 </div>
                 <div>
@@ -142,20 +142,21 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' }) {
                     3. AI Providers & API Key Security
                   </h2>
                   <p>
-                    Translation follows the reading position and sends the relevant source text and
-                    necessary metadata to the server. Complete translations are saved on this device
-                    and participate in library sync when enabled. Selecting Original, leaving the
-                    reader or backgrounding the app stops unneeded requests. No whole-book
-                    background task is started, and library sync is not enabled automatically.
-                    Images, original PDF files, notes and bookmarks are excluded from translation
-                    requests. Signed-in readers can use LeafRead translation and reading assistance
-                    without supplying an API key. When you use these features, selected passages,
-                    reference text, book titles, questions and recent conversations are sent through
-                    LeafRead servers to OpenRouter and the selected model provider. Their privacy
-                    policies apply. Platform credentials remain in server Secrets and are never sent
-                    to your device. Complete exceptions and upstream error responses are retained in
-                    access-controlled server logs for troubleshooting; error responses may include
-                    related request content.
+                    Opening a book while signed in uploads its extracted text and necessary
+                    metadata, such as its title and source language, as a server translation job.
+                    The server sends text to the model in batches and saves completed translations
+                    and progress. Your device fetches and caches the results for reading. The job
+                    continues when you select Original, leave the reader or background the app;
+                    returning retrieves the latest progress. This does not automatically enable
+                    library sync. Images, covers, original PDF files, notes and bookmarks are
+                    excluded from translation uploads. Signed-in readers can use LeafRead
+                    translation and reading assistance without supplying an API key. For reading
+                    assistance, selected passages, reference text, book titles, questions and recent
+                    conversations are sent through LeafRead servers to OpenRouter and the selected
+                    model provider. Their privacy policies apply. Platform credentials remain in
+                    server Secrets and are never sent to your device. Translation batch requests and
+                    responses, complete exceptions and upstream error responses are retained in
+                    access-controlled server logs for troubleshooting.
                   </p>
                 </div>
                 <div>

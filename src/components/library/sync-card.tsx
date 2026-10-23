@@ -1,5 +1,5 @@
 'use client';
-import { Cloud, Download, RefreshCw } from 'lucide-react';
+import { Download, RefreshCw } from 'lucide-react';
 import { useSync, syncNow } from '@/components/auth/sync-provider';
 import { useIdentity } from '@/components/auth/identity-provider';
 import { useI18n } from '@/lib/i18n/provider';
@@ -37,14 +37,8 @@ export function SyncCard() {
   };
   return (
     <section className="settings-form-card mb-5" aria-label={t('云端同步')}>
-      <div className="mb-4 flex items-center gap-3">
-        <Cloud size={24} className="text-primary" />
-        <h2 className="font-medium">{t('云端同步')}</h2>
-      </div>
-      <p className="text-sm leading-7 text-muted-foreground">
-        {t('同一账号的书籍、笔记、进度、AI 对话和自动译文会在联网后同步。游客数据只保存在本机。')}
-      </p>
-      <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+      <h2 className="font-medium">{t('云端同步')}</h2>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
         <p role="status" className="text-sm">
           {sync.state === 'error' && sync.error === 'sync-invalid'
             ? t('{count} 条数据暂未同步，已保留在本机；其他数据继续同步。', {

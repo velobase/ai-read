@@ -51,15 +51,15 @@ export function AccountLibraryPanel() {
   const granted = account.session?.permissions.includes('library_sync');
   const disabled = working || control.switching || account.busy || account.loading;
   return (
-    <View style={{ backgroundColor: colors.surface, borderRadius: 18, padding: 20, gap: 14 }}>
+    <View style={{ paddingVertical: 12, gap: 16 }}>
       <Text style={{ color: colors.ink, fontSize: 19, fontWeight: '600' }}>
         {zh ? '书库同步' : 'Library sync'} ·{' '}
         {library.handle.kind === 'device' ? (zh ? '未开启' : 'Off') : zh ? '已开启' : 'On'}
       </Text>
       <Text style={{ color: colors.muted, lineHeight: 23 }}>
         {zh
-          ? '本机与账号书库分别保存。账号书库同步书籍、阅读进度、笔记和书签；保存的译文、AI 历史和阅读设置暂不跨设备同步。'
-          : 'Device and account libraries are separate. Account libraries sync books, progress, notes and bookmarks. Saved translations, AI history and reading settings do not sync yet.'}
+          ? '账号书库同步书籍、进度、笔记和书签。本机书籍需单独添加；PDF 原件、译文、AI 历史和阅读设置不跨设备同步。'
+          : 'Account libraries sync books, progress, notes and bookmarks. Add device books separately. Original PDFs, translations, AI history and reading settings stay on this device.'}
       </Text>
       {library.handle.kind === 'account' && (
         <>
@@ -119,11 +119,6 @@ export function AccountLibraryPanel() {
             {zh ? '开启书库同步' : 'Enable library sync'}
           </Button>
         ))}
-      <Text style={{ color: colors.muted, lineHeight: 22 }}>
-        {zh
-          ? '首次开启时确认同步权限。本机书籍需另行选择添加，PDF 原件始终保存在本机。'
-          : 'Confirm sync permissions the first time. Choose local books to add separately; original PDF files stay on this device.'}
-      </Text>
       {!libraryAccountAvailable() && !granted && (
         <Text style={{ color: colors.muted, lineHeight: 22 }}>
           {zh ? '请更新叶子阅读后开启同步。' : 'Update LeafRead to enable library sync.'}

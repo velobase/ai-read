@@ -94,96 +94,93 @@ function PreviewPages({ preview, disabled }: { preview: Preview; disabled: boole
   }
   return (
     <section className="space-y-3 rounded-xl border p-4" aria-label={t('解析预览')}>
-      <div className="flex flex-wrap gap-2" role="group" aria-label={t('解析预览')}>
-        {(['all', 'empty', ...(groups.ocr.length ? ['ocr'] : [])] as Filter[]).map((value) => (
-          <Button
-            key={value}
-            type="button"
-            variant={filter === value ? 'secondary' : 'ghost'}
-            size="sm"
-            aria-pressed={filter === value}
-            disabled={disabled || !groups[value].length}
-            onClick={() => selectFilter(value)}
-          >
-            {t(
-              value === 'all'
-                ? '所有页（{count}）'
-                : value === 'empty'
-                  ? '无文字页（{count}）'
-                  : 'OCR 页（{count}）',
-              { count: groups[value].length },
-            )}
+      {(groups.empty.length > 0 || groups.ocr.length > 0) && (
+        <div className="flex flex-wrap gap-2" role="group" aria-label={t('解析预览')}>
+          {(
+            [
+              'all',
+              ...(groups.empty.length ? ['empty'] : []),
+              ...(groups.ocr.length ? ['ocr'] : []),
+            ] as Filter[]
+          ).map((value) => (
+            <Button
+              key={value}
+              type="button"
+              variant={filter === value ? 'secondary' : 'ghost'}
+              size="sm"
+              aria-pressed={filter === value}
+              disabled={disabled || !groups[value].length}
+              onClick={() => selectFilter(value)}
+            >
+              {t(
+                value === 'all'
+                  ? '所有页（{count}）'
+                  : value === 'empty'
+                    ? '无文字页（{count}）'
+                    : 'OCR 页（{count}）',
+                { count: groups[value].length },
+              )}
+            </Button>
+          ))}
+        </div>
+      )}
+      {pages.length > 1 ? (
+        <form
+          className="flex flex-wrap items-center gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            jump();
+          }}
+        >
+          <label className="flex items-center gap-2 text-xs">
+            {t('原 PDF 页码')}
+            <Input
+              className="h-9 w-20 text-center"
+              inputMode="numeric"
+              maxLength={12}
+              value={input}
+              disabled={disabled}
+              aria-invalid={invalid}
+              onChange={(event) => {
+                if (!busy.current) {
+                  setInput(event.target.value);
+                  setInvalid(false);
+                }
+              }}
+            />
+          </label>
+          <Button type="submit" variant="secondary" size="sm" disabled={disabled}>
+            {t('跳转')}
           </Button>
-        ))}
-      </div>
-      <form
-        className="flex flex-wrap items-center gap-2"
-        onSubmit={(event) => {
-          event.preventDefault();
-          jump();
-        }}
-      >
-        <label className="flex items-center gap-2 text-xs">
-          {t('原 PDF 页码')}
-          <Input
-            className="h-9 w-20 text-center"
-            inputMode="numeric"
-            maxLength={12}
-            value={input}
-            disabled={disabled}
-            aria-invalid={invalid}
-            onChange={(event) => {
-              if (!busy.current) {
-                setInput(event.target.value);
-                setInvalid(false);
-              }
-            }}
-          />
-        </label>
-        <Button type="submit" variant="secondary" size="sm" disabled={disabled}>
-          {t('跳转')}
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          disabled={disabled || index <= 0}
-          onClick={() => selectPage(pages[index - 1]?.sourcePage)}
-        >
-          {t('上一页')}
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          disabled={disabled || index < 0 || index >= pages.length - 1}
-          onClick={() => selectPage(pages[index + 1]?.sourcePage)}
-        >
-          {t('下一页')}
-        </Button>
-      </form>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={disabled || index <= 0}
+            onClick={() => selectPage(pages[index - 1]?.sourcePage)}
+          >
+            {t('上一页')}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={disabled || index < 0 || index >= pages.length - 1}
+            onClick={() => selectPage(pages[index + 1]?.sourcePage)}
+          >
+            {t('下一页')}
+          </Button>
+        </form>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          {t('PDF 第 {n} 页', { n: current.sourcePage })}
+        </p>
+      )}
       {invalid && (
         <p role="alert" className="text-xs text-destructive">
           {t('请输入本次解析范围内的整数页码。')}
         </p>
       )}
-      <div aria-live="polite" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-        <span className="font-medium text-primary">
-          {t('PDF 第 {n} 页', { n: current.sourcePage })}
-        </span>
-        <span>
-          {t(
-            current.method === 'empty'
-              ? '未提取文字'
-              : current.method === 'ocr'
-                ? 'OCR 识别文字'
-                : '已提取文字',
-          )}
-        </span>
-        <span className="text-muted-foreground">
-          {t('共 {count} 段', { count: current.paragraphs.length })}
-        </span>
-      </div>
       {current.method === 'empty' ? (
         <p className="rounded-lg bg-muted p-4 text-sm leading-7 text-muted-foreground">
           {t('此页未提取到文字，不会导入正文。')}
@@ -205,33 +202,37 @@ function PreviewPages({ preview, disabled }: { preview: Preview; disabled: boole
               </p>
             ))}
           </div>
-          <p className="text-xs text-muted-foreground">
-            {t('第 {from}–{to} 段，共 {count} 段', {
-              from: start + 1,
-              to: start + paragraphs.length,
-              count: current.paragraphs.length,
-            })}
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={disabled || batch === 0}
-              onClick={() => moveBatch(batch - 1)}
-            >
-              {t('上一批段落')}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={disabled || start + paragraphs.length >= current.paragraphs.length}
-              onClick={() => moveBatch(batch + 1)}
-            >
-              {t('下一批段落')}
-            </Button>
-          </div>
+          {current.paragraphs.length > PDF_PREVIEW_PARAGRAPHS_PER_BATCH && (
+            <>
+              <p className="text-xs text-muted-foreground">
+                {t('第 {from}–{to} 段，共 {count} 段', {
+                  from: start + 1,
+                  to: start + paragraphs.length,
+                  count: current.paragraphs.length,
+                })}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={disabled || batch === 0}
+                  onClick={() => moveBatch(batch - 1)}
+                >
+                  {t('上一批段落')}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={disabled || start + paragraphs.length >= current.paragraphs.length}
+                  onClick={() => moveBatch(batch + 1)}
+                >
+                  {t('下一批段落')}
+                </Button>
+              </div>
+            </>
+          )}
         </>
       )}
     </section>

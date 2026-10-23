@@ -3,8 +3,8 @@
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
-import { BookOpen, ChevronRight, FileText, LoaderCircle, Search, ShieldCheck } from 'lucide-react';
-import { catalog, categories, bookDescription } from '@/lib/catalog';
+import { ChevronRight, LoaderCircle, Search } from 'lucide-react';
+import { catalog } from '@/lib/catalog';
 import type { Book } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import {
@@ -49,9 +49,6 @@ export function SearchPage() {
     saved: zh ? '已保存译文' : 'Saved translations',
     allLanguages: zh ? '所有译文语言' : 'All saved languages',
     language: zh ? '译文语言' : 'Translation language',
-    local: zh
-      ? '仅搜索本机已保存的译文，不下载或生成新译文。'
-      : 'Searches translations saved on this device. Nothing is downloaded or generated.',
     searching: zh ? '正在本机检索已保存译文…' : 'Searching saved translations on this device…',
     empty: zh
       ? '换一个语言或关键词。这里仅搜索本机已经保存的译文。'
@@ -327,27 +324,7 @@ export function SearchPage() {
             </label>
           )}
         </div>
-        {source === 'translation' && <p className="search-local-status">{copy.local}</p>}
-        {!query ? (
-          <>
-            <div className="search-local-intro">
-              <Search size={23} />
-              <h2>{text('在书页间找到答案')}</h2>
-              <p>{text('搜索书名、作者、正文或笔记。正文检索在当前设备完成，无需 AI。')}</p>
-            </div>
-            <div className="flex flex-wrap justify-center gap-3">
-              {categories.slice(1).map((category) => (
-                <Link
-                  href={`/categories?category=${encodeURIComponent(category)}`}
-                  key={category}
-                  className="rounded-full bg-white px-5 py-3 text-sm"
-                >
-                  {text(category)}
-                </Link>
-              ))}
-            </div>
-          </>
-        ) : (
+        {query && (
           <>
             <div className="search-tools">
               <div className="search-tabs" role="group" aria-label={text('搜索范围')}>
@@ -373,7 +350,6 @@ export function SearchPage() {
                 ))}
               </div>
               <label className="search-book-filter">
-                <BookOpen size={15} />
                 <select
                   value={bookFilter}
                   aria-label={text('限定书籍')}
@@ -389,23 +365,14 @@ export function SearchPage() {
                 </select>
               </label>
             </div>
-            <p className="search-local-status" role="status" aria-live="polite">
-              {pending ? (
-                <>
-                  <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" />
-                  {source === 'translation'
-                    ? `${copy.searching} ${scannedBooks}`
-                    : text('正在本机检索正文…已查看 {count} 本书', { count: scannedBooks })}
-                </>
-              ) : (
-                <>
-                  <ShieldCheck size={14} />
-                  {source === 'translation'
-                    ? copy.local
-                    : text('正文仅在本机搜索，搜索词不会用于统计。')}
-                </>
-              )}
-            </p>
+            {pending && (
+              <p className="search-local-status" role="status" aria-live="polite">
+                <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" />
+                {source === 'translation'
+                  ? `${copy.searching} ${scannedBooks}`
+                  : text('正在本机检索正文…已查看 {count} 本书', { count: scannedBooks })}
+              </p>
+            )}
             {showBooks && visibleBooks.length > 0 && (
               <section className="search-result-group">
                 <h2>{t('书籍')}</h2>
@@ -415,9 +382,6 @@ export function SearchPage() {
                     <div className="min-w-0 flex-1">
                       <h3>{book.title}</h3>
                       <p className="mt-2 text-xs text-muted-foreground">{book.author}</p>
-                      <p className="mt-3 line-clamp-2 text-xs leading-6 text-muted-foreground">
-                        {bookDescription(book)}
-                      </p>
                     </div>
                     <ChevronRight size={18} className="hidden text-muted-foreground sm:block" />
                   </Link>
@@ -435,19 +399,8 @@ export function SearchPage() {
             {showPassages && (passages.matches.length > 0 || failed || page > 1 || pending) && (
               <section className="search-result-group search-passages">
                 <h2 ref={passageHeading} tabIndex={-1} className="scroll-mt-6 focus:outline-none">
-                  <FileText size={17} />
                   {source === 'translation' ? copy.saved : text('正文')}
                 </h2>
-                <PassagePagination
-                  page={page}
-                  count={passages.matches.length}
-                  hasNext={passages.limited}
-                  pending={pending}
-                  disabled={opening || routing}
-                  failed={failed}
-                  locale={locale}
-                  change={changePage}
-                />
                 {failed && (
                   <div role="alert" className="py-5 text-sm">
                     <p>{text('正文搜索未能完成，请重试。')}</p>
@@ -509,13 +462,9 @@ export function SearchPage() {
                       <mark>{match.excerpt.slice(match.matchStart, match.matchEnd)}</mark>
                       {match.excerpt.slice(match.matchEnd)}
                     </p>
-                    <span className="search-passage-jump">
-                      {text('阅读这一段')}
-                      <ChevronRight size={13} />
-                    </span>
                   </button>
                 ))}
-                {passages.matches.length > 0 && (
+                {(page > 1 || passages.limited) && (
                   <PassagePagination
                     page={page}
                     count={passages.matches.length}
@@ -543,9 +492,7 @@ export function SearchPage() {
                   >
                     <p className="line-clamp-3 text-sm leading-7">{note.text || note.quote}</p>
                     <p className="mt-3 text-xs text-muted-foreground">
-                      {t('《{value0}》 · 回到原文', {
-                        value0: booksById.get(note.bookId)?.title || t('书中笔记'),
-                      })}
+                      {booksById.get(note.bookId)?.title || t('书中笔记')}
                     </p>
                   </button>
                 ))}

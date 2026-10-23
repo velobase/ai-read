@@ -42,7 +42,6 @@ type Props = {
   pdfPages: boolean;
   setPdfPages: (value: boolean) => void;
   close: () => void;
-  bookmarks: () => void;
   search: () => void;
   navigate: (chapter: number, paragraph: string) => void;
 };
@@ -81,7 +80,6 @@ function ContentsBody({
   hasPdfContents,
   pdfPages,
   setPdfPages,
-  bookmarks,
   search,
   navigate,
 }: Props) {
@@ -201,30 +199,15 @@ function ContentsBody({
   return (
     <View style={{ flex: 1 }}>
       <View style={{ paddingHorizontal: 22, paddingTop: 12, paddingBottom: 12, gap: 12 }}>
-        <View style={{ flexDirection: 'row', gap: 10 }}>
-          <View style={{ flex: 1 }}>
-            <Button
-              secondary
-              icon="bookmark-outline"
-              onPress={() => {
-                if (isCurrent()) bookmarks();
-              }}
-            >
-              {t('bookmarks')}
-            </Button>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Button
-              secondary
-              icon="search-outline"
-              onPress={() => {
-                if (isCurrent()) search();
-              }}
-            >
-              {t('searchBook')}
-            </Button>
-          </View>
-        </View>
+        <Button
+          secondary
+          icon="search-outline"
+          onPress={() => {
+            if (isCurrent()) search();
+          }}
+        >
+          {t('searchBook')}
+        </Button>
         {hasPdfContents && (
           <View style={{ flexDirection: 'row', gap: 8 }}>
             {[false, true].map((pages) => (
@@ -310,11 +293,11 @@ function ContentsBody({
             <Icon name="locate-outline" color={colors.accent} size={18} />
             <Text style={{ color: colors.accent, fontSize: 14 }}>{t('contentsLocate')}</Text>
           </Pressable>
-          <Text style={{ flex: 1, textAlign: 'right', color: colors.muted, fontSize: 12 }}>
-            {searching
-              ? t('contentsSearchMatches', { n: projection.directMatchCount })
-              : t('contentsVisible', { visible: rows.length, total: entries.length })}
-          </Text>
+          {searching && (
+            <Text style={{ flex: 1, textAlign: 'right', color: colors.muted, fontSize: 12 }}>
+              {t('contentsSearchMatches', { n: projection.directMatchCount })}
+            </Text>
+          )}
         </View>
       </View>
       <FlatList
@@ -417,9 +400,6 @@ function ContentsBody({
                     paddingLeft: hierarchical && !searching ? 0 : 10,
                   }}
                 >
-                  <Text style={{ width: 26, color: colors.muted, fontSize: 12 }}>
-                    {entry.order + 1}
-                  </Text>
                   <View style={{ flex: 1, gap: 3 }}>
                     <Text
                       numberOfLines={2}

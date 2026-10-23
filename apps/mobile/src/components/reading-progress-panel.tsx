@@ -190,7 +190,6 @@ function ProgressPreview({
   return (
     <View style={{ gap: 15 }}>
       <View style={{ gap: 5, alignItems: 'center' }}>
-        <Text style={{ color: colors.muted, fontSize: 12 }}>{t('progressPreview')}</Text>
         <Text style={{ color: colors.ink, fontSize: 26 }}>{percent}%</Text>
         <Text style={{ color: colors.ink, fontSize: 16, textAlign: 'center' }}>{title}</Text>
         {pdf && sourcePage && previewNavigation.current?.kind === 'chapter' ? (
@@ -241,7 +240,7 @@ function ProgressPreview({
           onPress={() => step(1)}
         />
       </View>
-      <View style={{ backgroundColor: colors.soft, padding: 16, borderRadius: 14, gap: 8 }}>
+      <View style={{ paddingVertical: 8, gap: 8 }}>
         <Text style={{ color: colors.accent, fontSize: 11 }}>{t('original')}</Text>
         <Text
           numberOfLines={4}
@@ -255,9 +254,6 @@ function ProgressPreview({
           {safeReadingQuote(entry.paragraph.text, 0, 280)}
         </Text>
       </View>
-      <Text style={{ color: colors.muted, fontSize: 12, lineHeight: 20 }}>
-        {t('progressPreviewHint')}
-      </Text>
       {failed ? (
         <Text accessibilityRole="alert" style={{ color: colors.error }}>
           {t('error')}

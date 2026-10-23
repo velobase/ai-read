@@ -13,16 +13,6 @@ export type ReadingQuestion = {
   sources: ReadingSource[];
   history: { role: 'user' | 'assistant'; content: string }[];
 };
-export type ReadingTranslation = {
-  title: string;
-  bookLanguage: string;
-  language: string;
-  target: string;
-  /** Public translation provider/model/prompt identity captured when a run starts. */
-  translationContextKey?: string;
-  sources: ReadingSource[];
-};
-
 /** Pure SSE parsing shared by hosts; transport and UTF-8 decoding belong to adapters. */
 export class CompletionStream {
   private buffer = '';

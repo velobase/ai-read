@@ -63,11 +63,19 @@ export async function cacheChapterTranslation(chapter: ChapterTranslation, langu
       const book = (await idb(tx.objectStore('books').get(chapter.bookId))) as Book | undefined;
       if (!book) return;
       await assertSavedTranslationChapter(tx, book, { ...chapter, language });
-      await idb(
-        tx
-          .objectStore('chapter-translations')
-          .put(chapter, chapterKey(chapter.editionId, chapter.index)),
-      );
+      const store = tx.objectStore('chapter-translations');
+      const key = chapterKey(chapter.editionId, chapter.index);
+      const existing = (await idb(store.get(key))) as ChapterTranslation | undefined;
+      const previous =
+        existing?.bookId === book.id && existing.sourceHash === chapter.sourceHash
+          ? existing.paragraphs
+          : {};
+      for (const [id, text] of Object.entries(chapter.paragraphs)) {
+        if (previous[id] !== undefined && previous[id] !== text)
+          throw new Error('saved_translation_immutable_conflict');
+      }
+      // Polls can complete out of order across tabs. Keep every completed paragraph.
+      await idb(store.put({ ...chapter, paragraphs: { ...previous, ...chapter.paragraphs } }, key));
     },
     ['books', 'chapter-translations', 'translation-versions'],
   );

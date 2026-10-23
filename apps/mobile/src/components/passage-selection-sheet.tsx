@@ -208,12 +208,10 @@ function SelectionContent({
             </View>
             <IconButton icon="close" label={t('close')} onPress={finish} />
           </View>
-          <Text style={{ color: colors.muted, lineHeight: 22, fontSize: 13, padding: 20 }}>
-            {t('selectionHint')}
-          </Text>
           {supported && NativeSelection ? (
             <NativeSelection
               ref={native}
+              accessibilityHint={t('selectionHint')}
               contentJSON={contentJSON}
               style={{ flex: 1 }}
               onSelectionChange={({ nativeEvent }) => {

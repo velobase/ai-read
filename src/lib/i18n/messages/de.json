@@ -890,5 +890,6 @@
   "继续解析": "Extraktion fortsetzen",
   "重试第 {page} 页": "Seite {page} erneut versuchen",
   "PDF 第 {page} 页解析失败，已完成的页面已保留。": "PDF-Seite {page} konnte nicht extrahiert werden. Abgeschlossene Seiten bleiben erhalten.",
-  "PDF 第 {page} 页超出文字总量限制，请缩小页码范围。": "PDF-Seite {page} überschreitet das Gesamtlimit für Text. Wählen Sie einen kleineren Seitenbereich."
+  "PDF 第 {page} 页超出文字总量限制，请缩小页码范围。": "PDF-Seite {page} überschreitet das Gesamtlimit für Text. Wählen Sie einen kleineren Seitenbereich.",
+  "备份内容": "Inhalt der Sicherung"
 }

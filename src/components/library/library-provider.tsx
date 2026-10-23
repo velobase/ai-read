@@ -33,9 +33,8 @@ import {
   type ReaderProfile,
 } from '@/lib/library-state';
 import type { Book, Bookmark, Note, Position } from '@/lib/types';
-import { Modal } from '@/components/reader/reader-dialogs';
 import { Button } from '@/components/ui/button';
-import { FileUp, LoaderCircle, X } from 'lucide-react';
+import { LoaderCircle, X } from 'lucide-react';
 import { useIdentity } from '@/components/auth/identity-provider';
 import { storageKey } from '@/lib/storage-scope';
 import type { TranslationSearchTarget } from '@/lib/translation-search';
@@ -81,7 +80,6 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [importOpen, setImportOpen] = useState(false);
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
   const input = useRef<HTMLInputElement>(null);
@@ -251,12 +249,12 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const importFile = async (file?: File) => {
     if (!file || importing) return;
     if (/\.pdf$/i.test(file.name)) {
-      setImportOpen(false);
       setPdfFile(file);
       if (input.current) input.current.value = '';
       return;
     }
     setImporting(true);
+    setNotice('');
     const measured = measureClient('book_import', {
       format: file.name.toLowerCase().endsWith('.epub') ? 'epub' : 'txt',
     });
@@ -269,7 +267,6 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       });
       const existing = allBooks.find((b) => b.id === book.id);
       await addBook(book);
-      setImportOpen(false);
       setNotice(existing ? t('这本书已在书架，原有笔记和进度已保留。') : t('已导入书架。'));
       router.push(`/books/${book.id}`);
       measured('ok', { count: book.chapters.length });
@@ -293,7 +290,9 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     error,
     refresh,
     notify: setNotice,
-    openImport: () => setImportOpen(true),
+    openImport: () => {
+      if (!importing && !pdfFile) input.current?.click();
+    },
     addBook,
     readBook,
     updateBooks,
@@ -316,43 +315,6 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         aria-label={t('导入 EPUB、TXT 或 PDF')}
         onChange={(e) => void importFile(e.target.files?.[0])}
       />
-      {importOpen && (
-        <Modal
-          title={t('导入书籍')}
-          close={() => {
-            if (!importing) setImportOpen(false);
-          }}
-        >
-          <p className="mt-3 text-sm leading-7 text-muted-foreground">
-            {t('把喜欢的书，放进自己的书架。')}
-          </p>
-          <button
-            disabled={importing}
-            onClick={() => input.current?.click()}
-            className="mt-6 flex w-full items-center gap-4 rounded-2xl bg-muted p-6 text-start hover:bg-accent disabled:opacity-60"
-          >
-            {importing ? (
-              <LoaderCircle className="animate-spin text-primary" />
-            ) : (
-              <FileUp className="text-primary" />
-            )}
-            <span>
-              <strong className="block font-medium">
-                {importing ? t('正在整理书籍…') : t('从文件导入')}
-              </strong>
-              <span className="mt-1 block text-xs text-muted-foreground">
-                {t('EPUB / UTF-8 TXT / PDF · 最大 30 MB')}
-              </span>
-            </span>
-          </button>
-          <p className="mt-4 text-xs leading-6 text-muted-foreground">
-            {t('阅读包与同步可携带已解析的插图；复杂版面、行内图片和原始文件仍需保留原书。')}
-          </p>
-          <p className="mt-5 text-xs leading-6 text-muted-foreground">
-            {t('本机数据已保存。登录后可跨设备同步。')}
-          </p>
-        </Modal>
-      )}
       {pdfFile && (
         <PdfImportDialog
           file={pdfFile}
@@ -372,20 +334,23 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
           }}
         />
       )}
-      {notice && (
+      {(notice || importing) && (
         <div
           role="status"
           className="fixed bottom-24 left-1/2 z-[100] flex w-max max-w-[90vw] -translate-x-1/2 items-center gap-4 rounded-2xl bg-[#30343a] px-5 py-3 text-sm leading-6 text-white shadow-lg"
         >
-          <span>{localize(notice)}</span>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={t('关闭提示')}
-            onClick={() => setNotice('')}
-          >
-            <X size={16} />
-          </Button>
+          {importing && <LoaderCircle size={16} className="animate-spin" />}
+          <span>{importing ? t('正在整理书籍…') : localize(notice)}</span>
+          {!importing && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t('关闭提示')}
+              onClick={() => setNotice('')}
+            >
+              <X size={16} />
+            </Button>
+          )}
         </div>
       )}
     </LibraryContext.Provider>

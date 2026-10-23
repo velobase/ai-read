@@ -71,11 +71,11 @@ export function BookSourceLanguage({
           setQuery('');
           setVisible(true);
         }}
-        style={{ alignItems: 'center', gap: 9 }}
+        style={[styles.spread, { minHeight: 44 }]}
       >
-        <Text style={{ fontSize: 11, color: colors.muted }}>{t('original')}</Text>
+        <Text style={{ fontSize: 14, color: colors.muted }}>{t('original')}</Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-          <Text style={{ fontSize: 21, color: update ? colors.accent : colors.ink }}>{value}</Text>
+          <Text style={{ fontSize: 15, color: colors.ink }}>{value}</Text>
           {update && <Icon name="chevron-down" size={13} color={colors.accent} />}
         </View>
       </Pressable>
@@ -85,7 +85,6 @@ export function BookSourceLanguage({
           title={t('sourceLanguage')}
           close={() => saving === null && setVisible(false)}
         >
-          <Text style={{ color: colors.muted, lineHeight: 22 }}>{t('sourceLanguageHint')}</Text>
           {choice('auto', t('sourceLanguageDefault'))}
           <TextInput
             accessibilityLabel={t('sourceLanguageSearch')}
@@ -97,7 +96,7 @@ export function BookSourceLanguage({
             onChangeText={setQuery}
             style={[styles.input, { color: colors.ink, borderColor: colors.border }]}
           />
-          <View>{filtered.map(([code, name]) => choice(code, `${name} · ${code}`))}</View>
+          <View>{filtered.map(([code, name]) => choice(code, name))}</View>
           {!filtered.length && <Text style={{ color: colors.muted }}>{t('noResults')}</Text>}
         </Sheet>
       )}

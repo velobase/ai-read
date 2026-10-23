@@ -6,13 +6,11 @@ import { Icon } from './ui';
 
 /** Session-only navigation controls; the caller owns capture, validation and history. */
 export function ReaderReturnActions({
-  label,
   onReturn,
   onStay,
   busy = false,
   compact = false,
 }: {
-  label?: string;
   onReturn: () => void;
   onStay: () => void;
   busy?: boolean;
@@ -23,7 +21,7 @@ export function ReaderReturnActions({
   const disabled = busy || blocked;
   const input = useRef({ disabled, onReturn, onStay });
   input.current = { disabled, onReturn, onStay };
-  const title = label || t('readerReturnPosition');
+  const title = t('readerReturnPosition');
   const height = compact ? 32 : 44;
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 1 }}>

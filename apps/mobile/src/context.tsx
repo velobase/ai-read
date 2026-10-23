@@ -19,7 +19,7 @@ export const defaultPreferences: Preferences = {
   fontSize: 19,
   lineHeight: 1.75,
   serif: true,
-  mode: 'original',
+  mode: 'bilingual',
   language: 'zh-CN',
   speechRate: 0.9,
   turnMode: 'paged',

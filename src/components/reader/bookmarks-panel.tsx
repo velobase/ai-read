@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Bookmark, BookmarkPlus, LoaderCircle, PencilLine, Search, Trash2 } from 'lucide-react';
+import { BookmarkPlus, LoaderCircle, PencilLine, Search, Trash2 } from 'lucide-react';
 import type { Book, Bookmark as ReadingBookmark } from '../../../packages/reading-core/src';
 import { useI18n } from '@/lib/i18n/provider';
 import { Button } from '@/components/ui/button';
@@ -112,9 +112,6 @@ export function BookmarksPanel({
             className="h-10 rounded-full border-0 bg-muted ps-10"
           />
         </div>
-        <p className="text-xs text-muted-foreground">
-          {t('{count} 个书签', { count: filtered.length })}
-        </p>
         {error && (
           <p role="alert" className="text-sm text-destructive">
             {localize(error)}
@@ -124,13 +121,7 @@ export function BookmarksPanel({
       <div className="reading-bookmarks min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-8">
         {!filtered.length && (
           <div className="px-3 py-12 text-center text-muted-foreground">
-            <Bookmark size={28} strokeWidth={1.3} className="mx-auto mb-4" />
             <p className="text-sm">{query.trim() ? t('没有找到匹配的书签。') : t('还没有书签')}</p>
-            {!query.trim() && (
-              <p className="mt-2 text-xs leading-relaxed">
-                {t('保存当前位置，稍后从这里继续阅读。')}
-              </p>
-            )}
           </div>
         )}
         {filtered.slice(0, limit).map((item) => (

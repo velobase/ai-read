@@ -23,7 +23,7 @@ import {
   type ValidatedLibraryRecoveryArchive,
 } from './library-recovery-archive';
 import { prepareRecoveryAttachments } from './recovery-attachments';
-import { translationDraftScopeKey } from './translation-drafts';
+import { translationDraftScopeKey } from './recovery-translation-drafts';
 import {
   ensureTranslationStore,
   ensureBookTranslationMigration,

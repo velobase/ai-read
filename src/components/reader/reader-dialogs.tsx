@@ -74,11 +74,11 @@ export function SettingsModal({
     [error, setError] = useState('');
   return (
     <Modal title={zh ? '翻译与伴读' : 'Translation & companion'} close={close}>
-      <p className="my-5 text-sm leading-7 text-muted-foreground">
-        {zh
-          ? '登录即可使用 LeafRead 翻译服务，无需填写 API Key。'
-          : 'Sign in to use LeafRead translation. No API key required.'}
-      </p>
+      {!accountMode && (
+        <p className="my-4 text-sm text-muted-foreground">
+          {zh ? '登录后修改翻译设置。' : 'Sign in to change translation settings.'}
+        </p>
+      )}
       {!hasServerKey && (
         <p className="mb-4 text-sm">
           {zh

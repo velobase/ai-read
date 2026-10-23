@@ -59,7 +59,6 @@ import {
   forgetReadingAnchor,
   hasReadableTranslation,
   pageCount,
-  readingTop,
   setPage,
   type PendingContentAnchor,
 } from './reading-layout';
@@ -118,7 +117,6 @@ import {
   ArrowUpRight,
   BookOpen,
   Bookmark,
-  BookmarkPlus,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -126,19 +124,16 @@ import {
   Highlighter,
   List,
   Languages,
-  History,
   LoaderCircle,
   LocateFixed,
   Maximize2,
   Minimize2,
-  Moon,
   MoreHorizontal,
   PencilLine,
   Search,
   Settings2,
   Sparkles,
   Square,
-  Sun,
   Trash2,
   X,
 } from 'lucide-react';
@@ -166,7 +161,7 @@ function withBookLanguage(bookId: string, settings: Settings): Settings {
     const saved = JSON.parse(localStorage.getItem(storageKey('ai-read-book-language')) || '{}')[
       bookId
     ];
-    if (!saved) return settings;
+    if (!saved) return { ...settings, readingMode: 'bilingual' };
     return {
       ...settings,
       readingMode: ['original', 'bilingual', 'translation'].includes(saved.readingMode)
@@ -591,30 +586,10 @@ export default function Reader({
     () => (book.id === sampleBook.id ? { ...sampleTranslations, ...translations } : translations),
     [book.id, translations],
   );
-  const [translationTarget, setTranslationTarget] = useState({
-    scope: '',
-    paragraph: '',
-    missing: '',
-  });
   const contentScope = JSON.stringify([book.id, settings.language, view]);
-  const translationScope = JSON.stringify([
-    book.id,
-    settings.language,
-    view,
-    position.chapter,
-    position.paragraph,
-  ]);
   const bookTranslation = useBookTranslation(book, settings, {
     chapter: position.chapter,
     enabled: ready && !missing && !switching,
-    paragraph:
-      pendingContentAnchor.current?.scope === contentScope
-        ? pendingContentAnchor.current.anchor.paragraph
-        : translationTarget.scope === translationScope
-          ? translationTarget.paragraph
-          : position.paragraph,
-    auto: view !== 'original' && !revealedTranslation && !referenceSession,
-    connectionReady: aiReady,
     legacy: legacyTranslations,
   });
   const paragraphChapters = useMemo(
@@ -886,67 +861,6 @@ export default function Reader({
     window.addEventListener('keydown', key, true);
     return () => window.removeEventListener('keydown', key, true);
   });
-  useEffect(() => {
-    const root = readerRef.current;
-    if (!surfaceReady || !root) return;
-    let frameId = 0;
-    const update = () => {
-      if (root.dataset.turning === 'true') return;
-      const frame = settings.navigationMode === 'paged' ? activeFrame(root) : root;
-      const area =
-        settings.navigationMode === 'paged'
-          ? frame?.querySelector<HTMLElement>('.page-viewport')
-          : root;
-      if (!frame || !area) return;
-      const bounds = area.getBoundingClientRect();
-      const top = bounds.top + (settings.navigationMode === 'paged' ? 0 : readingTop(root));
-      const visible = Array.from(frame.querySelectorAll<HTMLElement>('[data-paragraph]'))
-        .filter((passage) =>
-          Array.from(passage.getClientRects()).some(
-            (rect) =>
-              rect.bottom > top + 1 &&
-              rect.top < bounds.bottom &&
-              rect.right > bounds.left + 1 &&
-              rect.left < bounds.right - 1,
-          ),
-        )
-        .map((passage) => passage.dataset.paragraph!)
-        .filter((id) => paragraphsById.get(id)?.text.trim());
-      const missing =
-        visible.find((id) => !bookTranslation.text(paragraphChapters.get(id) ?? 0, id)) || '';
-      const paragraph = missing || visible.at(-1) || position.paragraph;
-      setTranslationTarget((old) =>
-        old.scope === translationScope && old.paragraph === paragraph && old.missing === missing
-          ? old
-          : { scope: translationScope, paragraph, missing },
-      );
-    };
-    const schedule = () => {
-      cancelAnimationFrame(frameId);
-      frameId = requestAnimationFrame(update);
-    };
-    root.addEventListener('reader-location', schedule);
-    root.addEventListener('scroll', schedule, { passive: true });
-    window.addEventListener('resize', schedule);
-    schedule();
-    return () => {
-      cancelAnimationFrame(frameId);
-      root.removeEventListener('reader-location', schedule);
-      root.removeEventListener('scroll', schedule);
-      window.removeEventListener('resize', schedule);
-    };
-  }, [
-    surfaceReady,
-    translationScope,
-    bookTranslation.revision,
-    translations,
-    stableTranslations.revision,
-    settings.navigationMode,
-    view,
-    jump,
-    paragraphsById,
-    paragraphChapters,
-  ]);
   const progress =
     position.chapter === book.chapters.length - 1 && navigation.atEnd
       ? 100
@@ -2675,7 +2589,29 @@ export default function Reader({
           <ArrowLeft size={18} />
           <span className="hidden sm:inline">{returnLabel}</span>
         </Button>
-        <span className="min-w-0 truncate text-sm text-muted-foreground">{book.title}</span>
+        <div className="min-w-0 text-sm text-muted-foreground">
+          <div className="truncate">{book.title}</div>
+          {!bookTranslation.sameLanguage && (needsLogin || bookTranslation.pending || bookTranslation.error) && (
+            <div className="flex items-center gap-2 text-xs" role="status" aria-live="polite">
+              {needsLogin ? (
+                <button type="button" onClick={openLogin}>
+                  {locale.startsWith('zh') ? '登录后自动翻译' : 'Sign in to translate'}
+                </button>
+              ) : !bookTranslation.online ? (
+                <span>{locale.startsWith('zh') ? '离线 · 已保存译文可阅读' : 'Offline · saved translations available'}</span>
+              ) : bookTranslation.error ? (
+                <>
+                  <span>{localize(bookTranslation.error)}</span>
+                  <button type="button" onClick={bookTranslation.retry}>
+                    {locale.startsWith('zh') ? '重试' : 'Retry'}
+                  </button>
+                </>
+              ) : (
+                <span>{locale.startsWith('zh') ? '翻译中' : 'Translating'} · {bookTranslation.progress}%</span>
+              )}
+            </div>
+          )}
+        </div>
         <Button
           variant="ghost"
           size="icon"
@@ -2821,10 +2757,6 @@ export default function Reader({
               normalizeHeading(visibleChapter.paragraphs[0]?.text ?? '') ===
               normalizeHeading(visibleChapter.title);
             const hidden = settings.navigationMode === 'paged' && chapterIndex !== position.chapter;
-            const statusParagraph =
-              translationTarget.scope === translationScope
-                ? translationTarget.missing
-                : position.paragraph;
             return (
               <section
                 key={visibleChapter.id}
@@ -2941,57 +2873,13 @@ export default function Reader({
                                 />
                               </div>
                             )}
-                            {view === 'translation' && !translated && (
+                            {view === 'translation' && !translated && !!paragraph.text.trim() && (
                               <div className="translation-placeholder" aria-hidden="true">
                                 <span />
                                 <span />
                                 <span />
                               </div>
                             )}
-                            {view !== 'original' &&
-                              !translated &&
-                              paragraph.id === statusParagraph && (
-                                <div className="inline-translation-status" role="status">
-                                  {!bookTranslation.online ? (
-                                    <span>
-                                      {locale.startsWith('zh')
-                                        ? '当前离线，联网后继续翻译。已保存的译文仍可阅读。'
-                                        : 'Offline. Translation resumes when connected. Saved translations remain available.'}
-                                    </span>
-                                  ) : needsLogin ? (
-                                    <>
-                                      <span>
-                                        {locale.startsWith('zh')
-                                          ? '登录后继续翻译。'
-                                          : 'Sign in to continue translating.'}
-                                      </span>
-                                      <button type="button" onClick={openLogin}>
-                                        {t('登录')}
-                                      </button>
-                                    </>
-                                  ) : bookTranslation.error ? (
-                                    <>
-                                      <span>{localize(bookTranslation.error)}</span>
-                                      <button
-                                        type="button"
-                                        onClick={() => void bookTranslation.retry()}
-                                      >
-                                        {locale.startsWith('zh') ? '重试' : 'Retry'}
-                                      </button>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <LoaderCircle
-                                        size={14}
-                                        className="animate-spin motion-reduce:animate-none"
-                                      />
-                                      <span>
-                                        {locale.startsWith('zh') ? '正在翻译…' : 'Translating…'}
-                                      </span>
-                                    </>
-                                  )}
-                                </div>
-                              )}
                             {view === 'translation' &&
                               !!translated &&
                               paragraphReferences.length > 0 && (
@@ -3074,11 +2962,9 @@ export default function Reader({
                     chapter={visibleChapter}
                     pdf={pdf}
                     next={book.chapters[chapterIndex + 1]}
-                    previous={book.chapters[chapterIndex - 1]}
                     index={chapterIndex}
                     turning={navigation.turning}
                     onChapter={navigation.changeChapter}
-                    onContents={() => setSidebarOpen(true)}
                     onFinish={() => router.push('/library')}
                   />
                 )}
@@ -3126,17 +3012,6 @@ export default function Reader({
           variant="plain"
           size="plain"
           className="reader-tool"
-          aria-label={t('书签')}
-          title={t('书签')}
-          onClick={() => openTool('bookmarks')}
-        >
-          <Bookmark size={20} strokeWidth={1.6} />
-        </Button>
-        <span className="mx-auto my-1 h-px w-5 bg-border" />
-        <Button
-          variant="plain"
-          size="plain"
-          className="reader-tool"
           aria-label={t('阅读语言')}
           title={t('阅读语言')}
           onClick={() => openTool('language')}
@@ -3154,22 +3029,6 @@ export default function Reader({
           <span className="text-xl font-normal">
             A<span className="text-sm">a</span>
           </span>
-        </Button>
-        <Button
-          variant="plain"
-          size="plain"
-          className="reader-tool"
-          aria-label={settings.theme === 'paper' ? t('切换夜间模式') : t('切换日间模式')}
-          title={t('日间 / 夜间')}
-          onClick={() =>
-            updateAppearance({ theme: settings.theme === 'paper' ? 'night' : 'paper' })
-          }
-        >
-          {settings.theme === 'paper' ? (
-            <Moon size={20} strokeWidth={1.6} />
-          ) : (
-            <Sun size={20} strokeWidth={1.6} />
-          )}
         </Button>
         <Button
           variant="plain"
@@ -3215,7 +3074,6 @@ export default function Reader({
           void turnReadingPage(direction);
         }}
         onContents={() => setSidebarOpen(true)}
-        onMode={() => setAppearanceOpen(true)}
       />
       {settings.navigationMode === 'scroll' && !chromeVisible && (
         <div className="pointer-events-none fixed bottom-4 left-1/2 z-10 -translate-x-1/2 text-[11px] tabular-nums text-muted-foreground">
@@ -3289,7 +3147,7 @@ export default function Reader({
             {book.pageDirection === 'rtl' ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}
           </Button>
         </div>
-        <nav className="grid grid-cols-5" aria-label={t('手机阅读工具')}>
+        <nav className="grid grid-cols-4" aria-label={t('手机阅读工具')}>
           <Button
             variant="plain"
             size="plain"
@@ -3301,15 +3159,6 @@ export default function Reader({
           >
             <List size={22} strokeWidth={1.6} />
             <span>{t('目录')}</span>
-          </Button>
-          <Button
-            variant="plain"
-            size="plain"
-            className="mobile-reader-tool"
-            onClick={() => openTool('progress')}
-          >
-            <History size={22} strokeWidth={1.6} />
-            <span>{t('进度')}</span>
           </Button>
           <Button
             variant="plain"
@@ -3488,16 +3337,6 @@ export default function Reader({
             <LocateFixed size={16} />
             {t('定位正在读')}
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="mb-4 w-full justify-start rounded-full"
-            onClick={() => openTool('bookmarks')}
-          >
-            <Bookmark size={16} />
-            {t('书签')}
-            <span className="ms-auto text-muted-foreground">{bookmarks.length}</span>
-          </Button>
           {hasPdfContents && (
             <div className="mb-4 flex gap-2" role="group" aria-label={t('目录')}>
               {[false, true].map((pages) => (
@@ -3633,11 +3472,6 @@ export default function Reader({
                   </option>
                 ))}
               </select>
-              <p className="text-xs leading-5 text-muted-foreground">
-                {locale.startsWith('zh')
-                  ? '仅搜索整本书在本机保存的译本，不会生成译文。'
-                  : 'Searches this book’s locally saved editions. No translation is generated.'}
-              </p>
             </div>
           )}
         </div>
@@ -3749,33 +3583,11 @@ export default function Reader({
             <p className="px-3 py-6 text-sm text-muted-foreground">{t('未找到匹配文字。')}</p>
           )}
         </nav>
-        <div className="flex shrink-0 items-center justify-between border-t px-7 py-4 text-xs text-muted-foreground">
-          <span>
-            {searchTitles && contentsProjection.searching
-              ? t('匹配 {count} 项', { count: contentsProjection.directMatchCount })
-              : (!search.trim() || searchTitles) && hierarchicalContents
-                ? t('显示 {visible}/{total} 项', {
-                    visible: contentsProjection.rows.length,
-                    total: contents.length,
-                  })
-                : isPdfBook(book)
-                  ? hasPdfContents && !pdfPages
-                    ? t('{count} 个章节', { count: contents.length })
-                    : t('{count} 个原页', { count: contents.length })
-                  : t('{count} 个章节', { count: book.chapters.length })}
-          </span>
-          <Button
-            variant="link"
-            size="plain"
-            className="text-xs font-normal"
-            onClick={() => {
-              setSidebarOpen(false);
-              router.push('/library');
-            }}
-          >
-            {t('返回书架')}
-          </Button>
-        </div>
+        {searchTitles && contentsProjection.searching && (
+          <p role="status" className="shrink-0 px-7 py-3 text-xs text-muted-foreground">
+            {t('匹配 {count} 项', { count: contentsProjection.directMatchCount })}
+          </p>
+        )}
       </ReadingPanel>
 
       <ReadingPanel
@@ -3795,10 +3607,7 @@ export default function Reader({
       >
         <ReadingLanguage
           settings={{ ...settings, readingMode: view }}
-          update={(patch) => {
-            updateAppearance(patch);
-            openTool(null);
-          }}
+          update={updateAppearance}
         />
       </ReadingPanel>
 
@@ -3809,13 +3618,6 @@ export default function Reader({
         compact
       >
         <div className="grid gap-1 px-5 pb-6 text-sm">
-          <button
-            className="flex items-center gap-3 rounded-xl px-4 py-4 text-start hover:bg-muted"
-            onClick={() => void addCurrentBookmark().catch(report)}
-          >
-            <BookmarkPlus size={19} />
-            {t('添加当前位置书签')}
-          </button>
           <button
             className="flex items-center gap-3 rounded-xl px-4 py-4 text-start hover:bg-muted"
             onClick={() => openTool('bookmarks')}
@@ -3965,8 +3767,7 @@ export default function Reader({
             className="min-h-32 resize-none rounded-xl border-0 bg-muted p-4 text-base shadow-none"
             disabled={savingNote}
           />
-          <div className="mt-5 flex items-center justify-between gap-4">
-            <span className="text-xs text-muted-foreground">{t('收起后可从笔记继续编辑')}</span>
+          <div className="mt-5 flex justify-end">
             <Button
               type="submit"
               className="rounded-full px-6"
@@ -4044,7 +3845,6 @@ export default function Reader({
             className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
           >
             <div className="mx-7 mb-3 mt-2 flex items-center gap-3 text-muted-foreground">
-              <BookOpen size={15} />
               <Select
                 disabled={Boolean(busy)}
                 value={settings.scope}
@@ -4069,14 +3869,6 @@ export default function Reader({
                   ))}
                 </SelectContent>
               </Select>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => setSettingsOpen(true)}
-                aria-label={t('AI 连接设置')}
-              >
-                <Settings2 size={16} />
-              </Button>
             </div>
             <div
               ref={restoreChatScroll}
@@ -4085,42 +3877,10 @@ export default function Reader({
               }}
               className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-7 pb-5"
             >
-              {!messages.length && (
-                <div className="pt-8 text-sm leading-7">
-                  <p className="text-foreground">
-                    {selected ? t('围绕这段文字，一起读深一点。') : t('从正在读的这一页开始。')}
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {t('解释会附上原文引用，点击即可回看。')}
-                  </p>
-                  <div className="mt-7 flex flex-col items-start gap-3">
-                    {[t('请梳理本章的核心观点，引用原文。'), t('请结合上下文解释这段文字。')].map(
-                      (prompt, index) => (
-                        <Button
-                          key={prompt}
-                          variant="outline"
-                          className="h-auto rounded-full px-4 py-2.5 text-xs font-normal shadow-none"
-                          onClick={() => void ask(prompt)}
-                        >
-                          {index === 0 ? t('这一章在讲什么？') : t('这里是什么意思？')}
-                          <ArrowUpRight size={13} />
-                        </Button>
-                      ),
-                    )}
-                  </div>
-                </div>
-              )}
               {messages.map((message, index) => (
                 <div key={index} data-role={message.role} className="group/message pt-6">
                   <div className="mb-2 flex items-center gap-2 text-[11px] text-muted-foreground">
-                    {message.role === 'assistant' ? (
-                      <>
-                        <Sparkles size={13} />
-                        {t('AI 伴读')}
-                      </>
-                    ) : (
-                      t('你')
-                    )}
+                    {message.role === 'assistant' ? t('AI 伴读') : t('你')}
                     {message.partial && <span className="ms-auto">{t('未完成')}</span>}
                   </div>
                   {message.content ? (
@@ -4282,24 +4042,22 @@ export default function Reader({
                 {t('为选中的文字写想法')}
               </Button>
             )}
-            <div className="flex items-center justify-between py-4 text-xs text-muted-foreground">
-              <span>{t('{count} 条笔记与划线', { count: notes.length })}</span>
+            {notes.length > 0 && (
+            <div className="flex justify-end py-4">
               <Button
                 variant="ghost"
                 size="sm"
                 className="text-xs font-normal"
-                disabled={!notes.length}
                 onClick={exportNotes}
               >
                 <ArrowDownToLine size={14} />
                 {t('导出')}
               </Button>
             </div>
+            )}
             {!notes.length && !selected && (
               <div className="py-16 text-center text-muted-foreground">
-                <PencilLine size={28} strokeWidth={1.3} className="mx-auto mb-4" />
                 <p className="text-sm">{t('选中文字，留下一个想法。')}</p>
-                <p className="mt-2 text-xs">{t('笔记和划线保存在本地')}</p>
               </div>
             )}
             {notes.map((note) => (
@@ -4367,7 +4125,7 @@ export default function Reader({
         />
       )}
       {helpOpen && (
-        <Modal title={t('跨越语言，读懂每一页。')} close={() => setHelpOpen(false)}>
+        <Modal title={t('阅读帮助')} close={() => setHelpOpen(false)}>
           <div className="mt-5 text-[13px] leading-[1.9] text-muted-foreground [&_p]:my-[1em]">
             <p>
               {t(
@@ -4376,8 +4134,8 @@ export default function Reader({
             </p>
             <p>
               {locale.startsWith('zh')
-                ? '在“阅读语言”中选择原文、双语或仅译文。译文会随阅读自动补齐；切回原文会停止后续翻译。AI 跟随阅读位置，选中文字可指定提问范围。'
-                : 'Choose Original, Bilingual or Translation only in Reading language. Missing translations fill in as you read; switching to Original stops further translation. AI follows your reading position, or the text you select.'}
+                ? '打开书后自动在后台翻译，离开后也会继续；回来即可看到最新进度和译文。在“阅读语言”中选择原文、双语或仅译文。AI 跟随阅读位置，选中文字可指定提问范围。'
+                : 'Opening a book starts background translation, which continues after you leave. Return to see the latest progress and translations. Choose Original, Bilingual or Translation only in Reading language. AI follows your reading position, or the text you select.'}
             </p>
             <p>
               {t(
@@ -4386,14 +4144,6 @@ export default function Reader({
             </p>
             <p>{t('保留文字与页码出处。复杂表格、公式和图片不会还原为原版版式。')}</p>
             <div className="mt-3 flex flex-wrap items-center gap-4 text-xs">
-              <a
-                className="inline-flex items-center gap-[5px] text-primary no-underline [&_svg]:rotate-45"
-                href="https://leafread.ai"
-                target="_blank"
-                rel="noreferrer"
-              >
-                leafread.ai <ArrowUp size={14} />
-              </a>
               <a className="text-primary no-underline" href={SUPPORT_MAILTO}>
                 {SUPPORT_EMAIL}
               </a>

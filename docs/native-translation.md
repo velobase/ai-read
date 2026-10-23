@@ -1,33 +1,11 @@
-# Native translation while reading
+# Native background book translation
 
-Native and Web share one reading flow: choose Original, Bilingual or Translation only and a target language in **Reading language**. The choice takes effect immediately and is remembered for the book. Original text, paragraph IDs, saved translation keys, notes and portable reading data remain intact.
+The native reader uses the same persistent server task as the web reader. Opening a book ensures a task for its target language, shows the latest saved paragraphs and overall progress, and polls while the reader is active. Closing the reader or backgrounding the app stops observation only; the server worker continues translating and saving the whole book.
 
-## Reading demand
+Returning restores the reading position and refreshes the task. Changing Original/Bilingual/Translation-only affects display only. Changing the target language selects that language’s task. Turning pages may prioritize pending chapters; it never aborts an in-flight model request. No pause or translation-scope controls are required.
 
-Bilingual and translation-only modes reuse saved text first. The foreground reader requests missing passages on the visible page and preloads two following paragraphs. It advances to the next visible missing paragraph as completed text arrives, so a page with many short paragraphs does not stall after the first three. Advancing through the book updates that demand; it does not start an entire logical chapter, PDF page range or whole-book job. Book details have no translation preparation card, and there is no app-wide preparation banner, explicit batch continuation or manual pause workflow.
+Authenticated requests use the existing account session and origin checks. Results are validated against the canonical book/chapter identity before entering the account-scoped SQLite library. Only complete paragraphs are shown. Existing exact saved versions and selections are retained for notes, bookmarks, search and recovery. Offline reading continues from local results.
 
-Switching to original text, leaving the reader, backgrounding, changing account/library, target language, server or source-language override interrupts active work. Returning to the foreground can resume missing text for the still-active reading context. The queue serializes requests and guards writes with the current library lease; stale requests cannot publish into a different library.
+The foreground paragraph generation queue, model streaming adapter and client draft runner have been removed. Historical draft data remains readable by recovery export/import; it is not resumed by a second execution path. Task creation, retries, leases, checkpoints and full-book continuation belong to the server worker. See [persistent book translation](chapter-translations.md).
 
-Original mode and equivalent source/target languages make no new translation request. Saved-note, bookmark and search navigation can display exact saved text without replacing it or changing the book's normal language preference.
-
-## Status and layout
-
-Bilingual mode leaves the original readable while missing translations arrive. Translation-only mode uses placeholders, without inserting original-language fallback text. Loading, offline and failure are shown near the missing content; a persistent failure exposes Retry. Ordinary translation errors do not turn into an API-key configuration wizard.
-
-Layout updates wait for reading interaction to settle and preserve the reading anchor. Status text is not saved as book content and is not part of translation selection offsets. Existing completed text remains available offline.
-
-## Durable paragraph drafts
-
-Long paragraphs are divided into chunks of at most 6,000 UTF-16 code units, preferring word boundaries and preserving surrogate pairs. Only a successfully completed stream enters `translation_drafts`; an interrupted response never counts as completed text. Draft ranges are contiguous and begin at zero.
-
-Draft identity includes the book, paragraph, source hash and length, service origin, account identity, source and target languages, and translation configuration fingerprint. The public `translationContextKey` identifies the normalized provider URL, model and effective prompt without a key or session token. Incompatible configurations cannot be combined into a resumed paragraph.
-
-Checkpoints append to an identical saved prefix. A delayed shorter prefix cannot erase durable work. Only a fully completed paragraph is atomically committed to the existing translation stores and selected for reading; its completed draft is then removed. Existing saved/imported translations win conflicts. Drafts stay out of reading text and portable exports. Deleting a book retains the existing cascade behavior for its draft records.
-
-Output is bounded to 100,000 characters per paragraph. Transient request failures receive at most two automatic retries; persistent failures wait for Retry. Offline state is checked again before continuing. Storage failures stop further generation rather than losing completed chunks while continuing to incur provider charges.
-
-The current flow does not create a separate background execution service or delete prior translations. Saved versions, notes and reading selections remain in SQLite and continue to use the existing export and recovery contracts.
-
-## Validation boundary
-
-The authorized lightweight offline checks in `scripts/check-mobile-reading-translation.mjs` exercise the real scheduler with simulated lifecycle, API responses, storage and timers. They cover saved text reuse, complete long paragraphs, interruption/checkpoint recovery, navigation priority, bounded retries and offline recovery. Mobile TypeScript checks and an iOS Simulator build pass; no real account actions or paid model requests are used. Previous simulator evidence remains in [verification notes](mobile-verification.md); it describes the implementation at the time recorded and does not validate the new interaction. Real-device gestures, translation quality, offline recovery and account changes remain for user validation.
+Type checking and builds do not replace real-device validation of foreground/background transitions, account changes or translation quality. No paid model request is needed for static verification.

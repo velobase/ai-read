@@ -1,6 +1,6 @@
 import { View } from 'react-native';
 import { useApp, type Preferences } from '../context';
-import { Chip, SectionLabel } from './ui';
+import { Chip } from './ui';
 
 export function ReadingNavigation({
   onChange,
@@ -11,8 +11,7 @@ export function ReadingNavigation({
   const change = onChange || patch;
   return (
     <>
-      <SectionLabel>{t('navigation')}</SectionLabel>
-      <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+      <View accessibilityLabel={t('navigation')} style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
         <Chip active={prefs.turnMode === 'paged'} onPress={() => change({ turnMode: 'paged' })}>
           {t('pageMode')}
         </Chip>

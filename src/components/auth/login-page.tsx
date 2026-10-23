@@ -1,7 +1,5 @@
 'use client';
 
-import { SUPPORT_EMAIL, SUPPORT_MAILTO } from '@/lib/contact';
-
 import { useI18n } from '@/lib/i18n/provider';
 
 import Link from 'next/link';
@@ -9,7 +7,7 @@ import { LanguageMenu } from '@/components/library/language-menu';
 import { useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { signIn } from 'next-auth/react';
-import { BookOpen, ChevronLeft, LoaderCircle, ShieldCheck, ArrowRight } from 'lucide-react';
+import { ChevronLeft, LoaderCircle, ArrowRight } from 'lucide-react';
 import { useIdentity } from './identity-provider';
 import { safeReturnPath } from '@/lib/identity';
 import { Button } from '@/components/ui/button';
@@ -49,17 +47,7 @@ export function LoginPage() {
         <LanguageMenu />
       </div>
       <div className="login-card">
-        <span className="brand-mark">
-          <BookOpen size={30} strokeWidth={1.5} />
-        </span>
-        <p className="mt-7 text-xs tracking-[0.2em] text-muted-foreground">
-          {locale.startsWith('zh') ? '叶子阅读' : 'LeafRead'}
-        </p>
-        <h1 className="mt-3 text-[30px] font-semibold tracking-tight">{t('阅读，从这里继续')}</h1>
-        <p className="mt-4 text-sm leading-7 text-muted-foreground">
-          {t('用一个熟悉的账号，拥有自己的阅读身份。')}
-        </p>
-        <div className="my-9 h-px w-12 bg-border" />
+        <h1 className="mb-8 text-2xl font-semibold tracking-tight">{t('登录 ByPage · 逐页')}</h1>
         {user ? (
           <>
             <p className="mb-5 text-sm text-muted-foreground">
@@ -118,39 +106,20 @@ export function LoginPage() {
             <ArrowRight className="ms-2" size={15} />
           </Link>
         )}
-        <div className="login-privacy">
-          <ShieldCheck size={17} className="shrink-0 text-[#79a795]" />
-          <p>{t('登录仅使用昵称、头像和邮箱。书籍与笔记保存在当前浏览器，游客书库会完整保留。')}</p>
+        <div className="mt-8 flex justify-center gap-5 text-xs text-muted-foreground">
+          <Link href="/privacy" className="py-3 hover:underline">
+            {locale.startsWith('zh') ? '隐私政策' : 'Privacy Policy'}
+          </Link>
+          <Link href="/terms" className="py-3 hover:underline">
+            {locale.startsWith('zh') ? '服务条款' : 'Terms of Service'}
+          </Link>
         </div>
-      </div>
-      <div className="mt-10 flex flex-col items-center gap-2 text-center text-xs text-muted-foreground/70">
-        <p>{t('跨越语言，读懂每一页。')}</p>
-        <p className="flex flex-wrap items-center justify-center gap-3 text-[11px]">
-          <span>© 2026 LeafRead</span>
-          <a
-            href="https://leafread.ai"
-            target="_blank"
-            rel="noreferrer"
-            className="hover:underline"
-          >
-            leafread.ai
-          </a>
-          <Link href="/privacy" className="hover:underline">
-            Privacy
-          </Link>
-          <Link href="/terms" className="hover:underline">
-            Terms
-          </Link>
-          <a href={SUPPORT_MAILTO} className="hover:underline">
-            {SUPPORT_EMAIL}
-          </a>
-        </p>
       </div>
     </main>
   );
 }
 
-export function GoogleMark() {
+function GoogleMark() {
   return (
     <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24">
       <path

@@ -269,8 +269,7 @@ export function BookSearchSheet({
       {source === 'translation' && (
         <Text style={{ color: colors.muted, fontSize: 12, lineHeight: 20 }}>
           {bookSourceLanguages.find(([code]) => code === language)?.[1] || language}
-          {' · '}
-          {noSavedTranslations ? t('searchNoSavedTranslations') : t('searchSavedTranslationsHint')}
+          {noSavedTranslations ? ` · ${t('searchNoSavedTranslations')}` : ''}
         </Text>
       )}
       {searching ? (
@@ -282,15 +281,13 @@ export function BookSearchSheet({
             {t('retry')}
           </Button>
         </View>
-      ) : (
+      ) : query.trim() ? (
         <Text style={{ color: colors.muted, fontSize: 12 }}>
-          {query.trim()
-            ? matches.length
-              ? t('searchResultsPage', { page: page + 1, count: matches.length })
-              : t('noResults')
-            : t('searchPrivacy')}
+          {matches.length
+            ? t('searchResultsPage', { page: page + 1, count: matches.length })
+            : t('noResults')}
         </Text>
-      )}
+      ) : null}
       {matches.map((match) => (
         <Pressable
           accessibilityRole="button"

@@ -79,9 +79,6 @@ function NoteEditor({ note, close, onSaved, bookTitle, onBusyChange }: FormProps
       setBusy(value);
     }
   };
-  const dismiss = () => {
-    if (!saving.current && library.isCurrent()) close();
-  };
   const save = async () => {
     if (saving.current || !mounted.current || !library.isCurrent()) return;
     if (draft.trim().length > 50000) {
@@ -177,9 +174,6 @@ function NoteEditor({ note, close, onSaved, bookTitle, onBusyChange }: FormProps
       )}
       <Button busy={busy} onPress={() => void save()}>
         {t('save')}
-      </Button>
-      <Button secondary disabled={busy} onPress={dismiss}>
-        {t('cancel')}
       </Button>
     </View>
   );

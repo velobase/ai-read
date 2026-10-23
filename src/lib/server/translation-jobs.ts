@@ -3,6 +3,10 @@ import {
   translationChapterFingerprint,
 } from '../../../packages/reading-core/src';
 import 'server-only';
+import { randomUUID } from 'node:crypto';
+import { Prisma } from '@/generated/prisma/client';
+import { translationBookSource } from '../translation-edition';
+import { serverAIConfig } from './ai-config';
 import { database } from './database';
 import type { Book } from '../types';
 import {
@@ -64,7 +68,6 @@ export async function readTranslationChapter(
     where: {
       editionId,
       chapterIndex: index,
-      state: 'ready',
       edition: { userId, bookId, targetLanguage: language },
     },
     include: { edition: { select: { sourceHash: true } } },
@@ -89,7 +92,7 @@ export async function readTranslationChapter(
     sourceHash: chapter.sourceHash,
     sourceScheme: TRANSLATION_SOURCE_SCHEME,
     sourceFingerprint: source.chapterFingerprints[index],
-    paragraphs: chapter.paragraphs as Record<string, string>,
+    paragraphs: (chapter.paragraphs || {}) as Record<string, string>,
   };
 }
 
@@ -146,6 +149,10 @@ export async function translationManifest(
         state: row.state as TranslationEdition['state'],
         error: row.error || undefined,
         createdAt: row.createdAt.getTime(),
+        progress: {
+          completed: row.chapters.reduce((sum, chapter) => sum + chapter.completedChunks, 0),
+          total: row.chapters.reduce((sum, chapter) => sum + chapter.totalChunks, 0),
+        },
         chapters: row.chapters.map((c) => ({
           index: c.chapterIndex,
           sourceHash: c.sourceHash,
@@ -165,4 +172,174 @@ export async function translationManifest(
       };
     }),
   };
+}
+
+/** A client may enqueue or reprioritize work; its connection never owns that work. */
+export async function ensureTranslation(
+  userId: string,
+  input: { book: Book; language: string; chapter: number; action?: 'ensure' | 'retry' },
+): Promise<TranslationManifest> {
+  if (
+    typeof input.language !== 'string' ||
+    !input.language.trim() ||
+    input.language.length > 80 ||
+    !Number.isInteger(input.chapter) ||
+    input.chapter < 0 ||
+    (input.action !== undefined && input.action !== 'ensure' && input.action !== 'retry')
+  )
+    throw new TranslationRequestError('translation_request_invalid', '翻译请求格式不正确。');
+  let source: Book;
+  try {
+    source = translationBookSource(input.book);
+  } catch (cause) {
+    const error = new TranslationRequestError(
+      'translation_book_invalid',
+      cause instanceof Error ? cause.message : '书籍格式不正确。',
+    );
+    error.cause = cause;
+    throw error;
+  }
+  if (input.chapter >= source.chapters.length)
+    throw new TranslationRequestError('translation_request_invalid', '章节不存在。');
+  const language = input.language.trim();
+  const identity = await translationSource(source);
+  const config = await serverAIConfig(userId);
+  const profile = {
+    baseUrl: config.baseUrl,
+    model: config.model,
+    translationPrompt: config.translationPrompt,
+    progressUnit: 'paragraph',
+  };
+  await database.$transaction(
+    async (tx) => {
+      // Serializes creation across replicas without replacing or deleting saved editions.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${JSON.stringify([userId, source.id, language])}))`;
+      const selection = await tx.translationSelection.findUnique({
+        where: {
+          userId_bookId_targetLanguage: { userId, bookId: source.id, targetLanguage: language },
+        },
+      });
+      const candidates = await tx.translationEdition.findMany({
+        where: { userId, bookId: source.id, targetLanguage: language, sourceHash: identity.hash },
+        orderBy: { createdAt: 'desc' },
+        include: { chapters: true },
+      });
+      let edition = candidates.find((item) => item.id === selection?.editionId) || candidates[0];
+      if (!edition) {
+        edition = await tx.translationEdition.create({
+          data: {
+            id: randomUUID(),
+            userId,
+            bookId: source.id,
+            targetLanguage: language,
+            sourceHash: identity.hash,
+            source: source as unknown as Prisma.InputJsonValue,
+            profile,
+            state: 'active',
+            chapters: {
+              create: source.chapters.map((chapter, index) => ({
+                chapterIndex: index,
+                sourceHash: identity.chapters[index],
+                state: 'queued',
+                totalChunks: chapter.paragraphs.length,
+                paragraphs: {},
+                priority: index === input.chapter ? 1 : 0,
+              })),
+            },
+          },
+          include: { chapters: true },
+        });
+      } else {
+        await tx.$queryRaw`SELECT id FROM "TranslationEdition" WHERE id = ${edition.id} FOR UPDATE`;
+        edition = await tx.translationEdition.findUniqueOrThrow({
+          where: { id: edition.id },
+          include: { chapters: true },
+        });
+        if (!edition.leaseUntil || edition.leaseUntil.getTime() <= Date.now()) {
+          await normalizeSavedTranslation(tx, edition);
+          edition = await tx.translationEdition.findUniqueOrThrow({
+            where: { id: edition.id },
+            include: { chapters: true },
+          });
+        }
+      }
+      if (input.action === 'retry') {
+        await tx.translationChapter.updateMany({
+          where: { editionId: edition.id, state: 'error' },
+          data: { state: 'queued', attempts: 0, retryAt: null, error: null },
+        });
+        if (edition.state === 'error')
+          await tx.translationEdition.update({
+            where: { id: edition.id },
+            data: { state: 'active', error: null },
+          });
+      }
+      // Priority affects the next claim only; it never touches a running request/lease.
+      await tx.translationChapter.updateMany({
+        where: { editionId: edition.id, state: { in: ['queued', 'missing'] } },
+        data: { priority: 0 },
+      });
+      await tx.translationChapter.updateMany({
+        where: {
+          editionId: edition.id,
+          chapterIndex: input.chapter,
+          state: { in: ['queued', 'missing'] },
+        },
+        data: { priority: 1 },
+      });
+      await tx.translationSelection.upsert({
+        where: {
+          userId_bookId_targetLanguage: { userId, bookId: source.id, targetLanguage: language },
+        },
+        create: { userId, bookId: source.id, targetLanguage: language, editionId: edition.id },
+        update: { editionId: edition.id },
+      });
+    },
+    { timeout: 30000 },
+  );
+  return translationManifest(userId, source.id, language);
+}
+
+/** Recount saved business data once in paragraph units; never discard existing translations. */
+export async function normalizeSavedTranslation(
+  tx: Prisma.TransactionClient,
+  edition: { id: string; source: unknown; profile: unknown; state: string },
+) {
+  const profile = edition.profile as Record<string, Prisma.InputJsonValue>;
+  if (profile.progressUnit === 'paragraph') return;
+  const source = edition.source as Book;
+  const chapters = await tx.translationChapter.findMany({ where: { editionId: edition.id } });
+  let complete = true;
+  let allFailed = true;
+  for (const chapter of chapters) {
+    const original = source.chapters[chapter.chapterIndex];
+    const saved = (chapter.paragraphs || {}) as Record<string, string>;
+    const completed = original.paragraphs.filter(
+      (paragraph) =>
+        Object.hasOwn(saved, paragraph.id) &&
+        typeof saved[paragraph.id] === 'string' &&
+        (!paragraph.text.trim() || saved[paragraph.id].trim()),
+    ).length;
+    const ready = completed === original.paragraphs.length;
+    complete &&= ready;
+    if (!ready && chapter.state !== 'error') allFailed = false;
+    await tx.translationChapter.update({
+      where: {
+        editionId_chapterIndex: { editionId: edition.id, chapterIndex: chapter.chapterIndex },
+      },
+      data: {
+        totalChunks: original.paragraphs.length,
+        completedChunks: completed,
+        state: ready ? 'ready' : chapter.state === 'error' ? 'error' : 'queued',
+      },
+    });
+  }
+  await tx.translationEdition.update({
+    where: { id: edition.id },
+    data: {
+      profile: { ...profile, progressUnit: 'paragraph' },
+      state: complete ? 'ready' : allFailed ? 'error' : 'active',
+      error: allFailed && !complete ? '部分内容翻译失败，请重试。' : null,
+    },
+  });
 }

@@ -209,7 +209,6 @@ export function ReaderSpeechPanel({
           </Button>
         </>
       )}
-      <Text style={{ color: colors.muted, fontSize: 12, lineHeight: 20 }}>{t('speakHint')}</Text>
     </View>
   );
 }

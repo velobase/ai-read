@@ -5,19 +5,10 @@ import { useI18n } from '@/lib/i18n/provider';
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { signOut } from 'next-auth/react';
-import {
-  CheckCircle2,
-  Copy,
-  Monitor,
-  LogOut,
-  ShieldCheck,
-  HardDrive,
-  LoaderCircle,
-} from 'lucide-react';
+import { LoaderCircle } from 'lucide-react';
 import { useIdentity } from './identity-provider';
-import { GoogleMark } from './login-page';
 import { useLibrary } from '@/components/library/library-provider';
-import { Avatar, LibraryShell, PageHeading, SettingsRow } from '@/components/library/library-ui';
+import { Avatar, LibraryShell, PageHeading } from '@/components/library/library-ui';
 import { Button } from '@/components/ui/button';
 import { Modal } from '@/components/reader/reader-dialogs';
 
@@ -103,7 +94,6 @@ export function AccountPage() {
         <PageHeading title={t('账号与安全')} back="/me" />
         {!user ? (
           <div className="settings-form-card py-10 text-center">
-            <ShieldCheck className="mx-auto mb-5 text-muted-foreground" size={28} />
             <h2 className="text-lg font-medium">{t('你正在以游客身份阅读')}</h2>
             <p className="my-4 text-sm leading-7 text-muted-foreground">
               {t('已有书籍和笔记保存在本机。登录后，会打开这个账号自己的阅读空间。')}
@@ -122,10 +112,6 @@ export function AccountPage() {
                 <Avatar />
                 <div className="min-w-0">
                   <h2 className="truncate text-xl font-semibold">{user.name}</h2>
-                  <p className="mt-2 flex items-center gap-1.5 text-xs text-[#639b83]">
-                    <CheckCircle2 size={14} />
-                    {t('已验证的阅读身份')}
-                  </p>
                 </div>
                 <Link className="ms-auto shrink-0 text-sm text-primary" href="/me/profile">
                   {t('编辑')}
@@ -137,66 +123,28 @@ export function AccountPage() {
                   <dd className="break-all">{user.email}</dd>
                 </div>
                 <div>
-                  <dt>{t('账户编号')}</dt>
-                  <dd className="flex min-w-0 items-center gap-2">
-                    <span className="break-all font-mono text-xs">{user.id}</span>
-                    <button
-                      aria-label={t('复制账户编号')}
-                      className="flex size-9 shrink-0 items-center justify-center rounded-full hover:bg-muted"
-                      onClick={() =>
-                        void navigator.clipboard.writeText(user.id).then(
-                          () => notify(t('账户编号已复制。')),
-                          () => notify(t('复制失败，请手动选择账户编号。')),
-                        )
-                      }
-                    >
-                      <Copy size={14} />
-                    </button>
+                  <dt>{t('登录方式')}</dt>
+                  <dd>
+                    {data?.accounts
+                      .map((account) => (account.provider === 'apple' ? 'Apple' : 'Google'))
+                      .join(', ') || t('正在读取…')}
                   </dd>
-                </div>
-                <div>
-                  <dt>{t('加入时间')}</dt>
-                  <dd>{new Date(user.createdAt).toLocaleDateString(locale)}</dd>
                 </div>
               </dl>
             </div>
             <section className="settings-form-card mt-4">
-              <h2 className="mb-5 font-medium">{t('登录方式')}</h2>
-              <div className="flex items-center gap-3">
-                {data?.accounts.some((a) => a.provider === 'apple') ? (
-                  <span aria-hidden>●</span>
-                ) : (
-                  <GoogleMark />
-                )}
-                <span className="text-sm">
-                  {data?.accounts
-                    .map((a) => (a.provider === 'apple' ? 'Apple' : 'Google'))
-                    .join(', ') || '…'}
-                </span>
-                <span className="ms-auto text-xs text-muted-foreground">
-                  {!!data?.accounts.length ? t('已连接') : t('正在读取…')}
-                </span>
-              </div>
-              <p className="mt-5 text-xs leading-6 text-muted-foreground">
-                {locale.startsWith('zh')
-                  ? '登录由所选服务验证，叶子阅读不会保存你的 Apple 或 Google 密码。'
-                  : 'Your sign-in provider verifies your identity. LeafRead never stores your Apple or Google password.'}
-              </p>
-            </section>
-            <section className="settings-form-card mt-4">
               <div className="mb-2 flex items-center justify-between gap-4">
                 <h2 className="font-medium">{t('登录设备')}</h2>
-                <button
-                  className="text-xs text-primary disabled:opacity-40"
-                  disabled={!data?.sessions.some((s) => !s.current) || busy}
-                  onClick={() => setConfirmation('others')}
-                >
-                  {t('退出其他设备')}
-                </button>
+                {data?.sessions.some((session) => !session.current) && (
+                  <button
+                    className="text-xs text-primary disabled:opacity-40"
+                    disabled={busy}
+                    onClick={() => setConfirmation('others')}
+                  >
+                    {t('退出其他设备')}
+                  </button>
+                )}
               </div>
-              <p className="text-xs leading-6 text-muted-foreground">
-                {t('同一设备的不同浏览器，可能显示为不同会话。')}
-              </p>
               {error ? (
                 <div className="py-5 text-sm">
                   <p role="alert" className="text-destructive">
@@ -214,7 +162,6 @@ export function AccountPage() {
               ) : (
                 data.sessions.map((s) => (
                   <div className="account-session" key={s.id}>
-                    <Monitor size={21} className="shrink-0 text-muted-foreground" />
                     <div className="min-w-0 flex-1">
                       <h3 className="text-sm">
                         {s.device
@@ -229,7 +176,7 @@ export function AccountPage() {
                       </p>
                     </div>
                     {s.current ? (
-                      <span className="shrink-0 rounded-full bg-[#edf5f0] px-2.5 py-1 text-xs text-[#639b83]">
+                      <span className="shrink-0 text-xs text-muted-foreground">
                         {t('当前设备')}
                       </span>
                     ) : (
@@ -245,25 +192,11 @@ export function AccountPage() {
                 ))
               )}
             </section>
-            <div className="settings-group mt-4">
-              <SettingsRow
-                icon={<HardDrive size={21} />}
-                title={t('本机书库与备份')}
-                href="/me/data"
-                detail={t('按账号独立保存')}
-              />
-            </div>
-            <p className="px-1 text-xs leading-7 text-muted-foreground">
-              {t(
-                '同一账号的书籍、笔记、进度、AI 对话和自动译文会在联网后同步。游客数据只保存在本机。',
-              )}
-            </p>
             <Button
               variant="outline"
               className="mt-7 h-12 w-full rounded-full"
               onClick={() => setConfirmation('signout')}
             >
-              <LogOut size={17} />
               {t('退出当前账号')}
             </Button>
             <Button

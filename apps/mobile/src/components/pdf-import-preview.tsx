@@ -218,8 +218,6 @@ function PreviewPages({ model, disabled, isCurrent, compact = false }: Props & {
                   ? 'pdfPreviewEmptyMethod'
                   : 'pdfPreviewTextMethod',
             )}
-            {' · '}
-            {t('pdfPreviewParagraphCount', { n: page.paragraphs.length })}
           </Text>
         </View>
       )}

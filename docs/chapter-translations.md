@@ -1,36 +1,29 @@
-# Translation while reading
+# Persistent book translation
 
-Web and native reading use the same interaction: **Reading language** contains Original, Bilingual and Translation only, plus the target language. A selection takes effect immediately and is remembered for that book. A book with no saved choice uses the reader's preferences; new installations default to Original on both platforms. Interface language remains separate.
+Opening a book creates or resumes an account-owned background translation task for the reader’s target language. Web and iOS use the same server task and show its saved progress. Original, Bilingual and Translation only are display choices: switching modes, turning pages, closing a browser tab or backgrounding the app never cancels the task. Equivalent source and target languages need no translation.
 
-## Reader behavior
+## Reading flow
 
-- Original mode reads the source and requests no further translation. Equivalent source and target languages also read directly.
-- Bilingual and translation-only modes first reuse saved translations. Missing passages on the visible page are translated automatically, with a small lookahead of two following paragraphs. Completing the first visible missing paragraph advances demand to the next one, including on pages containing many short paragraphs.
-- Bilingual mode keeps original text visible. Translation-only mode reserves placeholders for missing translations and never substitutes the original body text. A nearby status distinguishes loading, offline and failure; failed requests offer Retry.
-- Completed paragraphs appear when interaction is idle. Web waits for pointer activity, selections and page turns to settle and restores the visible text anchor when updating layout. There is no manual “show new translations” step.
-- Changing the reading position changes demand. Changing book or target language, returning to original mode, leaving the reader, or hiding the page stops work that is no longer needed. Returning to an active translated reading context may resume missing nearby passages.
-- Search, bookmarks and notes can reveal their exact saved text without requesting replacement translations or changing the book's reading preference.
+```text
+Open book → ensure the existing task → show saved text and overall progress
+  ├─ Turn page → update priority of pending content; in-flight work continues
+  ├─ Leave → worker continues and saves results
+  └─ Return → restore reading position; fetch current results and progress
+Complete → hide the progress indicator
+```
 
-There is no preparation screen, translation task panel, whole-book action, manual queue or edition-switching step in the reading flow. Book details open reading directly.
+There is no preparation page, start/pause button, or current-page/whole-book choice. Completed paragraphs become readable while the rest of the book is still translating. Existing layout anchoring and exact note/bookmark references remain in use. A retry action is shown only for a failed task. Offline readers retain locally saved text; reconnecting refreshes server progress.
 
-## Generation and saving
+## Ownership and persistence
 
-The Web reader uses LeafRead's platform AI service through the existing streaming endpoint. Signed-in users do not configure a provider, model or API key. Provider credentials stay on the server; changing the translation prompt affects future missing passages without replacing saved text.
+`POST /api/translations` ensures or retries a task using the authenticated account, canonical book source and target language. Reopening the same source/language reuses its task. `GET /api/translations` supplies progress and complete paragraph results, including those in a partially finished chapter. The API’s response connection does not own execution.
 
-Only one paragraph request runs at a time for the current demand. Nearby original passages provide bounded context. Long source paragraphs are split into chunks of up to 6,000 UTF-16 code units without splitting surrogate pairs. Successful chunks are saved as a draft; incomplete stream output is not published. A complete paragraph is saved with an immutable translation key and a separate reading selection. Existing saved text wins a duplicate generation race.
+The worker uses the existing PostgreSQL translation edition/chapter records, leases and checkpoints. It batches short paragraphs, checkpoints long paragraphs and publishes only complete paragraphs. Progress counts completed paragraphs across the whole book. A server restart recovers unfinished work after lease expiry. Claims and writes are fenced so overlapping workers cannot publish conflicting results. Transient failures receive bounded retries, with persistent failures exposed for explicit retry.
 
-Web drafts use the existing `translation-jobs` IndexedDB store under a reading-specific key, scoped to book, paragraph, source identity, target language and translation configuration. The store name does not imply a background job. Only complete paragraphs enter reading text, note anchors and ordinary translation exports. Compatible saved chunks can be reused when the same passage is needed again.
+The platform supplies model credentials. Request content, results, durations and complete exceptions are recorded in protected server logs with task/chapter/request correlation. Credentials do not enter client state or log payloads.
 
-Transient failures receive bounded automatic retries. Persistent failures stop that demand and expose Retry. Going offline preserves saved text; reconnecting can resume the current reading demand. Changing connection settings affects missing translations and does not replace saved paragraphs.
+Existing books, translation results, note references, reading positions and local recovery data remain intact. Client-side generation queues and streaming translation endpoints are removed. Local stores now serve saved reading content rather than executing translation work.
 
-## Existing saved editions
+## Verification boundary
 
-Existing paragraph caches, exact saved versions, reading selections and complete chapter artifacts remain readable. The authenticated `GET /api/translations` endpoint continues to provide saved manifests and completed chapter artifacts after checking their source identity against each edition’s saved source snapshot. A separate library sync is not required. Production SHA-256 hashes keep the existing canonical reading-text normalization; portable source fingerprints additionally protect local artifacts. The browser checks the account's saved manifest and downloads matching completed content around the current position before requesting new translation. A failed saved-content download exposes Retry rather than generating a replacement.
-
-The former POST task commands, chunk-generation endpoint, local background runner and server translation worker have been removed. Existing database tables, browser stores, books, notes, checkpoints and completed translations are retained. An old queued job is not restarted by the application. No migration deletes user data.
-
-Previously saved note and bookmark keys remain unchanged. Downloading or importing a saved translation does not authorize replacing an existing reading selection. Ordinary Web backups and portable reading packs retain their existing data boundaries; see [mobile reading packs](mobile.md#move-reading-between-web-and-ios).
-
-## Validation boundary
-
-The explicitly authorized lightweight checks run with `node scripts/check-web-reading-translation.mjs` and `node scripts/check-mobile-reading-translation.mjs`. They exercise the real paragraph writer and mobile scheduler with local storage/model/lifecycle substitutes: saved text reuse, complete-paragraph publishing, interruption/checkpoint recovery, duplicate request locking, retry limits and offline recovery. A small DOM substitute in `node --experimental-strip-types scripts/check-reading-translation-layout.mjs` additionally checks saved offsets across placeholders, language isolation, cancellation and replacement geometry. These checks make no network or paid model requests. Type checking and Web/iOS compilation also pass. Real-device gestures, translation quality and end-to-end layout behavior remain for user validation.
+Type checking and production compilation can validate the implementation without calling the paid model. End-to-end reading, device backgrounding and actual provider output require user verification. Historical release notes describe the earlier implementation and are not evidence for this rewrite.

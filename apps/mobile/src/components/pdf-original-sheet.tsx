@@ -660,9 +660,7 @@ function PdfOriginalContent({
                   <Text accessibilityRole="alert" style={{ color: colors.error, fontSize: 12 }}>
                     {t('pdfSearchError')}
                   </Text>
-                ) : (
-                  <Text style={{ color: colors.muted, fontSize: 12 }}>{t('pdfSearchHint')}</Text>
-                )}
+                ) : null}
               </View>
             )}
             {(phase === 'opening' || phase === 'ready') && source && NativePdfView ? (
@@ -863,14 +861,7 @@ function PdfOriginalContent({
                       {t('pdfPageOpening', { page: navigation.page })}
                     </Text>
                   </View>
-                ) : (
-                  <Text
-                    accessibilityLiveRegion="polite"
-                    style={{ color: colors.muted, fontSize: 11, textAlign: 'center' }}
-                  >
-                    {t('pdfPage', { n: page })}
-                  </Text>
-                )}
+                ) : null}
                 {!!pageError && (
                   <Text
                     accessibilityRole="alert"
@@ -888,9 +879,11 @@ function PdfOriginalContent({
                     {t(thumbnails ? 'pdfHideThumbnails' : 'pdfShowThumbnails')}
                   </Button>
                 )}
-                <Text style={{ color: colors.muted, fontSize: 11, textAlign: 'center' }}>
-                  {t(pdfNavigationAvailable ? 'pdfOriginalHint' : 'pdfNavigationUpdate')}
-                </Text>
+                {!pdfNavigationAvailable && (
+                  <Text style={{ color: colors.muted, fontSize: 11, textAlign: 'center' }}>
+                    {t('pdfNavigationUpdate')}
+                  </Text>
+                )}
                 {onReadPage && (
                   <Button
                     secondary

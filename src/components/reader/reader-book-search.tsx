@@ -199,6 +199,7 @@ export function ReaderSearchMatches({
   const first = page * READER_SEARCH_PAGE_SIZE + 1;
   return (
     <>
+      {(count > 0 || page > 0) && (
       <div className="sticky top-0 z-10 space-y-2 border-b bg-background px-3 py-3">
         <p className="text-xs text-muted-foreground" role="status">
           {zh ? `第 ${page + 1} 页` : `Page ${page + 1}`}
@@ -208,6 +209,7 @@ export function ReaderSearchMatches({
               : ` · Matches ${first}–${first + count - 1}`
             : ''}
         </p>
+        {(page > 0 || state.data?.limited) && (
         <div className="flex items-center justify-between gap-2">
           <Button
             variant="outline"
@@ -226,7 +228,9 @@ export function ReaderSearchMatches({
             {zh ? '下一页' : 'Next page'}
           </Button>
         </div>
+        )}
       </div>
+      )}
       {body}
     </>
   );

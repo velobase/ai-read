@@ -234,7 +234,10 @@ export async function assertSavedTranslationChapter(
     )
       continue;
     const version = validateSavedTranslationVersion(book, await idb(store.get(key)));
-    if (chapter.paragraphs[version.paragraphId] !== version.text)
+    if (
+      version.paragraphId in chapter.paragraphs &&
+      chapter.paragraphs[version.paragraphId] !== version.text
+    )
       throw new Error('saved_translation_immutable_conflict');
   }
 }

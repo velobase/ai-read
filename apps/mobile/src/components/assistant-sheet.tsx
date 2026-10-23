@@ -783,7 +783,9 @@ export function AssistantSheet({
       )}
       {!capabilities?.nativeAI && (
         <>
-          <Text style={{ color: colors.muted, lineHeight: 22 }}>{t('nativeAiSetup')}</Text>
+          <Text style={{ color: colors.muted, lineHeight: 22 }}>
+            {t(account.session ? 'nativeAiUnavailable' : 'nativeAiSetup')}
+          </Text>
           {account.session ? (
             <Button busy={connecting} onPress={() => void connect()}>
               {t('retry')}
@@ -799,16 +801,12 @@ export function AssistantSheet({
               {t('accountConnect')}
             </Button>
           )}
-          {capabilities && !capabilities.nativeAI && (
-            <Text style={{ color: colors.muted }}>{t('nativeAiUnavailable')}</Text>
-          )}
         </>
       )}
       {capabilities?.nativeAI && (
         <>
           <Text style={{ color: colors.muted, fontSize: 12 }}>{capabilities.aiModel}</Text>
-          <Text style={{ color: colors.ink, fontWeight: '600' }}>{t('aiScope')}</Text>
-          <View style={[styles.row, { flexWrap: 'wrap' }]}>
+          <View accessibilityLabel={t('aiScope')} style={[styles.row, { flexWrap: 'wrap' }]}>
             {(['chapter', 'read', 'book'] as const).map((item) => (
               <Chip
                 key={item}
@@ -834,9 +832,11 @@ export function AssistantSheet({
               {t(selectionError)}
             </Text>
           )}
-          <Text style={{ color: colors.muted, fontSize: 12, lineHeight: 19 }}>
-            {t('aiPrivacy')}
-          </Text>
+          {!visibleTurns.length && (
+            <Text style={{ color: colors.muted, fontSize: 12, lineHeight: 19 }}>
+              {t('aiPrivacy')}
+            </Text>
+          )}
           <TextInput
             accessibilityLabel={t('aiQuestion')}
             value={question}
@@ -860,29 +860,11 @@ export function AssistantSheet({
               {t('aiSend')}
             </Button>
           )}
-          {!visibleTurns.length && (
-            <Button
-              secondary
-              disabled={!historyReady || busy || !!selectionError}
-              onPress={() => void send(t('aiExplainPrompt'))}
-            >
-              {t('aiExplain')}
-            </Button>
-          )}
         </>
       )}
       {!!error && (
         <Text accessibilityRole="alert" style={{ color: colors.error, lineHeight: 23 }}>
           {error}
-        </Text>
-      )}
-      <Text style={{ color: colors.muted, fontSize: 12, lineHeight: 19 }}>
-        {t('aiHistoryLocal')}
-      </Text>
-      {!!partition && (
-        <Text style={{ color: colors.muted, fontSize: 12, lineHeight: 19 }}>
-          {partition.origin} ·{' '}
-          {account.session?.user.name || account.session?.user.email || t('aiGuest')}
         </Text>
       )}
       {((historyLoading && !!identity) || account.loading || account.busy) && (

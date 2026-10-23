@@ -140,9 +140,7 @@ export function BookmarksSheet({
       {status &&
         (!status.id || !bookmarks.some((bookmark) => bookmark.id === status.id)) &&
         feedback(status)}
-      <Text style={{ color: colors.muted, fontSize: 12, lineHeight: 19 }}>
-        {t('bookmarksDescription')}
-      </Text>
+      {bookmarks.length > 1 && (
       <View style={{ flexDirection: 'row' }}>
         <Chip
           active={order === 'position'}
@@ -163,6 +161,7 @@ export function BookmarksSheet({
           {t('bookmarkSortNewest')}
         </Chip>
       </View>
+      )}
       {loading ? (
         <ActivityIndicator color={colors.accent} />
       ) : !bookmarks.length ? (

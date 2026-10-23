@@ -7,10 +7,9 @@ import { measureClient } from './observability/client';
 
 export type Source = { id: string; chapter: string; text: string };
 type Request = {
-  action: 'ask' | 'translate' | 'terms';
+  action: 'ask' | 'terms';
   title: string;
   question?: string;
-  target?: string;
   selection?: string;
   readingPassage?: string;
   scope?: string;
@@ -34,20 +33,11 @@ async function request(settings: Settings, body: Request, signal: AbortSignal) {
     signal,
     body: JSON.stringify({
       ...body,
-      ...(body.action === 'translate'
-        ? {
-            translationFingerprint: translationFingerprint(settings),
-          }
-        : {}),
       language: languageName(settings.language),
     }),
   });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
-    if (response.status === 409 && data.code === 'ai-config-changed' && data.config)
-      window.dispatchEvent(
-        new CustomEvent('ai-read-ai-configuration-change', { detail: data.config }),
-      );
     throw new AIRequestError(
       data.error || `请求失败（${response.status}）`,
       response.status === 408 || response.status === 429 || response.status >= 500,

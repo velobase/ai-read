@@ -656,15 +656,14 @@ export function PdfOriginalDialog({
                   <ChevronRight size={18} />
                 </Button>
               </form>
-              <div className="flex items-start justify-between gap-3">
-                <p
-                  role="status"
-                  aria-live="polite"
-                  className="text-xs leading-5 text-muted-foreground"
-                >
-                  {!searchQuery
-                    ? t('仅在本机查找原 PDF 文字层，不会生成译文。')
-                    : !currentSearch || currentSearch.status === 'searching'
+              {searchQuery && (
+                <div className="flex items-start justify-between gap-3">
+                  <p
+                    role="status"
+                    aria-live="polite"
+                    className="text-xs leading-5 text-muted-foreground"
+                  >
+                    {!currentSearch || currentSearch.status === 'searching'
                       ? t('正在查找：{page}/{total} 页，已找到 {count} 处', {
                           page: currentSearch?.scannedPages || 0,
                           total: pdf.numPages,
@@ -685,32 +684,33 @@ export function PdfOriginalDialog({
                             ? t('未找到匹配文字。')
                             : t('此 PDF 没有可搜索的文字层；不会自动进行 OCR。')
                           : null}
-                </p>
-                {currentSearch?.status === 'searching' ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="h-7 shrink-0 px-2 text-xs"
-                    onClick={() => {
-                      searchRun.current?.abort();
-                      setSearchState((old) =>
-                        old === currentSearch ? { ...old, status: 'cancelled' } : old,
-                      );
-                    }}
-                  >
-                    {t('停止查找')}
-                  </Button>
-                ) : currentSearch && ['error', 'cancelled'].includes(currentSearch.status) ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="h-7 shrink-0 px-2 text-xs"
-                    onClick={() => setSearchAttempt((old) => old + 1)}
-                  >
-                    {t('重新查找')}
-                  </Button>
-                ) : null}
-              </div>
+                  </p>
+                  {currentSearch?.status === 'searching' ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="h-7 shrink-0 px-2 text-xs"
+                      onClick={() => {
+                        searchRun.current?.abort();
+                        setSearchState((old) =>
+                          old === currentSearch ? { ...old, status: 'cancelled' } : old,
+                        );
+                      }}
+                    >
+                      {t('停止查找')}
+                    </Button>
+                  ) : currentSearch && ['error', 'cancelled'].includes(currentSearch.status) ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="h-7 shrink-0 px-2 text-xs"
+                      onClick={() => setSearchAttempt((old) => old + 1)}
+                    >
+                      {t('重新查找')}
+                    </Button>
+                  ) : null}
+                </div>
+              )}
               {currentSearch?.limited && (
                 <p className="text-xs text-muted-foreground">
                   {t('仅显示前 {count} 处匹配，请缩小查询范围。', {
@@ -769,10 +769,7 @@ export function PdfOriginalDialog({
                 </div>
               </div>
             </div>
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-xs text-muted-foreground">
-                {t('原 PDF 仅保存在本机，不随书籍同步或阅读包导出。')}
-              </p>
+            <div className="flex justify-end">
               <Button
                 className="shrink-0"
                 variant="secondary"

@@ -890,5 +890,6 @@
   "继续解析": "Continuar extracción",
   "重试第 {page} 页": "Reintentar página {page}",
   "PDF 第 {page} 页解析失败，已完成的页面已保留。": "No se pudo extraer la página {page} del PDF. Las páginas completadas se han conservado.",
-  "PDF 第 {page} 页超出文字总量限制，请缩小页码范围。": "La página {page} del PDF supera el límite total de texto. Elige un intervalo de páginas más pequeño."
+  "PDF 第 {page} 页超出文字总量限制，请缩小页码范围。": "La página {page} del PDF supera el límite total de texto. Elige un intervalo de páginas más pequeño.",
+  "备份内容": "Contenido de la copia de seguridad"
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { FileText, LoaderCircle } from 'lucide-react';
+import { LoaderCircle } from 'lucide-react';
 import { useI18n } from '@/lib/i18n/provider';
 import { Modal } from '@/components/reader/reader-dialogs';
 import { Button } from '@/components/ui/button';
@@ -272,13 +272,7 @@ export function PdfImportDialog({
   return (
     <Modal title={t('解析 PDF')} close={dismiss} mobileSheet>
       <div className="mt-5 space-y-5">
-        <div className="flex items-center gap-3">
-          <FileText className="shrink-0 text-primary" />
-          <p className="truncate text-sm">{file.name}</p>
-        </div>
-        <p className="text-xs leading-6 text-muted-foreground">
-          {t('在本机提取文字，按原始页码转为可阅读、搜索、划线和翻译的书籍格式。')}
-        </p>
+        <p className="truncate text-sm">{file.name}</p>
         {error && (
           <p
             role="alert"

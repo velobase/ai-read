@@ -32,11 +32,6 @@ import {
 } from '../adapters/book-references';
 import { bookImages, useBookImageFiles, type BookImageReference } from '../adapters/book-media';
 import { BookImage, bookImageSize } from './book-image';
-import {
-  TranslationStatus,
-  type TranslationStatus as TranslationStatusKind,
-} from './translation-status';
-
 type Source = 'original' | 'translation';
 type Run = {
   key: string;
@@ -60,8 +55,6 @@ type Props = {
   translationKeys: Record<string, string>;
   readingMode: 'original' | 'bilingual' | 'translation';
   readingLanguage?: string;
-  translationStatus: TranslationStatusKind;
-  retryTranslation: () => void;
   onVisibleParagraphs: (ids: string[]) => void;
   onInteractionChange: (active: boolean) => void;
   anchor: Position;
@@ -139,8 +132,6 @@ function PageLayout({
   translationKeys,
   readingMode,
   readingLanguage,
-  translationStatus,
-  retryTranslation,
   onVisibleParagraphs,
   onInteractionChange,
   anchor,
@@ -653,12 +644,7 @@ function PageLayout({
                   },
                 }
               : {}),
-            text: fragment.run.placeholder
-              ? page.fragments.find((item) => item.run.placeholder) === fragment ||
-                readingMode !== 'translation'
-                ? ''
-                : t('translationPending')
-              : fragment.text,
+            text: fragment.run.placeholder ? t('translationPending') : fragment.text,
             placeholder: fragment.run.placeholder || false,
             paragraph: fragment.run.paragraph?.id,
             source: fragment.run.source,
@@ -726,15 +712,6 @@ function PageLayout({
   const chapterIndex = book.chapters.findIndex((item) => item.id === chapter.id);
   const contentReady = ready && imageFiles.ready;
   const needsNativeUpdate = !!NativePageView && !!images.length && !nativeReaderSupportsImages;
-  const pendingIndex =
-    pages[pageIndex]?.fragments.findIndex((fragment) => fragment.run.placeholder) ?? -1;
-  const pendingTop =
-    pendingIndex < 0
-      ? 0
-      : 16 +
-        pages[pageIndex].fragments
-          .slice(0, pendingIndex)
-          .reduce((height, fragment) => height + fragment.height + fragment.gap, 0);
   useEffect(() => {
     readyCallback.current?.(contentReady && !needsNativeUpdate && pages.length > 0);
     return () => readyCallback.current?.(false);
@@ -908,13 +885,9 @@ function PageLayout({
                     key={fragment.run.key + ':' + index}
                     style={{ height: fragment.height, marginBottom: fragment.gap }}
                   >
-                    {item.fragments.find((part) => part.run.placeholder) === fragment ? (
-                      <TranslationStatus status={translationStatus} retry={retryTranslation} />
-                    ) : readingMode === 'translation' ? (
-                      <Text style={{ color: colors.muted, fontSize: 13, lineHeight: 44 }}>
-                        {t('translationPending')}
-                      </Text>
-                    ) : null}
+                    <Text style={{ color: colors.muted, fontSize: 13, lineHeight: 44 }}>
+                      {t('translationPending')}
+                    </Text>
                   </View>
                 ) : (
                   <Pressable
@@ -1004,13 +977,6 @@ function PageLayout({
             </Pressable>
           )}
         />
-      )}
-      {contentReady && NativePageView && pendingIndex >= 0 && (
-        <View
-          style={{ position: 'absolute', top: pendingTop, left: horizontal, right: horizontal }}
-        >
-          <TranslationStatus status={translationStatus} retry={retryTranslation} />
-        </View>
       )}
     </View>
   );

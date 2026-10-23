@@ -3,15 +3,6 @@
 import { useI18n } from '@/lib/i18n/provider';
 
 import { useEffect, useRef, useState } from 'react';
-import {
-  Download,
-  Upload,
-  ShieldCheck,
-  BookOpen,
-  NotebookPen,
-  HardDrive,
-  Smartphone,
-} from 'lucide-react';
 import { useLibrary } from './library-provider';
 import { LibraryShell, PageHeading, SettingsRow } from './library-ui';
 import { storage } from '@/lib/storage';
@@ -32,7 +23,7 @@ import { readGuestLibrary } from '@/lib/guest-library';
 import { resumePortableCollections } from '@/lib/library-state';
 
 export function DataPage() {
-  const { t, text: localize, locale } = useI18n();
+  const { t, text: localize } = useI18n();
   const { user } = useIdentity();
   const [fromGuest, setFromGuest] = useState(false);
   const { allBooks, notes, bookmarks, positions, refresh, notify } = useLibrary();
@@ -192,40 +183,9 @@ export function DataPage() {
             </Button>
           </section>
         )}
-        <div className="settings-form-card">
-          <div className="mb-5 flex items-center gap-3">
-            <ShieldCheck className="text-[#62ad97]" size={26} />
-            <h2 className="font-medium">{t('安心保存在本机')}</h2>
-          </div>
-          <p className="text-sm leading-7 text-muted-foreground">
-            {t(
-              '书籍和笔记保存在当前浏览器。导出一份备份，可以在更换设备或清理浏览器之前，带走自己的阅读积累。',
-            )}
-          </p>
-          <div className="mt-7 grid grid-cols-2 gap-5 border-t pt-6">
-            <div>
-              <BookOpen size={18} className="mb-3 text-muted-foreground" />
-              <strong className="text-2xl font-medium">
-                {allBooks.length.toLocaleString(locale)}
-              </strong>
-              <span className="ms-2 text-xs text-muted-foreground">{t('本书')}</span>
-            </div>
-            <div>
-              <NotebookPen size={18} className="mb-3 text-muted-foreground" />
-              <strong className="text-2xl font-medium">
-                {notes.length.toLocaleString(locale)}
-              </strong>
-              <span className="ms-2 text-xs text-muted-foreground">{t('条笔记')}</span>
-            </div>
-          </div>
-          <p className="mt-5 text-sm text-muted-foreground">
-            {t('书签 {count} 条', { count: bookmarks.length })}
-          </p>
-        </div>
         <div className="settings-group mt-5">
           {user && (
             <SettingsRow
-              icon={<BookOpen size={22} className="text-[#81a896]" />}
               title={t('导入本机游客书库')}
               detail={t('保留游客原件')}
               onClick={() => {
@@ -249,26 +209,24 @@ export function DataPage() {
             />
           )}
           <SettingsRow
-            icon={<Download size={22} className="text-primary" />}
             title={t('导出阅读备份')}
             detail={t('书籍、笔记、进度')}
             onClick={exportData}
           />
           <SettingsRow
-            icon={<Smartphone size={22} className="text-primary" />}
             title={t(exporting ? '正在导出阅读包…' : '导出 iOS 阅读包')}
             detail={t('含已保存的译文和分组')}
             onClick={() => void exportMobile()}
           />
           <SettingsRow
-            icon={<Upload size={22} className="text-[#81a896]" />}
             title={t('从备份恢复')}
             onClick={() => {
               if (!busyRef.current) input.current?.click();
             }}
           />
         </div>
-        <div className="px-1 text-xs leading-7 text-muted-foreground">
+        <details className="px-1 text-xs leading-7 text-muted-foreground">
+          <summary className="cursor-pointer py-3">{t('备份内容')}</summary>
           <p>
             {t(
               '备份包含已解析的书籍文字、封面、划线、想法与阅读位置，不包含 API Key、AI 对话或译文缓存。',
@@ -283,7 +241,7 @@ export function DataPage() {
             {t('阅读包与同步可携带已解析的插图；复杂版面、行内图片和原始文件仍需保留原书。')}
           </p>
           <p className="mt-3">{t('全库阅读包保留空分组；单本阅读包只包含这本书所在的分组。')}</p>
-        </div>
+        </details>
         <input
           ref={input}
           type="file"

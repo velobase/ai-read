@@ -1,9 +1,10 @@
 'use client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { ChevronLeft } from 'lucide-react';
 import { useI18n } from '@/lib/i18n/provider';
 import { useLibrary } from './library-provider';
-import { BookCover, LibraryShell, PageHeading } from './library-ui';
+import { BookCover, LibraryShell } from './library-ui';
 import {
   downloadStoreBook,
   type StoreBook,
@@ -33,102 +34,94 @@ export function useStoreCatalog() {
   }, [attempt]);
   return { data, error, retry: () => retry((n) => n + 1) };
 }
-export function Storefront({
-  initialCategory = '',
-  collectionMode = false,
-}: {
-  initialCategory?: string;
-  collectionMode?: boolean;
-}) {
-  const { locale } = useI18n(),
-    zh = locale.startsWith('zh');
+export function Storefront({ preview = false }: { preview?: boolean }) {
+  const { t, locale } = useI18n();
+  const zh = locale.startsWith('zh');
   const { data, error, retry } = useStoreCatalog();
-  const [query, setQuery] = useState(''),
-    [category, setCategory] = useState(initialCategory),
-    [collection, setCollection] = useState('');
-  const chosenCollection = data?.collections.find((c) => c.id === collection);
+  const [query, setQuery] = useState('');
+  const [category, setCategory] = useState('');
+  const [collection, setCollection] = useState('');
+  const chosenCollection = data?.collections.find((entry) => entry.id === collection);
   let books =
     data?.books.filter(
-      (b) =>
-        (!category || b.category === category) &&
-        (!collection || b.collectionIds.includes(collection)) &&
-        `${b.title} ${b.author} ${b.description}`
+      (book) =>
+        (!category || book.category === category) &&
+        (!collection || book.collectionIds.includes(collection)) &&
+        `${book.title} ${book.author} ${book.description}`
           .toLowerCase()
           .includes(query.toLowerCase().trim()),
     ) || [];
-  if (chosenCollection)
+  if (chosenCollection) {
     books = [...books].sort(
       (a, b) =>
-        chosenCollection.items.findIndex((i) => i.bookId === a.id) -
-        chosenCollection.items.findIndex((i) => i.bookId === b.id),
+        chosenCollection.items.findIndex((item) => item.bookId === a.id) -
+        chosenCollection.items.findIndex((item) => item.bookId === b.id),
     );
+  }
+  if (preview) books = books.slice(0, 4);
+
   return (
-    <section className="my-8 space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="mb-2 text-xs uppercase tracking-[.18em] text-primary">LeafRead Library</p>
-          <h2 className="text-2xl font-semibold">
-            {zh ? '值得重读的经典' : 'Classics to return to'}
-          </h2>
-          <p className="mt-3 text-sm leading-6 text-muted-foreground">
-            {zh
-              ? '完整原文 · 免费下载 · 离线阅读。登录后可翻译，边读边对照。'
-              : 'Complete books, free to download and read offline. Sign in to translate as you read.'}
-          </p>
+    <section className="my-8 space-y-6" aria-label={t('书城')}>
+      {preview ? (
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold">{t('书城')}</h2>
+          <Link href="/discover" className="text-sm text-primary">
+            {t('全部书籍')}
+          </Link>
         </div>
-        <input
-          aria-label={zh ? '搜索书城' : 'Search bookstore'}
-          className="rounded-full border bg-white px-5 py-3 text-sm"
-          placeholder={zh ? '书名、作者…' : 'Title or author…'}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {['', ...new Set(data?.books.map((b) => b.category))].map((c) => (
-          <button
-            key={c}
-            className={`rounded-full border px-4 py-2 text-sm ${category === c ? 'border-primary bg-primary/10 text-primary' : 'bg-white'}`}
-            onClick={() => setCategory(c)}
-          >
-            {c || (zh ? '全部' : 'All')}
-          </button>
-        ))}
-      </div>
-      {!!data?.collections.length && (
-        <div className="flex flex-wrap gap-2">
-          <button
-            className={`text-sm ${!collection ? 'font-semibold' : 'text-muted-foreground'}`}
-            onClick={() => setCollection('')}
-          >
-            {zh ? '全部书单' : 'All collections'}
-          </button>
-          {data.collections.map((c) => (
-            <button
-              key={c.id}
-              className={`rounded-lg px-3 py-2 text-sm ${collection === c.id ? 'bg-primary/10 text-primary' : 'bg-white'}`}
-              onClick={() => setCollection(c.id)}
-            >
-              {c.title}
-            </button>
-          ))}
-        </div>
-      )}
-      {(chosenCollection?.description || collectionMode) && (
-        <p className="text-sm text-muted-foreground">
-          {chosenCollection?.description ||
-            (zh ? '挑一本书，开始新的阅读旅程。' : 'Find your next reading journey.')}
-        </p>
+      ) : (
+        <>
+          <input
+            type="search"
+            aria-label={zh ? '搜索书城' : 'Search bookstore'}
+            className="w-full rounded-xl border bg-transparent px-4 py-3 text-sm"
+            placeholder={zh ? '书名、作者' : 'Title or author'}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          {!!data && (
+            <div className="flex flex-wrap gap-4">
+              <select
+                aria-label={t('分类')}
+                value={category}
+                onChange={(event) => setCategory(event.target.value)}
+                className="min-h-11 max-w-full bg-transparent pe-5 text-sm"
+              >
+                <option value="">{t('全部')}</option>
+                {[...new Set(data.books.map((book) => book.category))].map((value) => (
+                  <option value={value} key={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+              {!!data.collections.length && (
+                <select
+                  aria-label={t('书单')}
+                  value={collection}
+                  onChange={(event) => setCollection(event.target.value)}
+                  className="min-h-11 max-w-full bg-transparent pe-5 text-sm"
+                >
+                  <option value="">{zh ? '全部书单' : 'All collections'}</option>
+                  {data.collections.map((entry) => (
+                    <option value={entry.id} key={entry.id}>
+                      {entry.title}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
+        </>
       )}
       {error ? (
-        <div role="alert" className="rounded-2xl bg-white p-8">
+        <div role="alert" className="py-6 text-sm">
           <p>
             {zh
               ? '书城暂时无法连接，已下载的书仍可从书架阅读。'
               : 'The bookstore is unavailable. Downloaded books are still on your shelf.'}
           </p>
           <button className="library-primary mt-4" onClick={retry}>
-            {zh ? '重试' : 'Retry'}
+            {t('重试')}
           </button>
         </div>
       ) : !data ? (
@@ -136,17 +129,16 @@ export function Storefront({
       ) : !books.length ? (
         <p>{zh ? '暂时没有符合条件的书。' : 'No books match your search.'}</p>
       ) : (
-        <div className="grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-3 lg:grid-cols-4">
-          {books.map((b) => (
-            <Link href={`/store/${b.slug}`} key={b.id} className="group">
-              <div className="max-w-[180px] transition-transform group-hover:-translate-y-1">
-                <BookCover book={b} />
+        <div
+          className={`grid grid-cols-2 gap-x-6 gap-y-10 ${preview ? 'sm:grid-cols-4' : 'sm:grid-cols-3 lg:grid-cols-4'}`}
+        >
+          {books.map((book) => (
+            <Link href={`/store/${book.slug}`} key={book.id}>
+              <div className="max-w-[180px]">
+                <BookCover book={book} />
               </div>
-              <h3 className="mt-4 font-semibold leading-6">{b.title}</h3>
-              <p className="mt-1 text-xs text-muted-foreground">{b.author}</p>
-              <p className="mt-3 text-xs text-primary">
-                {zh ? '免费 · 完整原文' : 'Free · Complete edition'}
-              </p>
+              <h3 className="mt-4 font-medium leading-6">{book.title}</h3>
+              <p className="mt-1 text-xs text-muted-foreground">{book.author}</p>
             </Link>
           ))}
         </div>
@@ -199,9 +191,15 @@ export function StoreBookPage({ slug }: { slug: string }) {
     }
   }
   return (
-    <LibraryShell>
+    <LibraryShell hideNavigation>
       <main className="library-container">
-        <PageHeading title={zh ? '书籍详情' : 'Book details'} back="/discover" />
+        <Link
+          href="/discover"
+          aria-label={zh ? '返回书城' : 'Back to bookstore'}
+          className="-ms-2 flex size-11 items-center justify-center rounded-full hover:bg-black/5"
+        >
+          <ChevronLeft size={25} />
+        </Link>
         {error ? (
           <button onClick={retry}>{zh ? '书城连接失败，点击重试' : 'Unable to load. Retry'}</button>
         ) : !data ? (
@@ -217,7 +215,7 @@ export function StoreBookPage({ slug }: { slug: string }) {
             <section className="grid gap-8 py-6 sm:grid-cols-[180px_1fr]">
               <BookCover book={book} />
               <div>
-                <p className="mb-3 text-xs uppercase tracking-widest text-primary">
+                <p className="mb-3 text-xs text-muted-foreground">
                   {book.category} · {book.language}
                 </p>
                 <h1 className="text-3xl font-semibold leading-tight">{book.title}</h1>
@@ -227,8 +225,7 @@ export function StoreBookPage({ slug }: { slug: string }) {
                 </p>
                 <p className="text-xs text-muted-foreground">
                   {book.chapterCount} {zh ? '个章节' : 'chapters'} ·{' '}
-                  {(book.byteLength / 1048576).toFixed(1)} MB ·{' '}
-                  {zh ? '完整原文' : 'Complete edition'}
+                  {(book.byteLength / 1048576).toFixed(1)} MB
                 </p>
                 <div className="mt-6 flex flex-wrap gap-3">
                   <button
@@ -246,38 +243,32 @@ export function StoreBookPage({ slug }: { slug: string }) {
                           ? '下载并阅读'
                           : 'Download & read'}
                   </button>
-                  <button
-                    className="library-secondary"
-                    disabled={busy || !!saved}
-                    onClick={() => void download(book, false)}
-                  >
-                    {saved ? (zh ? '已在书架' : 'On your shelf') : zh ? '加入书架' : 'Add to shelf'}
-                  </button>
+                  {!saved && (
+                    <button
+                      className="library-secondary"
+                      disabled={busy}
+                      onClick={() => void download(book, false)}
+                    >
+                      {zh ? '加入书架' : 'Add to shelf'}
+                    </button>
+                  )}
                 </div>
-                <p role="status" className="mt-4 text-sm">
-                  {message}
-                </p>
+                {message && (
+                  <p role="status" className="mt-4 text-sm">
+                    {message}
+                  </p>
+                )}
+                {book.sourceUrl && (
+                  <a
+                    href={book.sourceUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-6 inline-block text-sm text-primary"
+                  >
+                    {zh ? '原文来源' : 'Source edition'}
+                  </a>
+                )}
               </div>
-            </section>
-            <section className="my-8 rounded-2xl bg-white p-6 text-sm leading-7">
-              <h2 className="font-semibold">
-                {zh ? '用你熟悉的语言阅读' : 'Read in your language'}
-              </h2>
-              <p className="mt-2 text-muted-foreground">
-                {zh
-                  ? '下载后打开书籍，在翻译准备中选择目标语言并开始翻译。登录即可使用 LeafRead 翻译服务；完成的译文保存在本地，可用双语模式阅读。'
-                  : 'Open the downloaded book and prepare a translation in your preferred language. Sign in to use LeafRead translation. Completed translations stay on your device for bilingual reading.'}
-              </p>
-              {book.sourceUrl && (
-                <a
-                  href={book.sourceUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-4 inline-block text-primary underline"
-                >
-                  {zh ? '查看原文来源 ↗' : 'View source edition ↗'}
-                </a>
-              )}
             </section>
           </>
         )}

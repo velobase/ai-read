@@ -890,5 +890,6 @@
   "继续解析": "Continue extraction",
   "重试第 {page} 页": "Retry page {page}",
   "PDF 第 {page} 页解析失败，已完成的页面已保留。": "Could not extract PDF page {page}. Completed pages have been kept.",
-  "PDF 第 {page} 页超出文字总量限制，请缩小页码范围。": "PDF page {page} exceeds the total text limit. Choose a smaller page range."
+  "PDF 第 {page} 页超出文字总量限制，请缩小页码范围。": "PDF page {page} exceeds the total text limit. Choose a smaller page range.",
+  "备份内容": "Backup contents"
 }

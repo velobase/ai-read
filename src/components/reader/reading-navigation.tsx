@@ -2,15 +2,7 @@
 
 import { useI18n } from '@/lib/i18n/provider';
 
-import {
-  ArrowDown,
-  ArrowLeft,
-  ArrowRight,
-  Check,
-  ChevronsLeftRight,
-  List,
-  MoveVertical,
-} from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { Chapter, Settings } from '@/lib/types';
 import type { ReadingChapterTarget } from '../../../packages/reading-core/src';
@@ -26,24 +18,20 @@ export function ReadingModePicker({
   const { t } = useI18n();
   return (
     <fieldset className="reading-mode-picker">
-      <legend>{t('阅读方式')}</legend>
+      <legend className="sr-only">{t('阅读方式')}</legend>
       <div className="reading-mode-options">
         {(
           [
             {
               value: 'paged',
               title: t('翻页'),
-              detail: t('一屏一屏，从容往下读'),
-              Icon: ChevronsLeftRight,
             },
             {
               value: 'scroll',
               title: t('滚动'),
-              detail: t('上下滑动，跟随自己的节奏'),
-              Icon: MoveVertical,
             },
           ] as const
-        ).map(({ value, title, detail, Icon }) => (
+        ).map(({ value, title }) => (
           <label key={value} className="reading-mode-option" data-active={mode === value}>
             <input
               type="radio"
@@ -52,22 +40,13 @@ export function ReadingModePicker({
               checked={mode === value}
               onChange={() => onChange(value)}
             />
-            <span className="reading-mode-icon">
-              <Icon size={22} strokeWidth={1.5} />
-            </span>
             <span className="reading-mode-title">
               {title}
               {mode === value && <Check size={13} />}
             </span>
-            <span className="reading-mode-detail">{detail}</span>
           </label>
         ))}
       </div>
-      <p>
-        {mode === 'paged'
-          ? t('左右轻扫翻页，可以拖回取消；长按仍可选文。')
-          : t('上下滚动，阅读位置自动保存；空格向下滚动一屏。')}
-      </p>
     </fieldset>
   );
 }
@@ -83,7 +62,6 @@ export function ReadingNavigation({
   turning,
   onTurn,
   onContents,
-  onMode,
   progress,
   chapterTitle,
   rtl,
@@ -111,7 +89,6 @@ export function ReadingNavigation({
   onChapter: (target: ReadingChapterTarget) => void;
   onTurn: (direction: -1 | 1) => void;
   onContents: () => void;
-  onMode: () => void;
 }) {
   const { t } = useI18n();
   const chapterLabel = (direction: -1 | 1, target?: ReadingChapterTarget) =>
@@ -193,14 +170,6 @@ export function ReadingNavigation({
         <span>{next}</span>
         {rtl ? <ArrowLeft size={17} /> : <ArrowRight size={17} />}
       </Button>
-      <button
-        className="reading-nav-mode"
-        onClick={onMode}
-        aria-label={t('切换翻页或滚动阅读')}
-        title={t('阅读方式')}
-      >
-        {mode === 'paged' ? <ChevronsLeftRight size={16} /> : <MoveVertical size={16} />}
-      </button>
     </nav>
   );
 }
@@ -208,21 +177,17 @@ export function ReadingNavigation({
 export function ChapterEnding({
   chapter,
   next,
-  previous,
   index,
   turning,
   onChapter,
-  onContents,
   onFinish,
   pdf = false,
 }: {
   chapter: Chapter;
   next?: Chapter;
-  previous?: Chapter;
   index: number;
   turning: boolean;
   onChapter: (index: number, edge?: 'start' | 'end') => void;
-  onContents: () => void;
   onFinish: () => void;
   pdf?: boolean;
 }) {
@@ -251,16 +216,6 @@ export function ChapterEnding({
           </Button>
         </div>
       )}
-      <div className="chapter-ending-links">
-        <button disabled={!previous || turning} onClick={() => onChapter(index - 1, 'end')}>
-          <ArrowLeft size={14} />
-          {t(pdf ? '上一原页' : '上一章')}
-        </button>
-        <button onClick={onContents}>
-          <List size={15} />
-          {t('查看目录')}
-        </button>
-      </div>
     </section>
   );
 }

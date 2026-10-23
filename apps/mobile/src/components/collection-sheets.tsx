@@ -162,7 +162,6 @@ function NameEditor({
           fontSize: 16,
         }}
       />
-      <Text style={{ color: colors.muted, fontSize: 12 }}>{t('collectionsNameHint')}</Text>
       <Button busy={busy} disabled={!name.trim()} onPress={save}>
         {t('save')}
       </Button>
@@ -369,9 +368,13 @@ type CollectionEditor = { kind: 'create' } | { kind: 'rename' | 'remove'; group:
 export function CollectionManagerSheet({
   visible,
   close,
+  onShow,
+  onDismiss,
 }: {
   visible: boolean;
   close: () => void;
+  onShow: () => void;
+  onDismiss: () => void;
 }) {
   const { colors, t, notify } = useApp();
   const library = useLibrary();
@@ -419,6 +422,8 @@ export function CollectionManagerSheet({
     <Sheet
       tall
       visible={visible}
+      onShow={onShow}
+      onDismiss={onDismiss}
       title={t(
         editor?.kind === 'rename'
           ? 'collectionsRename'
@@ -475,9 +480,6 @@ export function CollectionManagerSheet({
           ) : snapshot && !snapshot.groups.length ? (
             <View style={{ gap: 10, paddingVertical: 18 }}>
               <Text style={{ color: colors.ink, fontSize: 16 }}>{t('collectionsEmpty')}</Text>
-              <Text style={{ color: colors.muted, fontSize: 13, lineHeight: 20 }}>
-                {t('collectionsEmptyHint')}
-              </Text>
             </View>
           ) : null}
           {snapshot?.groups.map((group) => (

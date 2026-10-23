@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Image, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { accountAvailable, signInAccount, useAccount } from '../adapters/account';
 import { useApp } from '../context';
 import { useLibrary } from '../library-context';
@@ -7,7 +7,7 @@ import { useLibraryController } from '../library-controller';
 import { useLibrarySyncStatus } from '../adapters/library-sync';
 import { Icon } from './ui';
 
-export function AccountNotice() {
+function AccountNotice() {
   const { colors, t } = useApp();
   const account = useAccount();
   if (!account.issue) return null;
@@ -26,7 +26,7 @@ export function AccountNotice() {
   );
 }
 
-export function GoogleSignInButton({ provider = 'google' }: { provider?: 'google' | 'apple' }) {
+function SignInButton({ provider }: { provider: 'google' | 'apple' }) {
   const { colors, t, notify } = useApp();
   const account = useAccount();
   const library = useLibrary();
@@ -109,9 +109,6 @@ export function GoogleSignInButton({ provider = 'google' }: { provider?: 'google
           )}
         </Text>
       </Pressable>
-      {unavailable && (
-        <Text style={{ color: colors.muted, lineHeight: 22 }}>{t('accountBuildRequired')}</Text>
-      )}
       {!!error && (
         <Text accessibilityRole="alert" style={{ color: colors.error, lineHeight: 22 }}>
           {error}
@@ -124,45 +121,22 @@ export function GoogleSignInButton({ provider = 'google' }: { provider?: 'google
 export function AccountCard({ manage }: { manage?: () => void }) {
   const { colors, t } = useApp();
   const account = useAccount();
-  const [imageFailed, setImageFailed] = useState(false);
   const user = account.session?.user;
-  useEffect(() => setImageFailed(false), [user?.image]);
   const identity = (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-      <View
-        style={{
-          width: 60,
-          height: 60,
-          borderRadius: 30,
-          backgroundColor: colors.soft,
-          alignItems: 'center',
-          justifyContent: 'center',
-          overflow: 'hidden',
-        }}
-      >
-        {user?.image?.startsWith('https://') && !imageFailed ? (
-          <Image
-            source={{ uri: user.image }}
-            onError={() => setImageFailed(true)}
-            style={{ width: 60, height: 60 }}
-          />
-        ) : (
-          <Icon name="person-outline" size={28} color={colors.accent} />
-        )}
-      </View>
       <View style={{ flex: 1, gap: 7 }}>
         <Text style={{ color: colors.ink, fontSize: 21, fontWeight: '600' }}>
           {user?.name || user?.email || t('accountConnect')}
         </Text>
-        <Text style={{ color: colors.muted, fontSize: 13, lineHeight: 20 }}>
-          {user?.email || t('accountPurpose')}
-        </Text>
+        {!!user?.name && !!user.email && (
+          <Text style={{ color: colors.muted, fontSize: 13, lineHeight: 20 }}>{user.email}</Text>
+        )}
       </View>
       {!!user && !!manage && <Icon name="chevron-forward" color={colors.muted} size={18} />}
     </View>
   );
   return (
-    <View style={{ backgroundColor: colors.surface, borderRadius: 20, padding: 22, gap: 18 }}>
+    <View style={{ paddingVertical: 16, gap: 18 }}>
       {user && manage ? (
         <Pressable
           accessibilityRole="button"
@@ -176,17 +150,13 @@ export function AccountCard({ manage }: { manage?: () => void }) {
       )}
       {!user ? (
         <>
-          <GoogleSignInButton provider="apple" />
-          <GoogleSignInButton />
-          <Text style={{ color: colors.muted, fontSize: 12, lineHeight: 20 }}>
-            {t('accountGuestHint')}
-          </Text>
+          <SignInButton provider="apple" />
+          <SignInButton provider="google" />
+          {!accountAvailable() && (
+            <Text style={{ color: colors.muted, lineHeight: 22 }}>{t('accountBuildRequired')}</Text>
+          )}
         </>
-      ) : (
-        <Text style={{ color: colors.muted, fontSize: 12 }}>
-          {t(account.verified ? 'accountVerified' : 'accountCached')}
-        </Text>
-      )}
+      ) : null}
       <AccountNotice />
     </View>
   );
@@ -197,35 +167,34 @@ export function AccountSyncSummary({ open }: { open: () => void }) {
   const library = useLibrary();
   const account = useAccount();
   const status = useLibrarySyncStatus(library);
-  if (!account.session) return null;
-  const label =
-    library.handle.kind === 'device'
-      ? 'accountSyncOff'
-      : status.state === 'error' || (status.countsState === 'ready' && status.blocked > 0)
-        ? 'accountSyncError'
-        : status.state === 'syncing'
-          ? 'accountSyncing'
-          : status.countsState === 'ready' && status.pending === 0 && status.completedAt
-            ? 'accountSynced'
-            : 'accountSyncPending';
+  if (!account.session || library.handle.kind === 'device') return null;
+  const needsAttention =
+    status.state === 'error' ||
+    status.countsState === 'error' ||
+    (status.countsState === 'ready' && status.blocked > 0);
+  if (
+    !needsAttention &&
+    status.state !== 'syncing' &&
+    !(status.countsState === 'ready' && status.pending > 0)
+  )
+    return null;
+  const label = needsAttention
+    ? 'accountSyncError'
+    : status.state === 'syncing'
+      ? 'accountSyncing'
+      : 'accountSyncPending';
   return (
     <Pressable
       accessibilityRole="button"
       onPress={open}
       style={{
-        backgroundColor: colors.surface,
-        borderRadius: 16,
-        padding: 20,
+        paddingVertical: 12,
         flexDirection: 'row',
         alignItems: 'center',
         gap: 14,
       }}
     >
-      <Icon name="cloud-outline" color={colors.accent} />
       <View style={{ flex: 1, gap: 6 }}>
-        <Text style={{ color: colors.ink, fontWeight: '600', fontSize: 16 }}>
-          {t('accountSync')}
-        </Text>
         <Text
           style={{
             color: label === 'accountSyncError' ? colors.error : colors.muted,

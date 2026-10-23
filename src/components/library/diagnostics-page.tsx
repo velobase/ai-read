@@ -1,15 +1,6 @@
 'use client';
 
 import { useSyncExternalStore } from 'react';
-import {
-  Activity,
-  ArrowDownToLine,
-  Check,
-  CircleHelp,
-  Gauge,
-  ShieldCheck,
-  Trash2,
-} from 'lucide-react';
 import { LibraryShell, PageHeading } from './library-ui';
 import { useI18n } from '@/lib/i18n/provider';
 import { Button } from '@/components/ui/button';
@@ -73,19 +64,8 @@ export function DiagnosticsPage() {
   return (
     <LibraryShell hideNavigation>
       <main className="profile-page diagnostics-page">
-        <PageHeading title={t('诊断与隐私')} back="/me/settings" />
-        <section className="diagnostics-intro">
-          <span className="diagnostics-icon">
-            <Activity size={24} strokeWidth={1.6} />
-          </span>
-          <div>
-            <h2>{t('让阅读更流畅')}</h2>
-            <p>{t('查看当前页面的性能与操作状态，帮助定位阅读中遇到的问题。')}</p>
-          </div>
-        </section>
-
+        <PageHeading title={t('诊断与隐私')} back="/me" />
         <div className="diagnostics-local-note">
-          <ShieldCheck size={17} />
           <span>
             {t('记录仅保留在本次页面内存中，刷新后清除。不含书籍正文、书名、笔记、问题或密钥。')}
           </span>
@@ -93,11 +73,7 @@ export function DiagnosticsPage() {
 
         <section aria-labelledby="performance-title" className="diagnostics-section">
           <div className="diagnostics-section-heading">
-            <h2 id="performance-title">
-              <Gauge size={18} />
-              {t('页面性能')}
-            </h2>
-            <span>{t('本次会话')}</span>
+            <h2 id="performance-title">{t('页面性能')}</h2>
           </div>
           <div className="diagnostics-vitals">
             {(['LCP', 'INP', 'CLS'] as const).map((name) => {
@@ -132,7 +108,6 @@ export function DiagnosticsPage() {
                     </small>
                   </strong>
                   <span className={`diagnostics-rating ${rating || 'pending'}`}>
-                    <i />
                     {t(
                       !rating
                         ? '等待记录'
@@ -148,7 +123,6 @@ export function DiagnosticsPage() {
             })}
           </div>
           <p className="diagnostics-hint">
-            <CircleHelp size={14} />
             {t('部分指标在交互或切换页面后产生；空白不代表零耗时。')}
           </p>
         </section>
@@ -179,7 +153,6 @@ export function DiagnosticsPage() {
             </button>
           </div>
           <div className="diagnostics-consent-state">
-            <Check size={15} />
             {t(
               status.blocked
                 ? '已遵循浏览器的隐私偏好，统计保持关闭。'
@@ -204,9 +177,6 @@ export function DiagnosticsPage() {
             {recent.length ? (
               recent.map((event, index) => (
                 <div className="diagnostics-event" key={`${event.at}-${index}`}>
-                  <span
-                    className={`diagnostics-event-dot ${event.properties.outcome === 'error' ? 'has-error' : ''}`}
-                  />
                   <div>
                     <strong>{t(eventLabels[event.name])}</strong>
                     <span>
@@ -236,11 +206,9 @@ export function DiagnosticsPage() {
           </p>
           <div className="flex flex-wrap gap-3 pt-3">
             <Button variant="secondary" onClick={exportReport} disabled={!events.length}>
-              <ArrowDownToLine size={16} />
               {t('导出诊断')}
             </Button>
             <Button variant="ghost" onClick={clearDiagnostics} disabled={!events.length}>
-              <Trash2 size={16} />
               {t('清空记录')}
             </Button>
           </div>

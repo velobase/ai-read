@@ -100,7 +100,7 @@ export function Button({
 }) {
   const { colors } = useApp();
   const blocked = useLibraryBlocked();
-  const color = secondary ? (danger ? colors.error : colors.accent) : colors.background;
+  const color = secondary ? (danger ? colors.error : colors.ink) : colors.background;
   return (
     <Pressable
       onPress={() => {
@@ -112,7 +112,7 @@ export function Button({
       style={({ pressed }) => [
         styles.button,
         {
-          backgroundColor: secondary ? colors.soft : danger ? colors.error : colors.accent,
+          backgroundColor: secondary ? colors.surface : danger ? colors.error : colors.accent,
           opacity: disabled ? 0.4 : pressed ? 0.7 : 1,
         },
       ]}
@@ -150,15 +150,14 @@ export function Chip({
       style={[
         styles.chip,
         {
-          backgroundColor: active ? colors.soft : colors.background,
+          backgroundColor: active ? colors.surface : 'transparent',
           opacity: disabled ? 0.5 : 1,
-          borderColor: 'transparent',
         },
       ]}
     >
       <Text
         style={{
-          color: active ? colors.accent : colors.muted,
+          color: active ? colors.ink : colors.muted,
           fontSize: 13,
           fontWeight: active ? '600' : '400',
         }}
@@ -168,29 +167,11 @@ export function Chip({
     </Pressable>
   );
 }
-export function Empty({
-  title,
-  description,
-  icon = 'book-outline',
-  children,
-}: {
-  title: string;
-  description?: string;
-  icon?: IconName;
-  children?: ReactNode;
-}) {
+export function Empty({ title, children }: { title: string; children?: ReactNode }) {
   const { colors } = useApp();
   return (
     <View style={styles.empty}>
-      <View style={[styles.emptyIcon, { backgroundColor: colors.soft }]}>
-        <Icon name={icon} color={colors.accent} size={30} />
-      </View>
       <Text style={[styles.subtitle, { color: colors.ink, textAlign: 'center' }]}>{title}</Text>
-      {description && (
-        <Text style={[styles.description, { color: colors.muted, textAlign: 'center' }]}>
-          {description}
-        </Text>
-      )}
       {children}
     </View>
   );
@@ -228,10 +209,10 @@ export function Sheet({
   const [headerHeight, setHeaderHeight] = useState(64);
   const [contentHeight, setContentHeight] = useState<number>();
   const panelLimit = Math.max(0, Math.min(availableHeight, window.height) * (tall ? 0.9 : 0.78));
-  // The grabber occupies 4pt plus its 9pt top margin. A numeric viewport gives
+  // A numeric viewport gives
   // UIScrollView a real scroll range; maxHeight on an auto-height ancestor alone
   // can leave it measured at the entire child's intrinsic height.
-  const scrollLimit = Math.max(0, panelLimit - headerHeight - 13 - insets.bottom);
+  const scrollLimit = Math.max(0, panelLimit - headerHeight - insets.bottom);
   const scrollHeight = Math.min(contentHeight ?? scrollLimit, scrollLimit);
   return (
     <Modal
@@ -277,16 +258,6 @@ export function Sheet({
               overflow: 'hidden',
             }}
           >
-            <View
-              style={{
-                alignSelf: 'center',
-                width: 34,
-                height: 4,
-                borderRadius: 2,
-                backgroundColor: colors.border,
-                marginTop: 9,
-              }}
-            />
             <View
               style={[styles.sheetHeader, { borderColor: colors.border, flexShrink: 0 }]}
               onLayout={({ nativeEvent }) => {
@@ -338,8 +309,6 @@ export function SectionLabel({ children }: { children: string }) {
         color: colors.muted,
         fontSize: 12,
         fontWeight: '600',
-        letterSpacing: 1.2,
-        textTransform: 'uppercase',
         marginTop: 14,
       }}
     >
@@ -374,20 +343,11 @@ export const styles = StyleSheet.create({
   chip: {
     minHeight: 44,
     borderRadius: 22,
-    borderWidth: 1,
     paddingHorizontal: 17,
     alignItems: 'center',
     justifyContent: 'center',
   },
   empty: { alignItems: 'center', gap: 16, padding: 30, paddingVertical: 54 },
-  emptyIcon: {
-    width: 72,
-    height: 72,
-    borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 8,
-  },
   sheetHeader: {
     paddingHorizontal: 22,
     paddingVertical: 12,

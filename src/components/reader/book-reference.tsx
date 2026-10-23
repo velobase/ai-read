@@ -215,16 +215,8 @@ export function BookReferencePreview({
             ),
           )}
         </div>
-        <div className="flex items-center justify-end gap-2 border-t px-6 pt-4 pb-[max(16px,env(safe-area-inset-bottom))]">
-          {!target.location && (
-            <p className="me-auto text-xs leading-5 text-muted-foreground">
-              {t('此附注没有独立的正文位置。')}
-            </p>
-          )}
-          <Button variant="ghost" onClick={close}>
-            {t('关闭')}
-          </Button>
-          {target.location && (
+        {target.location && (
+        <div className="flex justify-end border-t px-6 pt-4 pb-[max(16px,env(safe-area-inset-bottom))]">
             <Button
               onClick={() => {
                 navigating.current = true;
@@ -234,8 +226,8 @@ export function BookReferencePreview({
               {t('在正文中查看')}
               <ArrowUpRight size={15} />
             </Button>
-          )}
         </div>
+        )}
       </DialogContent>
     </Dialog>
   );

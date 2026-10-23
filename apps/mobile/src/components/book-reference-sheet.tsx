@@ -28,7 +28,6 @@ export function ReferenceListSheet({
       title={t('bookReferences')}
       close={close}
     >
-      <Text style={{ color: colors.muted, lineHeight: 22 }}>{t('bookReferencesHint')}</Text>
       {references.map((reference, index) => (
         <Pressable
           key={`${reference.id}:${reference.origin.paragraph}`}

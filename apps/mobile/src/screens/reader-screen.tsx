@@ -71,7 +71,7 @@ import {
   type ReferenceOrigin,
 } from '../adapters/book-references';
 import { ReferenceListSheet, ReferencePreviewSheet } from '../components/book-reference-sheet';
-import { Button, Chip, Icon, IconButton, Sheet, SectionLabel, styles } from '../components/ui';
+import { Button, Chip, Icon, IconButton, Sheet, styles } from '../components/ui';
 import { TranslationVersionsContent } from '../components/translation-versions-sheet';
 import { ReaderReturnActions } from '../components/reader-return-actions';
 import { resolveReaderLocation, type ReaderLocationSnapshot } from '../adapters/reader-location';
@@ -441,27 +441,10 @@ export function ReaderScreen({
     return entries;
   }, [book, library]);
   const scrollParagraphs = continuous ? allParagraphs : chapter.paragraphs;
-  const translationScope = `${book.id}:${current.chapter}:${current.paragraph}:${readingLanguage}:${readingOverride?.mode || prefs.mode}`;
-  const [translationWindow, setTranslationWindow] = useState<{
-    scope: string;
-    paragraph?: string;
-  }>();
-  const translationTarget =
-    translationWindow?.scope === translationScope ? translationWindow.paragraph : undefined;
-  const targetEntry = translationTarget ? paragraphIndex.get(translationTarget) : undefined;
-  const translation = useChapterTranslation(
-    book,
-    value.translations,
-    targetEntry && translationTarget
-      ? { ...current, chapter: targetEntry.chapter, paragraph: translationTarget }
-      : current,
-    {
-      auto:
-        !referenceOriginal && !readingOverride && !revealedTranslation && prefs.mode !== 'original',
-      language: readingLanguage,
-      initialKeys: value.translationKeys,
-    },
-  );
+  const translation = useChapterTranslation(book, value.translations, current, {
+    language: readingLanguage,
+    initialKeys: value.translationKeys,
+  });
   const [displayedTranslation, setDisplayedTranslation] = useState({
     language: readingLanguage,
     saved: translation.saved,
@@ -528,26 +511,6 @@ export function ReaderScreen({
     ],
   );
   const speechActive = ['loading', 'speaking', 'paused'].includes(speech.state.status);
-  const translationState = {
-    status: translation.loadError ? ('error' as const) : translation.status,
-    retry: translation.loadError ? () => void translation.refresh() : translation.retry,
-  };
-  const missingVisibleParagraph = visibleParagraphs.find(
-    (id) => paragraphIndex.get(id)?.paragraph.text.trim() && !translations[id],
-  );
-  useEffect(() => {
-    const firstMissing = visibleParagraphs.find(
-      (id) => paragraphIndex.get(id)?.paragraph.text.trim() && !translation.translations[id],
-    );
-    const paragraph =
-      firstMissing ||
-      visibleParagraphs.filter((id) => paragraphIndex.get(id)?.paragraph.text.trim()).at(-1);
-    setTranslationWindow((old) =>
-      old?.scope === translationScope && old.paragraph === paragraph
-        ? old
-        : { scope: translationScope, paragraph },
-    );
-  }, [visibleParagraphs, translation.translations, paragraphIndex, translationScope]);
   const bookmarkContext = useRef('');
   bookmarkContext.current = `${positionEpoch.current}:${jumpRevision}:${layoutRevision}:${readingMode}:${readingLanguage}:${prefs.turnMode}:${prefs.scrollFlow}:${prefs.fontSize}:${prefs.lineHeight}:${prefs.serif}`;
   const currentText = useRef({ translations, translationKeys, readingMode });
@@ -1756,7 +1719,6 @@ export function ReaderScreen({
     setJumpRevision((value) => value + 1);
     setLayoutRevision((value) => value + 1);
     patch(next);
-    setSheet(null);
   };
   const finishReading = async (dismiss = false) => {
     if (!isReaderCurrent()) return;
@@ -1880,17 +1842,14 @@ export function ReaderScreen({
             <Text numberOfLines={1} style={{ flex: 1, color: colors.muted, fontSize: 13 }}>
               {book.title}
             </Text>
-            <IconButton
-              icon="headset-outline"
-              label={t(speechActive ? 'speechControls' : 'listen')}
-              active={speechActive}
-              onPress={() => void openSpeech()}
-            />
-            <IconButton
-              icon="bookmark-outline"
-              label={t('bookmarks')}
-              onPress={() => setSheet('bookmarks')}
-            />
+            {speechActive && (
+              <IconButton
+                icon="headset-outline"
+                label={t('speechControls')}
+                active
+                onPress={() => void openSpeech()}
+              />
+            )}
             <IconButton
               icon="ellipsis-horizontal"
               label={t('more')}
@@ -1898,6 +1857,14 @@ export function ReaderScreen({
             />
           </View>
         )}
+        <View style={{ paddingHorizontal: 28 }}>
+          <TranslationStatus
+            status={translation.loadError ? 'error' : translation.status}
+            progress={translation.progress}
+            canRetry={translation.canRetry}
+            retry={translation.retry}
+          />
+        </View>
         {prefs.turnMode === 'paged' ? (
           <PaginatedChapter
             key={`${chapterIndex}:${jump}:${jumpRevision}`}
@@ -1907,10 +1874,6 @@ export function ReaderScreen({
             translationKeys={translationKeys}
             readingMode={readingMode}
             readingLanguage={readingLanguage}
-            translationStatus={translation.loadError ? 'error' : translation.status}
-            retryTranslation={
-              translation.loadError ? () => void translation.refresh() : translation.retry
-            }
             onVisibleParagraphs={visibleParagraphsChanged}
             onInteractionChange={readingInteraction}
             onReadyChange={(ready) => {
@@ -1991,16 +1954,16 @@ export function ReaderScreen({
               alignSelf: 'center',
             }}
             ListHeaderComponent={
-              !continuous ? (
+              !continuous && (pdf || (readingMode !== 'translation' && !chapterStartsWithTitle)) ? (
                 <Pressable
                   onPress={() => setToolsVisible((v) => !v)}
                   style={{ paddingTop: pdf ? 8 : 24, paddingBottom: pdf ? 14 : 26, gap: 14 }}
                 >
-                  <Text style={{ color: colors.accent, fontSize: 11, letterSpacing: 1.4 }}>
-                    {pdf
-                      ? sourcePageLabel || chapter.title
-                      : `${t('chapter', { n: chapterIndex + 1 })} / ${book.chapters.length}`}
-                  </Text>
+                  {pdf && (
+                    <Text style={{ color: colors.muted, fontSize: 11 }}>
+                      {sourcePageLabel || chapter.title}
+                    </Text>
+                  )}
                   {readingMode !== 'translation' && !pdf && !chapterStartsWithTitle && (
                     <Text
                       accessibilityRole="header"
@@ -2146,26 +2109,18 @@ export function ReaderScreen({
                   {readingMode !== 'original' &&
                     translation &&
                     paragraphText('translation', translation)}
-                  {readingMode !== 'original' &&
-                    !!item.text.trim() &&
-                    !translation &&
-                    (item.id === missingVisibleParagraph ? (
-                      <TranslationStatus
-                        status={translationState.status}
-                        retry={translationState.retry}
-                      />
-                    ) : readingMode === 'translation' ? (
-                      <Text
-                        style={{
-                          color: colors.muted,
-                          fontSize: 13,
-                          lineHeight: 24,
-                          paddingVertical: 12,
-                        }}
-                      >
-                        {t('translationPending')}
-                      </Text>
-                    ) : null)}
+                  {readingMode !== 'original' && !!item.text.trim() && !translation && (
+                    <Text
+                      style={{
+                        color: colors.muted,
+                        fontSize: 13,
+                        lineHeight: 24,
+                        paddingVertical: 12,
+                      }}
+                    >
+                      {t('translationPending')}
+                    </Text>
+                  )}
                   {imagesByParagraph.get(item.id)?.after.map((image) => (
                     <BookImage key={image.placement.id} image={image} open={openImage} />
                   ))}
@@ -2214,9 +2169,6 @@ export function ReaderScreen({
             // a finished-book announcement to accessibility while reading an earlier chapter.
             ListFooterComponent={
               <View style={{ gap: 18, paddingTop: 10 }}>
-                <Text style={{ color: colors.muted, fontSize: 11, textAlign: 'center' }}>
-                  {t('noteHint')}
-                </Text>
                 {!continuous && chapterIndex + 1 < book.chapters.length ? (
                   <Button
                     onPress={() =>
@@ -2378,7 +2330,6 @@ export function ReaderScreen({
             >
               {[
                 { sheet: 'contents', icon: 'list-outline', label: 'chapters' },
-                { sheet: 'progress', icon: 'compass-outline', label: 'readingProgress' },
                 { sheet: 'notes', icon: 'create-outline', label: 'notes' },
                 { sheet: 'language', icon: 'language-outline', label: 'readingLanguage' },
                 { sheet: 'appearance', icon: 'text-outline', label: 'typesetting' },
@@ -2534,11 +2485,12 @@ export function ReaderScreen({
             }}
           />
         )}
-        <Sheet {...sheetProps('bookTools')} title={t('more')} close={() => setSheet(null)}>
-          <Text style={{ color: colors.ink, fontSize: 19, fontWeight: '600' }}>{book.title}</Text>
-          <Text style={{ color: colors.muted }}>{book.author}</Text>
+        <Sheet {...sheetProps('bookTools')} title={book.title} close={() => setSheet(null)}>
           <Button secondary icon="bookmark-outline" onPress={() => setSheet('bookmarks')}>
             {t('bookmarks')}
+          </Button>
+          <Button secondary icon="headset-outline" onPress={() => void openSpeech()}>
+            {t(speechActive ? 'speechControls' : 'listen')}
           </Button>
           {!!referenceHistory.length && (
             <ReaderReturnActions
@@ -2594,9 +2546,6 @@ export function ReaderScreen({
           {sheet === 'progress' && (
             <ReadingProgressPanel book={book} paragraph={current.paragraph} navigate={navigate} />
           )}
-          <Button secondary onPress={() => void exit()}>
-            {t('back')}
-          </Button>
         </Sheet>
         <ReaderNotesSheet
           book={book}
@@ -2660,7 +2609,6 @@ export function ReaderScreen({
             pdfPages={pdfPages}
             setPdfPages={setPdfPages}
             close={() => setSheet(null)}
-            bookmarks={() => setSheet('bookmarks')}
             search={() => setSheet('search')}
             navigate={navigate}
           />
@@ -2780,8 +2728,7 @@ export function ReaderScreen({
                   </Chip>
                 ))}
               </View>
-              <SectionLabel>{t('translationLanguage')}</SectionLabel>
-              <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+              <View accessibilityLabel={t('translationLanguage')} style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
                 {Object.entries({
                   'zh-CN': '简体中文',
                   'zh-TW': '繁體中文',

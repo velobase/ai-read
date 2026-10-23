@@ -1,13 +1,11 @@
-export const privacyUrl = 'https://leafread.ai/bypage/privacy.html';
 export const supportUrl = 'https://leafread.ai/bypage/support.html';
-export const supportEmail = 'leafread-support@googlegroups.com';
 export const privacyUpdated = '2026-10-23';
 
 export const privacyContent = {
   'zh-CN': [
     [
       '适用范围',
-      '本政策适用于 UTOPIX, LLC 发布的 叶子阅读 iOS 阅读应用。基础阅读无需账号。App 使用 leafread.ai 官方服务提供账号、在线 AI 与可选书库同步，不支持自定义服务器。登录不会自动上传本机书籍或笔记，诊断也不会自动上传。',
+      '本政策适用于 UTOPIX, LLC 发布的 叶子阅读 iOS 阅读应用。基础阅读无需账号。App 使用 leafread.ai 官方服务提供账号、在线 AI 与可选书库同步，不支持自定义服务器。仅登录不会上传本机书籍或笔记；登录后打开需要翻译的书籍会按下述流程上传正文。诊断不会自动上传。',
     ],
     [
       '本机阅读数据',
@@ -15,7 +13,7 @@ export const privacyContent = {
     ],
     [
       '官方账号与在线服务',
-      'App 连接 leafread.ai 官方服务以检查功能可用性和登录状态，该服务会接收连接请求及通常的网络信息，例如 IP 地址。你可选择 Apple 或 Google 登录。Apple 提供姓名和邮箱（可选择隐藏邮箱）；Google 提供姓名、邮箱及头像。我们不会获取你的 Apple 或 Google 密码。为在注销时撤销 Apple 授权，服务器加密保存 Apple 刷新令牌，仅用于身份授权管理。登录后，服务可向 App 提供姓名、邮箱、用户标识及会话信息；登录凭据保存在 iOS Keychain 中。选择双语或仅译文阅读时，App 会按阅读位置将当前及相邻段落的原文和必要书籍信息发送给官方服务及其配置的模型提供方，以加载译文；已有的本机译文会直接复用。提问时会发送问题和相关原文、对话上下文。翻译断点与已完成的译文保存在本机；离开阅读页、锁屏或切回原文会停止后续翻译，恢复阅读后可继续。插图、PDF 原文件、笔记和书签不会随翻译请求发送，书库同步也不会因此自动开启。你可以不登录而继续本机阅读。',
+      'App 连接 leafread.ai 官方服务以检查功能可用性和登录状态，该服务会接收连接请求及通常的网络信息，例如 IP 地址。你可选择 Apple 或 Google 登录。Apple 提供姓名和邮箱（可选择隐藏邮箱）；Google 提供姓名、邮箱及头像。我们不会获取你的 Apple 或 Google 密码。为在注销时撤销 Apple 授权，服务器加密保存 Apple 刷新令牌，仅用于身份授权管理。登录后，服务可向 App 提供姓名、邮箱、用户标识及会话信息；登录凭据保存在 iOS Keychain 中。登录后打开源语言与目标语言不同的书籍时，App 会将全书正文和必要书籍信息上传到官方服务器，创建或复用持久翻译任务。服务器在后台将正文分批发送给配置的模型提供方，并保存翻译进度和已完成的译文。离开阅读页、锁屏或切回原文不会停止后台翻译；重新打开书籍时，App 会读取本机已有译文并更新服务器进度和结果，已获取的译文也会保存在本机。提问时会发送问题和相关原文、对话上下文。插图、PDF 原文件、笔记和书签不会随翻译请求发送，书库同步也不会因此自动开启。你可以不登录而继续本机阅读。',
     ],
     [
       '可选的账号书库',
@@ -37,7 +35,7 @@ export const privacyContent = {
   en: [
     [
       'Scope',
-      'This policy covers the LeafRead iOS reader published by UTOPIX, LLC. Basic reading requires no account. The app uses the official leafread.ai service for accounts, online AI and optional library sync. Custom servers are not supported. Signing in does not automatically upload device books or notes, and diagnostics are not uploaded automatically.',
+      'This policy covers the LeafRead iOS reader published by UTOPIX, LLC. Basic reading requires no account. The app uses the official leafread.ai service for accounts, online AI and optional library sync. Custom servers are not supported. Signing in alone does not upload device books or notes. Opening a book that needs translation after sign-in uploads its text as described below. Diagnostics are not uploaded automatically.',
     ],
     [
       'Reading data on your device',
@@ -45,7 +43,7 @@ export const privacyContent = {
     ],
     [
       'Official account and online services',
-      'The app connects to the official leafread.ai service to check feature availability and sign-in status. The service receives connection requests and ordinary network information such as your IP address. You can choose Apple or Google sign-in. Apple provides your name and email, with Hide My Email available; Google provides your name, email and profile image. We never receive your Apple or Google password. The server encrypts and stores Apple refresh tokens solely for identity authorization management, including revocation when you delete your account. After sign-in, it may provide the app with your name, email, user identifier and session information; authentication credentials are stored in iOS Keychain. Choosing bilingual or translation-only reading sends the current and nearby source passages and necessary book details to the official service and its configured model provider to load translations. Existing on-device translations are reused. Asking a question sends the question and relevant passages and conversation context. Translation checkpoints and completed text are stored on your device. Leaving the reader, locking the phone or returning to original-text mode stops further translation; it can continue when you resume reading. Images, original PDF files, notes and bookmarks are not sent with translation requests, and library sync is not automatically enabled. You can continue local reading without signing in.',
+      'The app connects to the official leafread.ai service to check feature availability and sign-in status. The service receives connection requests and ordinary network information such as your IP address. You can choose Apple or Google sign-in. Apple provides your name and email, with Hide My Email available; Google provides your name, email and profile image. We never receive your Apple or Google password. The server encrypts and stores Apple refresh tokens solely for identity authorization management, including revocation when you delete your account. After sign-in, it may provide the app with your name, email, user identifier and session information; authentication credentials are stored in iOS Keychain. After sign-in, opening a book whose source language differs from the target language uploads the full book text and necessary book details to the official server to create or reuse a persistent translation task. A server worker sends the text in batches to the configured model provider and saves translation progress and completed translations. Translation continues in the background when you leave the reader, lock the phone or return to original-text mode. When you reopen the book, the app reads existing local translations and refreshes progress and results from the server. Downloaded translations are also saved on your device. Asking a question sends the question and relevant passages and conversation context. Images, original PDF files, notes and bookmarks are not sent with translation requests, and library sync is not automatically enabled. You can continue local reading without signing in.',
     ],
     [
       'Optional account library',
