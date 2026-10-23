@@ -12,8 +12,11 @@ export function appleConfigured() {
 }
 
 // Short-lived client secrets are generated for each OAuth request, never shipped to clients.
-export function appleClientSecret() {
+export const nativeAppleClientId = 'com.velobase.bypage';
+export function appleClientSecret(clientId = process.env.AUTH_APPLE_ID!) {
   if (!appleConfigured()) throw new Error('apple_auth_unavailable');
+  if (![process.env.AUTH_APPLE_ID, nativeAppleClientId].includes(clientId))
+    throw new Error('apple_auth_unavailable');
   const now = Math.floor(Date.now() / 1000);
   const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
   const body = `${encode({ alg: 'ES256', kid: process.env.AUTH_APPLE_KEY_ID })}.${encode({
@@ -21,7 +24,7 @@ export function appleClientSecret() {
     iat: now,
     exp: now + 3600,
     aud: 'https://appleid.apple.com',
-    sub: process.env.AUTH_APPLE_ID,
+    sub: clientId,
   })}`;
   const signature = sign('sha256', Buffer.from(body), {
     key: process.env.AUTH_APPLE_PRIVATE_KEY!.replace(/\\n/g, '\n'),
@@ -50,7 +53,12 @@ export function encryptAppleToken(token: string, userId: string, subject: string
     encrypted.toString('base64'),
   ].join('.');
 }
-export async function revokeAppleToken(envelope: string, userId: string, subject: string) {
+export async function revokeAppleToken(
+  envelope: string,
+  userId: string,
+  subject: string,
+  clientId = process.env.AUTH_APPLE_ID!,
+) {
   const [version, iv, tag, data, extra] = envelope.split('.');
   if (version !== 'v1' || !iv || !tag || !data || extra !== undefined)
     throw new Error('apple_revocation_unavailable');
@@ -68,8 +76,8 @@ export async function revokeAppleToken(envelope: string, userId: string, subject
     signal: AbortSignal.timeout(10000),
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
-      client_id: process.env.AUTH_APPLE_ID!,
-      client_secret: appleClientSecret(),
+      client_id: clientId,
+      client_secret: appleClientSecret(clientId),
       token,
       token_type_hint: 'refresh_token',
     }),

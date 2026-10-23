@@ -104,6 +104,7 @@ const zh = {
   accountSignedOut: '已退出登录，本机书库已保留',
   accountSignedOutOffline: '本机已退出。网络未连接，可在网页版账号设置中撤销此设备。',
   accountLoginError: '登录未完成，请检查网络后重试。',
+  accountLinkRequired: '这个邮箱已使用另一种方式注册。请使用原来的 Apple 或 Google 登录方式。',
   accountStorageError: '无法访问本机安全凭证，请重试。',
   accountBuildRequired: '请更新 叶子阅读 后使用 Google 登录。',
   accountExpired: '登录已失效，请重新登录。',
@@ -670,6 +671,7 @@ const en: Record<TextKey, string> = {
   accountSignedOutOffline:
     'Signed out locally. You can revoke this device in your web account settings when connected.',
   accountLoginError: 'Sign-in did not finish. Check your connection and try again.',
+  accountLinkRequired: 'This email already belongs to another sign-in method. Use the Apple or Google option you originally registered with.',
   accountStorageError: 'Secure credentials could not be accessed. Please try again.',
   accountBuildRequired: 'Update LeafRead to use Google sign-in.',
   accountExpired: 'Your sign-in has expired. Please sign in again.',

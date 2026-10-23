@@ -69,3 +69,17 @@ Google Cloud 项目：`velobase-ai-read-auth`，客户端名称：`AI Read Local
 遵从项目偏好，不编写或运行单元、集成和端到端自动化测试，不调用付费模型。交付执行 Prisma 生成、迁移、TypeScript 检查、生产构建与静态审阅。真实 Google 登录回调、跨设备会话撤销、同步、断网重连、冲突处理及用户书库迁移由用户验收。
 
 参考：[Auth.js Google](https://authjs.dev/getting-started/providers/google)、[Prisma adapter](https://authjs.dev/getting-started/adapters/prisma)、[Prisma PostgreSQL](https://www.prisma.io/docs/orm/overview/databases/postgresql)。
+
+## iOS 原生授权（LeafRead 1.0.1）
+
+Apple 使用 `ASAuthorizationController`，Google 使用官方 Google Sign-In iOS SDK 9.2.0（仅基础身份 scopes）。原生模块内接收提供方令牌，JS 只获得公开账号和会话信息。App 恢复时直接读取原有 Keychain 会话，不依赖浏览器 Cookie，也不会因为 Google SDK 中存在旧账号而在退出后自动重新登录。
+
+`POST /api/mobile/v1/auth/native/challenge` 签发五分钟 nonce / PKCE challenge；`token` 校验提供方签名、issuer、audience、nonce，Google 同时限制 `azp` 为 `AUTH_GOOGLE_IOS_ID`。数据库消费 challenge 的摘要，防止跨实例重放。Apple 原生 client ID 为 `com.velobase.bypage`；Web Services ID 保持独立，注销时分别撤销对应授权。
+
+账号按现有 `provider + providerAccountId` 找回。相同邮箱的不同提供方不自动关联，界面提示使用原登录方式。原生授权初始只授予 `account_ai`，`library` 需要界面显示当前邮箱并单独确认 `library_sync`，不会上传本机书籍。同步授权复用当前会话，重试丢失的响应不会导致凭据失效。
+
+`refresh` 在每次前台恢复时验证并续期有效移动端会话，最长延至未来 30 天，并限制自创建起 180 天后重新认证。过期、撤销或已删除账号的会话不能续期。网络失败保留本机状态；401 清理凭据。原生与 JS 层均校验原会话身份，防止迟到回调覆盖新登录。
+
+新增服务器环境变量 `AUTH_GOOGLE_IOS_ID`：在既有 Google OAuth 项目中为 bundle `com.velobase.bypage` 创建的 iOS 公共客户端 ID。App 的 `GIDClientID`、`GIDServerClientID` 和反向 URL scheme 与控制台配置匹配。Apple 私钥及 Google Web secret 仅位于服务器；客户端 ID 是公共标识。Google App Check 没有启用，也没有请求 Gmail、Drive、电话号码等附加权限。
+
+验证范围：静态类型检查与生产构建；模拟器仅手动检查授权入口。完整登录、回跳、会话续期和账号删除由用户自行验证，不运行自动化测试。

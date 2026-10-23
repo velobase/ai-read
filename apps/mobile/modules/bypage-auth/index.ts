@@ -25,7 +25,8 @@ type NativeAuth = {
   providerVersion?: number;
   signInWithProvider?(origin: string, provider: 'google' | 'apple'): Promise<NativeSession>;
   signIn(origin: string): Promise<NativeSession>;
-  signInLibrary?(origin: string): Promise<NativeSession>;
+  signInLibrary?(origin: string, expectedSessionId: string): Promise<NativeSession>;
+  renewSession?(origin: string, expectedSessionId: string): Promise<NativeSession>;
   readSession(origin: string): Promise<NativeSession | null>;
   authorization(origin: string, expectedSessionId: string): Promise<string | null>;
   cancelSignIn(): Promise<void>;
@@ -36,7 +37,7 @@ type NativeAuth = {
 const native = requireOptionalNativeModule<NativeAuth>('ByPageAuth');
 export const available = !!native && native.version >= 1;
 export const libraryAvailable =
-  available && (native?.libraryVersion || 0) >= 1 && typeof native?.signInLibrary === 'function';
+  available && (native?.libraryVersion || 0) >= 2 && typeof native?.signInLibrary === 'function';
 
 function module(): NativeAuth {
   if (!available) throw new Error('native_auth_unavailable');
@@ -64,9 +65,12 @@ export const signIn = async (origin: string, provider: 'google' | 'apple' = 'goo
   if (provider === 'apple') throw new Error('native_auth_unavailable');
   return publicSession(await auth.signIn(origin), origin);
 };
-export async function signInLibrary(origin: string): Promise<AuthSession> {
+export async function signInLibrary(
+  origin: string,
+  expectedSessionId: string,
+): Promise<AuthSession> {
   if (!libraryAvailable) throw new Error('native_library_auth_unavailable');
-  const session = publicSession(await native!.signInLibrary!(origin), origin);
+  const session = publicSession(await native!.signInLibrary!(origin, expectedSessionId), origin);
   if (!session.permissions.includes('library_sync')) throw new Error('invalid_auth_permissions');
   return session;
 }
@@ -83,3 +87,12 @@ export const cancelSignIn = () => (available ? native!.cancelSignIn() : Promise.
 export const clearSession = (origin: string, expectedSessionId?: string) =>
   available ? native!.clearSession(origin, expectedSessionId ?? null) : Promise.resolve();
 export const logout = (origin: string) => module().logout(origin);
+
+export const renewalAvailable = !!native?.renewSession && (native?.version || 0) >= 3;
+export async function renewSession(
+  origin: string,
+  expectedSessionId: string,
+): Promise<AuthSession> {
+  if (!renewalAvailable) throw new Error('native_auth_unavailable');
+  return publicSession(await native!.renewSession!(origin, expectedSessionId), origin);
+}
