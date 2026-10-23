@@ -2,6 +2,7 @@
 import { useI18n } from '@/lib/i18n/provider';
 import { Button } from '@/components/ui/button';
 import { BookOpen, Check, LoaderCircle, Pause, Play, RefreshCw } from 'lucide-react';
+import { translationErrorMessage } from '../../../packages/reading-core/src/translation-errors';
 import type { BookTranslationController } from './use-book-translation';
 import type { Book } from '@/lib/types';
 
@@ -94,12 +95,14 @@ export function TranslationPanel({
             ? zh
               ? '当前离线，已保存译文仍可阅读。'
               : 'Offline. Saved translations remain available.'
-            : c.error || work?.error}
+            : translationErrorMessage(c.error || work?.error || 'translation_failed', locale)}
         </p>
       )}
       <div className="flex flex-wrap gap-2">
         {!c.canPrepare ? (
-          <Button onClick={connect}>{zh ? '登录或查看翻译服务' : 'Sign in or check translation service'}</Button>
+          <Button onClick={connect}>
+            {zh ? '登录或查看翻译服务' : 'Sign in or check translation service'}
+          </Button>
         ) : (
           <>
             {active ? (
@@ -275,10 +278,11 @@ export function ChapterPreparation({
           ? zh
             ? '已保存的章节仍可阅读，联网后继续下载。'
             : 'Saved chapters remain readable. Reconnect to download more.'
-          : error ||
-            (zh
+          : error
+            ? translationErrorMessage(error, locale)
+            : zh
               ? '整章准备好后自动打开，阅读中不再逐段等待。也可以先读原文。'
-              : 'The complete chapter opens when ready, without paragraph-by-paragraph waits. You can read the original meanwhile.')}
+              : 'The complete chapter opens when ready, without paragraph-by-paragraph waits. You can read the original meanwhile.'}
       </p>
       {state && active && (
         <div className="mt-5 w-48">

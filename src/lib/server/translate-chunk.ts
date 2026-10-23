@@ -11,10 +11,13 @@ import {
 
 export class TranslationError extends Error {
   constructor(
+    public code: string,
     message: string,
     public retryable = false,
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
+    this.name = 'TranslationError';
   }
 }
 
@@ -71,21 +74,29 @@ Include every segment id exactly once, in input order. Keep paragraph boundaries
       model: profile.model,
       upstreamRequestId: response.headers.get('x-request-id'),
     });
-    const messages: Record<number, string> = {
-      401: '翻译服务暂时无法认证，请稍后重试',
-      402: '服务余额不足',
-      403: '服务拒绝访问',
-      404: '请检查服务地址和模型名称',
-      429: '请求限流或额度不足',
+    const codes: Record<number, string> = {
+      401: 'translation_authentication_failed',
+      402: 'translation_balance_insufficient',
+      403: 'translation_forbidden',
+      404: 'translation_model_unavailable',
+      429: 'translation_rate_limited',
     };
     throw new TranslationError(
-      messages[response.status] || '翻译服务暂时不可用。',
+      codes[response.status] || 'translation_service_unavailable',
+      `Model provider returned ${response.status}`,
       response.status === 408 || response.status === 429 || response.status >= 500,
+      {
+        cause: {
+          status: response.status,
+          upstreamBody,
+          upstreamRequestId: response.headers.get('x-request-id'),
+        },
+      },
     );
   }
   // Bound the response without silently accepting a truncated translation.
   const reader = response.body?.getReader();
-  if (!reader) throw new TranslationError('模型没有返回正文。', true);
+  if (!reader) throw new TranslationError('translation_empty_response', '模型没有返回正文。', true);
   let bytes = 0;
   const pieces: Uint8Array[] = [];
   try {
@@ -95,19 +106,38 @@ Include every segment id exactly once, in input order. Keep paragraph boundaries
       bytes += value.byteLength;
       if (bytes > 2 * 1024 * 1024) {
         await reader.cancel();
-        throw new TranslationError('译文响应过长，尚未发布。');
+        throw new TranslationError('translation_response_too_large', '译文响应过长，尚未发布。');
       }
       pieces.push(value);
     }
   } finally {
     reader.releaseLock();
   }
-  const data = JSON.parse(Buffer.concat(pieces).toString('utf8'));
+  const upstreamBody = Buffer.concat(pieces).toString('utf8');
+  let data;
+  try {
+    data = JSON.parse(upstreamBody);
+  } catch (cause) {
+    throw new TranslationError(
+      'translation_invalid_response',
+      'Model provider returned invalid JSON.',
+      true,
+      { cause: { error: cause, upstreamBody } },
+    );
+  }
   const choice = data.choices?.[0];
   if (choice?.finish_reason !== 'stop')
-    throw new TranslationError('模型未完整输出译文，尚未发布。');
+    throw new TranslationError(
+      'translation_incomplete_response',
+      '模型未完整输出译文，尚未发布。',
+      false,
+      { cause: { upstreamBody } },
+    );
   const content = choice.message?.content;
-  if (typeof content !== 'string') throw new TranslationError('模型没有返回正文。');
+  if (typeof content !== 'string')
+    throw new TranslationError('translation_empty_response', '模型没有返回正文。', false, {
+      cause: { upstreamBody },
+    });
   try {
     const value = JSON.parse(
       content
@@ -119,12 +149,14 @@ Include every segment id exactly once, in input order. Keep paragraph boundaries
   } catch (error) {
     logException('translation.parse', error, { content, model: profile.model });
     throw new TranslationError(
+      'translation_invalid_response',
       error instanceof SyntaxError
         ? '译文格式不完整，请重试。'
         : error instanceof Error
           ? error.message
           : '译文格式不完整，请重试。',
       true,
+      { cause: { error, upstreamBody } },
     );
   }
 }

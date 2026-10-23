@@ -60,7 +60,7 @@ async function api(
     },
   );
   const value = await response.json();
-  if (!response.ok) throw new Error(value.error || '译文任务暂时不可用。');
+  if (!response.ok) throw new Error(value.error || 'translation_service_unavailable');
   return value;
 }
 
@@ -82,7 +82,8 @@ export function useBookTranslation(
     chapters: ChapterTranslation[];
     cached: number;
     loaded: boolean;
-  }>({ scope: '', manifest: empty, chapters: [], cached: 0, loaded: false });
+    sourceHash: string;
+  }>({ scope: '', manifest: empty, chapters: [], cached: 0, loaded: false, sourceHash: '' });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [online, setOnline] = useState(true);
@@ -98,6 +99,11 @@ export function useBookTranslation(
   const edition = manifest.editions.find((e) => e.id === manifest.selectedId);
   const work = manifest.editions[0] || edition;
   const source = useMemo(() => translationSource(book), [book]);
+  const autoConflict = useRef<{
+    scope: string;
+    editionId?: string;
+    sourceHash: string;
+  } | null>(null);
   const chapters = data.scope === scope ? data.chapters : [];
   const artifacts = useMemo(() => new Map(chapters.map((c) => [c.index, c])), [chapters]);
   const legacy = useMemo(() => {
@@ -150,7 +156,7 @@ export function useBookTranslation(
     rememberTranslationCredentials(settings);
   }, [settings]);
   useEffect(() => {
-    const failed = () => setError('译文无法保存到本机，已暂停。请检查浏览器存储空间后继续。');
+    const failed = () => setError('translation_storage_failed');
     window.addEventListener('bypage-translation-storage-error', failed);
     return () => window.removeEventListener('bypage-translation-storage-error', failed);
   }, []);
@@ -176,6 +182,7 @@ export function useBookTranslation(
         chapters: cached,
         cached: indices.length,
         loaded: true,
+        sourceHash: hashes.hash,
       };
       if (!disposed)
         setData((old) =>
@@ -230,7 +237,8 @@ export function useBookTranslation(
           if (!disposed) setError('');
         }
       } catch (error) {
-        if (!disposed) setError(error instanceof Error ? error.message : '译本暂时无法读取。');
+        console.error('translation.sync', error);
+        if (!disposed) setError(error instanceof Error ? error.message : 'translation_load_failed');
       } finally {
         syncing = false;
       }
@@ -241,7 +249,10 @@ export function useBookTranslation(
       void sync();
     };
     const localUpdate = () => {
-      void local().catch(() => {});
+      void local().catch((error) => {
+        console.error('translation.local', error);
+        if (!disposed) setError('translation_storage_failed');
+      });
     };
     const channel =
       typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel('bypage-translations');
@@ -269,12 +280,11 @@ export function useBookTranslation(
     setBusy(true);
     setError('');
     try {
-      if (!options.enabled || (accounts && !user)) throw new Error('请先登录，再准备译文。');
-      if (!accounts && !navigator.locks)
-        throw new Error('当前浏览器不支持持久翻译任务，请使用新版浏览器。');
+      if (!options.enabled || (accounts && !user)) throw new Error('native_session_required');
+      if (!accounts && !navigator.locks) throw new Error('translation_browser_unsupported');
       // Built-in books may not yet have a physical local record.
       const saved = await localTransaction('readwrite', (tx) => ensureLocalBook(tx, book.id));
-      if (!saved) throw new Error('这本书已被删除。');
+      if (!saved) throw new Error('translation_book_not_found');
       if (accounts) {
         const next = await api(book.id, settings.language, {}, command, book);
         await cacheManifest(book.id, settings.language, next);
@@ -282,8 +292,11 @@ export function useBookTranslation(
       translationChanged();
       if (activeScope.current === scope) setRefresh((v) => v + 1);
     } catch (error) {
+      console.error('translation.command', error);
+      if (command.auto && error instanceof Error && error.message === 'translation_source_changed')
+        autoConflict.current = { scope, editionId: edition?.id, sourceHash: data.sourceHash };
       if (activeScope.current === scope)
-        setError(error instanceof Error ? error.message : '译文任务暂时不可用。');
+        setError(error instanceof Error ? error.message : 'translation_service_unavailable');
     } finally {
       operation.current = false;
       setBusy(false);
@@ -309,6 +322,10 @@ export function useBookTranslation(
       (accounts && !user) ||
       !settings.baseUrl ||
       !settings.model ||
+      (edition && edition.sourceHash !== data.sourceHash) ||
+      (autoConflict.current?.scope === scope &&
+        autoConflict.current.editionId === edition?.id &&
+        autoConflict.current.sourceHash === data.sourceHash) ||
       (edition && ['paused', 'error'].includes(edition.state))
     )
       return;
@@ -341,13 +358,18 @@ export function useBookTranslation(
     online,
     settings.baseUrl,
     settings.model,
+    source,
     autoTick,
   ]);
   return {
     manifest,
     edition,
     work,
-    error,
+    error:
+      error ||
+      (data.scope === scope && data.loaded && edition && edition.sourceHash !== data.sourceHash
+        ? 'translation_source_changed'
+        : ''),
     busy,
     online,
     loaded: data.scope === scope && data.loaded,
