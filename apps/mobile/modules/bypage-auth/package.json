@@ -1,0 +1,8 @@
+{
+  "name": "bypage-auth",
+  "version": "0.1.0",
+  "private": true,
+  "description": "System browser sign-in and origin-bound Keychain sessions for ByPage",
+  "license": "MIT",
+  "main": "index.ts"
+}
