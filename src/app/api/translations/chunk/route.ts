@@ -10,9 +10,9 @@ export const runtime = 'nodejs';
 let active = 0;
 export async function POST(request: Request) {
   // Account jobs obtain their original text and frozen profile from the database.
-  if (authEnabled()) return Response.json({ error: '请使用账号译文任务。' }, { status: 403 });
-  if (active >= 2)
-    return Response.json({ error: '正在准备其他章节，请稍后重试。' }, { status: 429 });
+  if (authEnabled())
+    return Response.json({ error: 'translation_request_invalid' }, { status: 403 });
+  if (active >= 2) return Response.json({ error: 'translation_rate_limited' }, { status: 429 });
   active++;
   try {
     const body = await accountBody(request, 256 * 1024);
@@ -46,7 +46,7 @@ export async function POST(request: Request) {
       typeof raw.translationPrompt !== 'string' ||
       raw.translationPrompt.length > 6000
     )
-      return Response.json({ error: '翻译内容格式无效。' }, { status: 400 });
+      return Response.json({ error: 'translation_request_invalid' }, { status: 400 });
     const config = await serverAIConfig();
     const result = await translateChunk(
       input,
@@ -59,7 +59,7 @@ export async function POST(request: Request) {
     logException('translation.chunk', error);
     return Response.json(
       {
-        error: error instanceof Error ? error.message : '翻译暂时不可用。',
+        error: error instanceof TranslationError ? error.code : 'translation_service_unavailable',
         retryable: !(error instanceof TranslationError) || error.retryable,
       },
       { status: error instanceof TranslationError && !error.retryable ? 400 : 502 },

@@ -33,3 +33,4 @@ export * from './reading-language';
 export * from './import-epub';
 
 export * from './translation-tasks';
+export * from './translation-errors';

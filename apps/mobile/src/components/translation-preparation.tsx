@@ -1,5 +1,5 @@
 import { ActivityIndicator, Text, View } from 'react-native';
-import { bookSourceLanguages, type Book } from '@bypage/reading-core';
+import { bookSourceLanguages, translationErrorMessage, type Book } from '@bypage/reading-core';
 import { useAccount } from '../adapters/account';
 import { useApp } from '../context';
 import { useChapterTranslation } from './use-chapter-translation';
@@ -79,13 +79,7 @@ export function TranslationPreparation({
           {!!error && (
             <View style={{ gap: 8 }}>
               <Text accessibilityRole="alert" style={{ color: colors.error, lineHeight: 22 }}>
-                {error === 'native_session_required'
-                  ? zh
-                    ? '请先登录。'
-                    : 'Please sign in.'
-                  : error === 'translationLoadError'
-                    ? t('translationLoadError')
-                    : error}
+                {translationErrorMessage(error, preferences.locale)}
               </Text>
               <Button
                 secondary
@@ -96,11 +90,9 @@ export function TranslationPreparation({
               </Button>
             </View>
           )}
-          {outdated && (
+          {outdated && error !== 'translation_source_changed' && (
             <Text style={{ color: colors.muted, lineHeight: 22 }}>
-              {zh
-                ? '原文已变化，请创建新译本。已有译文仍保存在本机。'
-                : 'The source has changed. Create a new edition; saved translations remain on this device.'}
+              {translationErrorMessage('translation_source_changed', preferences.locale)}
             </Text>
           )}
           {!account.session ? (

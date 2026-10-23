@@ -11,6 +11,7 @@ import {
   mergeTerms,
   planChapter,
   contentHash,
+  translationBookSource,
   type ChunkResult,
   type Term,
   type TranslationProfile,
@@ -64,20 +65,34 @@ async function runOne() {
     });
     if (!chapter) return;
     index = chapter.chapterIndex;
-    const book = edition.source as unknown as Book;
+    // JSONB does not retain object key order. Rebuild the same canonical reading
+    // snapshot used when creating the hashes before comparing or translating it.
+    const book = translationBookSource(edition.source as unknown as Book);
     const source = book.chapters[index];
-    if (!source || (await contentHash(source)) !== chapter.sourceHash)
-      throw new TranslationError('原文已变化，请创建新译本。');
+    const actualHash = source ? await contentHash(source) : null;
+    if (actualHash !== chapter.sourceHash)
+      throw new TranslationError(
+        'translation_source_changed',
+        'Stored chapter does not match the translation source fingerprint.',
+        false,
+        { cause: { expectedHash: chapter.sourceHash, actualHash } },
+      );
     const profile = edition.profile as TranslationProfile;
     const config = await serverAIConfig(edition.userId);
     // Credentials remain in the platform secret. A key never follows an old or
     // caller-selected endpoint; the edition's model and style stay pinned.
     if (!config.baseUrl || normalizeAIUrl(config.baseUrl) !== normalizeAIUrl(profile.baseUrl))
-      throw new TranslationError('模型服务地址已变化。请恢复原连接或创建新译本。');
+      throw new TranslationError(
+        'translation_provider_changed',
+        '模型服务地址已变化。请恢复原连接或创建新译本。',
+      );
     const chunks = planChapter(source);
     const results = chapter.checkpoint as unknown as ChunkResult[];
     if (chunks.length !== chapter.totalChunks || results.length !== chapter.completedChunks)
-      throw new TranslationError('翻译断点不匹配，请创建新译本。');
+      throw new TranslationError(
+        'translation_checkpoint_mismatch',
+        '翻译断点不匹配，请创建新译本。',
+      );
     const canStart = await database.$transaction(async (tx) => {
       const owned = await tx.translationEdition.updateMany({
         where: { id: edition.id, leaseToken, leaseUntil: { gt: new Date() }, state: 'active' },
@@ -158,21 +173,21 @@ async function runOne() {
         const attempts = row.attempts + 1;
         const retryable = !(error instanceof TranslationError) || error.retryable;
         const retry = retryable && attempts < 3;
-        const message =
-          error instanceof TranslationError ? error.message : '翻译连接中断，已保留完成的部分。';
+        const code =
+          error instanceof TranslationError ? error.code : 'translation_connection_interrupted';
         await tx.translationChapter.update({
           where: key,
           data: {
             state: retry ? 'queued' : 'error',
             attempts,
-            error: message,
+            error: code,
             retryAt: retry ? new Date(Date.now() + attempts * 10000) : null,
           },
         });
         if (!retry)
           await tx.translationEdition.updateMany({
             where: { id: candidate.id, state: 'active' },
-            data: { state: 'error', error: message },
+            data: { state: 'error', error: code },
           });
       });
   } finally {

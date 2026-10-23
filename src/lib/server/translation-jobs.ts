@@ -19,11 +19,13 @@ import { validSyncId } from '../reading-validation';
 const json = (value: unknown) => value as Prisma.InputJsonValue;
 export class TranslationRequestError extends Error {
   constructor(
+    public code: string,
     message: string,
     public status = 400,
     options?: ErrorOptions,
   ) {
     super(message, options);
+    this.name = 'TranslationRequestError';
   }
 }
 export async function translationManifest(
@@ -83,19 +85,27 @@ export async function translationManifest(
 export async function changeTranslation(userId: string, body: Record<string, unknown>) {
   const bookId = String(body.bookId || ''),
     language = String(body.language || '');
-  if (!/^[\w-]{2,30}$/.test(language)) throw new TranslationRequestError('请选择翻译语言。');
+  if (!/^[\w-]{2,30}$/.test(language))
+    throw new TranslationRequestError('translation_request_invalid', '请选择翻译语言。');
   const action = body.action;
   if (!['prepare', 'new', 'pause', 'resume', 'select'].includes(String(action)))
-    throw new TranslationRequestError('翻译操作无效。');
-  if (!validSyncId(bookId)) throw new TranslationRequestError('书籍编号无效。');
+    throw new TranslationRequestError('translation_request_invalid', '翻译操作无效。');
+  if (!validSyncId(bookId))
+    throw new TranslationRequestError('translation_request_invalid', '书籍编号无效。');
   let submitted: Book | undefined;
   if (action === 'prepare' || action === 'new') {
     try {
       submitted = translationBookSource(body.book as Book);
     } catch (cause) {
-      throw new TranslationRequestError('请提交完整的书籍原文。', 400, { cause });
+      throw new TranslationRequestError(
+        'translation_request_invalid',
+        '请提交完整的书籍原文。',
+        400,
+        { cause },
+      );
     }
-    if (submitted.id !== bookId) throw new TranslationRequestError('书籍编号不一致。');
+    if (submitted.id !== bookId)
+      throw new TranslationRequestError('translation_request_invalid', '书籍编号不一致。');
   }
   const submittedHash = submitted ? await translationSource(submitted) : null;
   const index = Number(body.chapter ?? 0);
@@ -104,7 +114,7 @@ export async function changeTranslation(userId: string, body: Record<string, unk
   const auto = body.auto === true;
   const newId = body.requestId;
   if (action === 'new' && (!validSyncId(newId) || newId.length > 80))
-    throw new TranslationRequestError('翻译任务编号无效。');
+    throw new TranslationRequestError('translation_request_invalid', '翻译任务编号无效。');
   await database.$transaction(
     async (tx) => {
       // Serialize edition creation and selection for the account, including retried requests.
@@ -125,13 +135,22 @@ export async function changeTranslation(userId: string, body: Record<string, unk
         },
       });
       const book = submitted || (edition?.source as unknown as Book | undefined);
-      if (!book) throw new TranslationRequestError('没有找到这个译本。', 404);
+      if (!book)
+        throw new TranslationRequestError(
+          'translation_edition_not_found',
+          '没有找到这个译本。',
+          404,
+        );
       if (!Number.isInteger(index) || index < 0 || index >= book.chapters.length)
-        throw new TranslationRequestError('章节编号无效。');
+        throw new TranslationRequestError('translation_request_invalid', '章节编号无效。');
       const source = submittedHash || (await translationSource(book));
       if (!edition && (action === 'prepare' || action === 'new')) {
         if (!config.baseUrl || !config.model || !config.hasKey)
-          throw new TranslationRequestError('平台翻译服务暂时不可用，请稍后重试。', 503);
+          throw new TranslationRequestError(
+            'translation_platform_unavailable',
+            '平台翻译服务暂时不可用，请稍后重试。',
+            503,
+          );
         const profile = translationProfile({ ...config, baseUrl: normalizeAIUrl(config.baseUrl) });
         edition = await tx.translationEdition.create({
           data: {
@@ -157,15 +176,28 @@ export async function changeTranslation(userId: string, body: Record<string, unk
             data: { state: 'paused' },
           });
       }
-      if (!edition) throw new TranslationRequestError('没有找到这个译本。', 404);
+      if (!edition)
+        throw new TranslationRequestError(
+          'translation_edition_not_found',
+          '没有找到这个译本。',
+          404,
+        );
       // Match the worker's edition-before-chapter lock order. In particular,
       // reprioritizing a chapter must not deadlock its checkpoint transaction.
       await tx.$queryRaw`SELECT "id" FROM "TranslationEdition" WHERE "id" = ${edition.id} FOR UPDATE`;
       if (action !== 'pause' && !submitted && body.sourceHash !== edition.sourceHash)
-        throw new TranslationRequestError('原文已变化，请创建新译本。', 409);
+        throw new TranslationRequestError(
+          'translation_source_changed',
+          '原文已变化，请创建新译本。',
+          409,
+        );
       if (action === 'select') {
         if (edition.sourceHash !== source.hash)
-          throw new TranslationRequestError('这个译本的原文版本已变化。');
+          throw new TranslationRequestError(
+            'translation_source_changed',
+            '这个译本的原文版本已变化。',
+            409,
+          );
         const pending = await tx.translationChapter.count({
           where: { editionId: edition.id, state: { not: 'ready' } },
         });
@@ -178,7 +210,10 @@ export async function changeTranslation(userId: string, body: Record<string, unk
           edition.createdAt >= selected.createdAt &&
           pending
         )
-          throw new TranslationRequestError('新译本完成后即可切换，当前译本仍可阅读。');
+          throw new TranslationRequestError(
+            'translation_edition_not_complete',
+            '新译本完成后即可切换，当前译本仍可阅读。',
+          );
         await tx.translationSelection.upsert({
           where: { userId_bookId_targetLanguage: key },
           create: { ...key, editionId: edition.id },
@@ -194,7 +229,11 @@ export async function changeTranslation(userId: string, body: Record<string, unk
         return;
       }
       if (edition.sourceHash !== source.hash)
-        throw new TranslationRequestError('原文已变化，请创建新译本。');
+        throw new TranslationRequestError(
+          'translation_source_changed',
+          '原文已变化，请创建新译本。',
+          409,
+        );
       // Automatic reading never silently resumes a user-paused or failed job.
       if (auto && ['paused', 'error'].includes(edition.state)) return;
       const indices =
