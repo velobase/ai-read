@@ -1,3 +1,4 @@
+import { observedRoute } from '@/lib/server/observability';
 import { auth } from '@/lib/server/auth';
 import { authEnabled } from '@/lib/server/auth-config';
 import { database } from '@/lib/server/database';
@@ -5,7 +6,7 @@ import { database } from '@/lib/server/database';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+async function handleGET() {
   const enabled = authEnabled();
   const session = await auth();
   const user = session?.user?.id
@@ -27,3 +28,5 @@ export async function GET() {
     { headers: { 'Cache-Control': 'no-store' } },
   );
 }
+
+export const GET = observedRoute('api.identity', handleGET);

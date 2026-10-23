@@ -1,3 +1,4 @@
+import { observedRoute } from '@/lib/server/observability';
 import { authEnabled } from '@/lib/server/auth-config';
 import { auth } from '@/lib/server/auth';
 import { publicAIConfig } from '@/lib/server/ai-config';
@@ -5,7 +6,7 @@ import { publicAIConfig } from '@/lib/server/ai-config';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+async function handleGET() {
   const enabled = authEnabled();
   const userId = enabled ? (await auth())?.user?.id : undefined;
   const requiresLogin = enabled && !userId;
@@ -22,3 +23,5 @@ export async function GET() {
     return Response.json({ error: '暂时无法读取 AI 配置，请重试。' }, { status: 503 });
   }
 }
+
+export const GET = observedRoute('api.config', handleGET);

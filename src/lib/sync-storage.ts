@@ -1,3 +1,7 @@
+import {
+  MAX_BOOKMARKS_PER_BOOK,
+  validateBookmark,
+} from '../../packages/reading-core/src/bookmarks';
 import { catalog } from './catalog';
 import {
   idb,
@@ -19,10 +23,21 @@ import {
   type SyncEntry,
   type SyncRecord,
 } from './sync-types';
-import type { Book, Message, Note, Position } from './types';
+import type { Book, Bookmark, Message, Note, Position } from './types';
 import type { BookState } from './library-state';
 import type { ReadingBackup } from './reading-backup';
 import { removeBookTranslations } from './translation-storage';
+import { bookMetadata } from './sync-types';
+import { supplementBookMetadata } from './book-metadata';
+import { supplementBookMedia } from '../../packages/reading-core/src/book-media';
+import {
+  supplementBookReferences,
+  supplementReferences,
+} from '../../packages/reading-core/src/book-references';
+import { sameBookContent } from '../../packages/reading-core/src/import-markup';
+import { validateBook } from './reading-backup';
+import { savedTranslationRange, savedTranslationSnapshot } from './saved-translation-storage';
+import { assertLibraryScope, captureLibraryScope } from './library-state';
 
 export function readJSON(key: string): Record<string, any> {
   try {
@@ -49,6 +64,24 @@ export async function stage(
   const key = syncKey(entity, bookId, id);
   const store = tx.objectStore('sync');
   const old: SyncEntry | undefined = await idb(store.get(key));
+  if (entity === 'book' && !deleted) {
+    const book: Book | undefined = await idb(tx.objectStore('books').get(bookId));
+    const remoteMetadata = (old?.shadow as SyncData['book'] | undefined)?.metadata || {};
+    const metadata = bookMetadata(remoteMetadata, book || {});
+    // This field is user-editable; the local choice (including `auto`) wins when staging.
+    if (book?.sourceLanguage !== undefined) metadata.sourceLanguage = book.sourceLanguage;
+    const localRevision = book?.media?.revision;
+    const alreadyCompared =
+      old?.mediaChecked?.localRevision === localRevision &&
+      old?.mediaChecked?.remoteRevision === remoteMetadata.mediaRevision;
+    // Navigation stays additive. Media may advance after a compatible reimport;
+    // try a changed sidecar once, without repeatedly proposing a smaller one.
+    if (localRevision && !alreadyCompared) metadata.mediaRevision = localRevision;
+    data = {
+      ...(data as SyncData['book']),
+      metadata,
+    };
+  }
   if (old?.pending && old.pending.deleted === deleted && sameData(old.pending.data, data)) return;
   if (!old?.pending && old && old.deleted === deleted && sameData(old.shadow, data)) return;
   const entry: SyncEntry = old || { key, entity, bookId, id, version: 0, deleted: false };
@@ -183,36 +216,61 @@ export async function keepRecovery(tx: IDBTransaction, bookId: string) {
   const book: Book | undefined = await idb(tx.objectStore('books').get(bookId));
   if (!book) return;
   const notes = (await idb(tx.objectStore('notes').get(bookId))) || [];
+  const bookmarks = (await idb(tx.objectStore('bookmarks').get(bookId))) || [];
   const position = await idb(tx.objectStore('positions').get(bookId));
   const chats = (await idb(tx.objectStore('chats').get(bookId))) || [];
   const translations = (await idb(tx.objectStore('translations').get(bookId))) || {};
-  const translationManifests = (await idb(tx.objectStore('translation-manifests').getAll())).filter(
-    (m) => m.editions?.some((e: { bookId: string }) => e.bookId === bookId),
-  );
+  const manifestKeys = await idb(tx.objectStore('translation-manifests').getAllKeys());
+  const manifests = await idb(tx.objectStore('translation-manifests').getAll());
+  const manifestIndices = manifests.flatMap((m, index) => {
+    let tuple: unknown;
+    try {
+      tuple = JSON.parse(String(manifestKeys[index]));
+    } catch {}
+    return (Array.isArray(tuple) && tuple[0] === bookId) ||
+      m.editions?.some((e: { bookId: string }) => e.bookId === bookId)
+      ? [index]
+      : [];
+  });
+  const translationManifests = manifestIndices.map((index) => manifests[index]);
+  const translationManifestKeys = manifestIndices.map((index) => manifestKeys[index]);
+  const exact = await savedTranslationSnapshot(tx, bookId);
   const chapterTranslations = (await idb(tx.objectStore('chapter-translations').getAll())).filter(
     (c) => c.bookId === bookId,
   );
   await idb(
-    tx
-      .objectStore('sync-recovery')
-      .put(
-        {
-          book,
-          notes,
-          position,
-          chats,
-          translations,
-          translationManifests,
-          chapterTranslations,
-          savedAt: Date.now(),
-        },
-        bookId,
-      ),
+    tx.objectStore('sync-recovery').put(
+      {
+        book,
+        notes,
+        bookmarks,
+        position,
+        chats,
+        translations,
+        translationManifests,
+        translationManifestKeys,
+        translationVersions: exact.versions,
+        translationSelections: exact.selections,
+        chapterTranslations,
+        savedAt: Date.now(),
+      },
+      bookId,
+    ),
   );
 }
 export async function removeLocalBook(tx: IDBTransaction, bookId: string) {
   await removeBookTranslations(tx, bookId);
-  for (const store of ['books', 'notes', 'positions', 'chats', 'translations'])
+  for (const name of ['translation-versions', 'translation-selections'])
+    await idb(tx.objectStore(name).delete(savedTranslationRange(bookId)));
+  for (const store of [
+    'books',
+    'notes',
+    'bookmarks',
+    'positions',
+    'chats',
+    'translations',
+    'pdf-originals',
+  ])
     await idb(tx.objectStore(store).delete(bookId));
   const turns: (ChatTurn & { bookId: string })[] = await idb(tx.objectStore('turns').getAll());
   for (const turn of turns)
@@ -233,8 +291,23 @@ async function putRemote(tx: IDBTransaction, record: SyncRecord) {
       await keepRecovery(tx, bookId);
       await removeLocalBook(tx, bookId);
     } else {
-      const content = (data as SyncData['book']).content;
-      if (content) await idb(tx.objectStore('books').put(content, bookId));
+      const incoming = data as SyncData['book'];
+      const existing: Book | undefined = await idb(tx.objectStore('books').get(bookId));
+      const content = incoming.content ? validateBook(incoming.content) : undefined;
+      if (content && (content.id !== bookId || (existing && !sameBookContent(existing, content))))
+        throw new Error('invalid-sync-data');
+      const base =
+        existing && content
+          ? supplementBookReferences(supplementBookMedia(existing, content), content)
+          : existing || content;
+      if (base) {
+        const next = supplementBookMetadata(
+          base,
+          incoming.metadata || (content && bookMetadata(content)),
+        );
+        if (next !== existing) await idb(tx.objectStore('books').put(next, bookId));
+        return next;
+      }
     }
   } else if (entity === 'note') {
     const store = tx.objectStore('notes');
@@ -242,6 +315,19 @@ async function putRemote(tx: IDBTransaction, record: SyncRecord) {
     await idb(
       store.put([...notes.filter((n) => n.id !== id), ...(!deleted ? [data as Note] : [])], bookId),
     );
+  } else if (entity === 'bookmark') {
+    const store = tx.objectStore('bookmarks');
+    const existing: Bookmark[] = (await idb(store.get(bookId))) || [];
+    const next = existing.filter((item) => item.id !== id);
+    if (!deleted) {
+      const book: Book | undefined = await idb(tx.objectStore('books').get(bookId));
+      if (!book) throw new Error('invalid-sync-data');
+      const bookmark = validateBookmark(book, data);
+      if (bookmark.id !== id || next.length >= MAX_BOOKMARKS_PER_BOOK)
+        throw new Error('Invalid bookmark');
+      next.push(bookmark);
+    }
+    await idb(store.put(next, bookId));
   } else if (entity === 'position') {
     if (deleted) await idb(tx.objectStore('positions').delete(bookId));
     else await idb(tx.objectStore('positions').put(data, bookId));
@@ -254,7 +340,12 @@ async function putRemote(tx: IDBTransaction, record: SyncRecord) {
     const store = tx.objectStore('translations');
     const values = (await idb(store.get(bookId))) || {};
     if (deleted) delete values[id];
-    else values[id] = (data as SyncData['translation']).text;
+    else {
+      const text = (data as SyncData['translation']).text;
+      const exact = await idb(tx.objectStore('translation-versions').get([bookId, id]));
+      if (exact && exact.text !== text) throw new Error('saved_translation_immutable_conflict');
+      values[id] = text;
+    }
     await idb(store.put(values, bookId));
   }
 }
@@ -279,7 +370,13 @@ function applyLocalStorage(record: SyncRecord) {
 }
 function shadowOf(record: SyncRecord) {
   return record.entity === 'book'
-    ? { shelfState: (record.data as SyncData['book'] | undefined)?.shelfState || {} }
+    ? {
+        shelfState: (record.data as SyncData['book'] | undefined)?.shelfState || {},
+        metadata: bookMetadata(
+          (record.data as SyncData['book'] | undefined)?.metadata || {},
+          (record.data as SyncData['book'] | undefined)?.content || {},
+        ),
+      }
     : record.data;
 }
 // Recheck pending edits inside the same transaction that applies the remote value.
@@ -296,7 +393,10 @@ export async function applyRemote(record: SyncRecord, sent?: SyncEntry, conflict
     }
     const pending = current?.pending;
     let keepPending =
-      pending && sent && pending.mutationId !== sent.pending?.mutationId && !conflict;
+      pending &&
+      sent &&
+      pending.mutationId !== sent.pending?.mutationId &&
+      (!conflict || (pending.deleted && !record.deleted));
     if (conflict && pending) {
       if (
         record.entity === 'note' &&
@@ -309,6 +409,30 @@ export async function applyRemote(record: SyncRecord, sent?: SyncEntry, conflict
         if (!notes.some((n) => n.id === note.id))
           await idb(tx.objectStore('notes').put([...notes, note], record.bookId));
         await stage(tx, 'note', record.bookId, note.id, note);
+      } else if (
+        record.entity === 'bookmark' &&
+        !pending.deleted &&
+        pending.data &&
+        (record.deleted || !sameData(pending.data, record.data))
+      ) {
+        const book = (await idb(tx.objectStore('books').get(record.bookId))) as Book | undefined;
+        if (!book) throw new Error('invalid-sync-data');
+        const bookmark = validateBookmark(book, {
+          ...(pending.data as Bookmark),
+          id: `conflict-${pending.mutationId}`,
+        });
+        const existing: Bookmark[] =
+          (await idb(tx.objectStore('bookmarks').get(record.bookId))) || [];
+        if (!existing.some((item) => item.id === bookmark.id)) {
+          // Fail visibly at the limit: never discard either label to accept a conflict.
+          const retained = record.deleted
+            ? existing.filter((item) => item.id !== record.id)
+            : existing;
+          if (retained.length >= MAX_BOOKMARKS_PER_BOOK)
+            throw new Error('每本书最多保存 1000 条书签。');
+          await idb(tx.objectStore('bookmarks').put([...retained, bookmark], record.bookId));
+        }
+        await stage(tx, 'bookmark', record.bookId, bookmark.id, bookmark);
       } else if (record.entity === 'position') await keepRecovery(tx, record.bookId);
       else if (
         !record.deleted &&
@@ -337,9 +461,40 @@ export async function applyRemote(record: SyncRecord, sent?: SyncEntry, conflict
             )
           )
             merged[field] = value;
+        const pendingMetadata = (pending.data as SyncData['book']).metadata || {};
+        const metadata = bookMetadata(
+          (record.data as SyncData['book']).metadata || {},
+          pendingMetadata,
+        );
+        if (record.entity === 'book') {
+          const baseLanguage = (current?.shadow as SyncData['book'] | undefined)?.metadata
+            ?.sourceLanguage;
+          // Missing fields from older clients are not resets. A reset is the
+          // explicit value `auto`, which participates in the same three-way merge.
+          const localLanguage = pendingMetadata.sourceLanguage ?? baseLanguage;
+          const remoteLanguage =
+            (record.data as SyncData['book']).metadata?.sourceLanguage ??
+            (record.data as SyncData['book']).content?.sourceLanguage ??
+            baseLanguage;
+          const sourceLanguage =
+            localLanguage !== baseLanguage && remoteLanguage === baseLanguage
+              ? localLanguage
+              : remoteLanguage;
+          if (sourceLanguage !== undefined) metadata.sourceLanguage = sourceLanguage;
+        }
+        if (
+          record.entity === 'book' &&
+          pendingMetadata.mediaRevision &&
+          pendingMetadata.mediaRevision !==
+            (current?.shadow as SyncData['book'] | undefined)?.metadata?.mediaRevision
+        )
+          metadata.mediaRevision = pendingMetadata.mediaRevision;
         const next =
           record.entity === 'book'
-            ? { shelfState: cleanShelf(merged) }
+            ? {
+                shelfState: cleanShelf(merged),
+                metadata,
+              }
             : cleanPreferences({
                 settings: merged,
                 groups: [
@@ -357,7 +512,47 @@ export async function applyRemote(record: SyncRecord, sent?: SyncEntry, conflict
         }
       }
     }
-    if (!keepPending) await putRemote(tx, record);
+    const incomingBook =
+      record.entity === 'book' ? (record.data as SyncData['book'] | undefined) : undefined;
+    let nextBook: Book | undefined;
+    if (!keepPending) nextBook = await putRemote(tx, record);
+    else if (incomingBook && !record.deleted && pending && !pending.deleted) {
+      const pendingMetadata = (pending.data as SyncData['book']).metadata || {};
+      const metadata = bookMetadata(incomingBook.metadata || {}, pendingMetadata);
+      // A normal ACK can arrive after a newer local edit. Preserve its language;
+      // on 409 the pending field above already contains the three-way result.
+      if (pendingMetadata.sourceLanguage !== undefined)
+        metadata.sourceLanguage = pendingMetadata.sourceLanguage;
+      nextBook = await putRemote(tx, {
+        ...record,
+        data: { ...incomingBook, metadata },
+      });
+    }
+    const remoteRevision =
+      incomingBook?.metadata?.mediaRevision || incomingBook?.content?.media?.revision;
+    // A pull can discover a smaller cloud copy after an offline delete/recreate.
+    // Offer the compatible fuller local sidecar once instead of merely recording
+    // the difference and permanently suppressing its upload.
+    const offerLocalMedia =
+      incomingBook?.content &&
+      nextBook?.media &&
+      incomingBook.content.media?.revision !== nextBook.media.revision &&
+      supplementBookMedia(incomingBook.content, nextBook).media?.revision ===
+        nextBook.media.revision;
+    const remoteReferences =
+      incomingBook?.metadata?.references || incomingBook?.content?.references;
+    // References are bounded metadata. Offer a compatible fuller local copy after
+    // a pull or ACK, without uploading the book text/images or retrying conflicts.
+    const offerLocalReferences =
+      incomingBook &&
+      nextBook?.references &&
+      remoteReferences?.revision !== nextBook.references.revision &&
+      supplementReferences(remoteReferences, nextBook.references) === nextBook.references;
+    const mediaChecked = offerLocalMedia
+      ? undefined
+      : incomingBook?.content?.media && nextBook?.media && remoteRevision
+        ? { localRevision: nextBook.media.revision, remoteRevision }
+        : current?.mediaChecked;
     const entry: SyncEntry = {
       key,
       entity: record.entity,
@@ -366,34 +561,94 @@ export async function applyRemote(record: SyncRecord, sent?: SyncEntry, conflict
       version: record.version,
       deleted: record.deleted,
       shadow: shadowOf(record),
+      ...(record.entity === 'book' && !record.deleted && mediaChecked ? { mediaChecked } : {}),
     };
     if (keepPending && pending) entry.pending = { ...pending, baseVersion: record.version };
+    else if ((offerLocalMedia || offerLocalReferences) && nextBook && incomingBook) {
+      entry.pending = {
+        mutationId: crypto.randomUUID(),
+        baseVersion: record.version,
+        deleted: false,
+        data: {
+          shelfState: cleanShelf(incomingBook.shelfState),
+          metadata: {
+            ...bookMetadata(incomingBook.metadata || {}, nextBook),
+            ...(offerLocalMedia && nextBook.media
+              ? { mediaRevision: nextBook.media.revision }
+              : {}),
+          },
+        },
+      };
+    }
     await idb(store.put(entry, key));
     applied = !keepPending;
     // Storage and metadata are committed together; these tiny legacy preferences
     // are mirrored before commit so a following local writer sees the new values.
     if (applied) applyLocalStorage(record);
     else if (conflict && pending && (record.entity === 'book' || record.entity === 'preferences')) {
-      applyLocalStorage({ ...record, data: pending.data });
+      applyLocalStorage({ ...record, deleted: pending.deleted, data: pending.data });
       applied = true;
     }
+    // Book metadata may have changed while a merged/newer shelf mutation remains pending.
+    if (nextBook) applied = true;
   });
   if (applied) notifyLocalData();
 }
 export async function recoveryBackup(): Promise<ReadingBackup> {
-  const entries = await localTransaction(
+  const records = await localTransaction(
     'readonly',
     (tx) => idb(tx.objectStore('sync-recovery').getAll()),
     ['sync-recovery'],
   );
+  // This store also contains small array-keyed reading-pack collection intents.
+  // Only complete book snapshots are user-exportable synchronization recoveries.
+  const entries = records.filter((entry) => entry?.book && Array.isArray(entry.notes));
   return {
     format: 'ai-read-books-and-notes',
     version: 1,
     exportedAt: Date.now(),
     books: entries.map((e) => e.book),
     notes: entries.flatMap((e) => e.notes),
+    bookmarks: entries.flatMap((e) => e.bookmarks || []),
     positions: Object.fromEntries(
       entries.filter((e) => e.position).map((e) => [e.book.id, e.position]),
     ),
   };
+}
+
+/** Recovery exports keep independent exact versions and their original reference keys. */
+export async function recoveryPortableLibrary() {
+  const scope = captureLibraryScope();
+  const records = await localTransaction(
+    'readonly',
+    (tx) => idb(tx.objectStore('sync-recovery').getAll()),
+    ['sync-recovery'],
+  );
+  const entries = records.filter((entry) => entry?.book && Array.isArray(entry.notes));
+  const backup: ReadingBackup = {
+    format: 'ai-read-books-and-notes',
+    version: 1,
+    exportedAt: Date.now(),
+    books: entries.map((e) => e.book),
+    notes: entries.flatMap((e) => e.notes),
+    bookmarks: entries.flatMap((e) => e.bookmarks || []),
+    positions: Object.fromEntries(
+      entries.filter((e) => e.position).map((e) => [e.book.id, e.position]),
+    ),
+  };
+  const { portableLibraryFromSnapshot } = await import('./portable-library');
+  const result = await portableLibraryFromSnapshot(backup, {
+    manifestKeys: entries.flatMap((e) =>
+      (e.translationManifests || []).map(
+        (_: unknown, index: number) => e.translationManifestKeys?.[index],
+      ),
+    ),
+    manifests: entries.flatMap((e) => e.translationManifests || []),
+    chapters: entries.flatMap((e) => e.chapterTranslations || []),
+    legacy: entries.map((e) => [e.book.id, e.translations || {}] as const),
+    versions: entries.flatMap((e) => e.translationVersions || []),
+    selections: entries.flatMap((e) => e.translationSelections || []),
+  });
+  assertLibraryScope(scope);
+  return result;
 }

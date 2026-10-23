@@ -1,43 +1,36 @@
-# Persistent book translations
+# Translation while reading
 
-Translation is a durable edition of a book. Reading consumes complete chapter artifacts; generation is independent of scroll, pagination, chat, and the lifetime of the reader component.
+Web and native reading use the same interaction: **Reading language** contains Original, Bilingual and Translation only, plus the target language. A selection takes effect immediately and is remembered for that book. A book with no saved choice uses the reader's preferences; new installations default to Original on both platforms. Interface language remains separate.
 
 ## Reader behavior
 
-- Opening an untranslated chapter in bilingual/translation mode queues that chapter and the next one. It never resumes an explicitly paused or failed edition.
-- The preparation page displays chapter progress and offers original-text reading. A complete chapter replaces the preparation page automatically, restoring the saved paragraph anchor. There is no partial-language fallback inside the chapter.
-- The reader's **Translation** panel and book details provide whole-book preparation, pause, resume, and edition selection. Pausing lets an already-running batch finish and save its checkpoint. Switching to original text or leaving the reader does not cancel an existing job.
-- An edition freezes its endpoint, model, prompt, source fingerprints, and target language. Changing general AI settings does not invalidate finished chapters. An explicit retranslation creates a new edition, retains the old one, and only allows switching after the new book is complete.
-- Complete legacy paragraph-cache chapters remain readable with their original note keys. Partial legacy caches are retained but do not produce a mixed-language reading page. New editions use separate per-chapter records and edition-qualified note anchors. No browser database is reset.
+- Original mode reads the source and requests no further translation. Equivalent source and target languages also read directly.
+- Bilingual and translation-only modes first reuse saved translations. Missing passages on the visible page are translated automatically, with a small lookahead of two following paragraphs. Completing the first visible missing paragraph advances demand to the next one, including on pages containing many short paragraphs.
+- Bilingual mode keeps original text visible. Translation-only mode reserves placeholders for missing translations and never substitutes the original body text. A nearby status distinguishes loading, offline and failure; failed requests offer Retry.
+- Completed paragraphs appear when interaction is idle. Web waits for pointer activity, selections and page turns to settle and restores the visible text anchor when updating layout. There is no manual “show new translations” step.
+- Changing the reading position changes demand. Changing book or target language, returning to original mode, leaving the reader, or hiding the page stops work that is no longer needed. Returning to an active translated reading context may resume missing nearby passages.
+- Search, bookmarks and notes can reveal their exact saved text without requesting replacement translations or changing the book's reading preference.
 
-## Generation and validation
+There is no preparation screen, translation task panel, whole-book action, manual queue or edition-switching step in the reading flow. Book details open reading directly.
 
-`translation-edition.ts` computes SHA-256 fingerprints over chapter structure/text and plans consecutive batches. Small chapters fit into one request; larger ones prefer section boundaries and keep multiple paragraphs together. Exceptionally long paragraphs are split without losing source characters and reassembled under the original paragraph ID. Each batch contains at most 12,000 source characters / 80 segments. These are provider-independent safety bounds, not tokenizer-exact limits.
+## Generation and saving
 
-Reference material includes the complete chapter when it is at most 28,000 characters; otherwise it includes section headings and surrounding original text. The book outline, bounded preceding translation, edition style, and an accumulated glossary accompany every batch. Glossary choices already recorded in the edition take precedence over later additions. This is a bounded consistency aid, not a guarantee of literary quality or a whole-book analysis pass.
+The Web reader uses the existing AI connection and streaming translation endpoint. Its availability may come from an account's saved connection, local deployment configuration, or an unauthenticated local model endpoint; normal reading does not require entering a key again.
 
-The provider uses non-streaming Chat Completions and returns JSON with ordered segment IDs, translated text, and optional terms. The response must end normally and cover every expected segment exactly once and in order. Code is preserved. Oversized, malformed, incomplete, or truncated responses are not published. Checkpoints and glossary changes commit together; the complete chapter is assembled and published atomically. Successful chapter publication discards intermediate text checkpoints to avoid duplicating the whole translation in job storage.
+Only one paragraph request runs at a time for the current demand. Nearby original passages provide bounded context. Long source paragraphs are split into chunks of up to 6,000 UTF-16 code units without splitting surrogate pairs. Successful chunks are saved as a draft; incomplete stream output is not published. A complete paragraph is saved with an immutable translation key and a separate reading selection. Existing saved text wins a duplicate generation race.
 
-Network, rate-limit, and retryable response failures receive at most two automatic retries per batch. Credential/configuration failures stop the job. Resume retries failed chapters, including failures outside the currently open chapter. Models with insufficient output capacity can still fail a batch; the UI retains completed work and reports the problem. Structural checks do not establish translation accuracy.
+Web drafts use the existing `translation-jobs` IndexedDB store under a reading-specific key, scoped to book, paragraph, source identity, target language and translation configuration. The store name does not imply a background job. Only complete paragraphs enter reading text, note anchors and ordinary translation exports. Compatible saved chunks can be reused when the same passage is needed again.
 
-## Account jobs
+Transient failures receive bounded automatic retries. Persistent failures stop that demand and expose Retry. Going offline preserves saved text; reconnecting can resume the current reading demand. Changing connection settings affects missing translations and does not replace saved paragraphs.
 
-Apply `202610180003_chapter_translations` with `npm run db:migrate` before using the new server. It adds `TranslationEdition`, `TranslationChapter`, and `TranslationSelection`; existing paragraph translations remain untouched. `/api/ready` verifies the new tables.
+## Existing saved editions
 
-`/api/translations` authenticates the current account, reads only its synced books, and serializes edition creation/selection with the existing account lock. The current book must finish its ordinary sync before it can be queued. New-edition requests carry a client request ID. Two devices preparing the same selected edition share its chapter jobs.
+Existing paragraph caches, exact saved versions, reading selections and complete chapter artifacts remain readable. The authenticated `GET /api/translations` endpoint continues to provide saved manifests and completed chapter artifacts after checking their source identity. The browser checks the account's saved manifest and downloads matching completed content around the current position before requesting new translation. A failed saved-content download exposes Retry rather than generating a replacement.
 
-`src/instrumentation.ts` starts a small worker on each long-lived Node server. Each process handles one batch at a time. A three-minute database lease plus a random fencing token coordinates replicas; provider requests time out after two minutes. Workers only claim active jobs, checkpoint each batch, and resume after a process restart. Checkpoint writes verify the lease and parent book. Soft-deleting a book pauses its jobs and fences in-flight results. No network request happens inside a database transaction.
+The former POST task commands, chunk-generation endpoint, local background runner and server translation worker have been removed. Existing database tables, browser stores, books, notes, checkpoints and completed translations are retained. An old queued job is not restarted by the application. No migration deletes user data.
 
-Credentials stay in the encrypted account connection. Workers read the current key for each batch only if the saved endpoint still matches the edition endpoint. A model/prompt change leaves the edition frozen; changing the endpoint requires restoring that connection or explicitly making a new edition. Keys are never copied into jobs or browser storage.
-
-This worker requires a running Node process, as provided by the existing standalone Docker/Kubernetes deployment. A request-suspending serverless host would require a separately managed worker. `TRANSLATION_WORKER_DISABLED=1` disables job execution for builds/maintenance without deleting jobs. A crash after the provider answers but before checkpoint commit can cause that batch to be requested again: delivery is at least once, not an exactly-once billing guarantee.
-
-## Local jobs and offline reads
-
-IndexedDB version 3 adds `translation-manifests`, `chapter-translations` (compound edition/chapter keys), and `translation-jobs` without altering existing stores. The root translation runtime survives route changes. Web Locks serialize local generation across tabs. Closing the browser pauses local work; reopening resumes from the last committed batch. A manually supplied local API key remains memory-only and must be entered again after reload; an environment-configured key remains on the local server.
-
-Account clients fetch metadata and download newly ready chapter artifacts once. Reading cached text never needs a provider request. Cached chapters can be read in an already-open app while offline; offline app startup/PWA support has not been added. Existing backup exports still exclude translations; original files, notes, and reading positions retain their existing backup behavior.
+Previously saved note and bookmark keys remain unchanged. Downloading or importing a saved translation does not authorize replacing an existing reading selection. Ordinary Web backups and portable reading packs retain their existing data boundaries; see [mobile reading packs](mobile.md#move-reading-between-web-and-ios).
 
 ## Validation boundary
 
-Prisma generation, type checking, production compilation, and static review are allowed. No unit/integration/E2E tests or live paid model requests are part of this implementation. Translation fluency, pause/resume behavior, browser layout, offline usage, and cross-device interaction need user validation.
+The explicitly authorized lightweight checks run with `node scripts/check-web-reading-translation.mjs` and `node scripts/check-mobile-reading-translation.mjs`. They exercise the real paragraph writer and mobile scheduler with local storage/model/lifecycle substitutes: saved text reuse, complete-paragraph publishing, interruption/checkpoint recovery, duplicate request locking, retry limits and offline recovery. A small DOM substitute in `node --experimental-strip-types scripts/check-reading-translation-layout.mjs` additionally checks saved offsets across placeholders, language isolation, cancellation and replacement geometry. These checks make no network or paid model requests. Type checking and Web/iOS compilation also pass. Real-device gestures, translation quality and end-to-end layout behavior remain for user validation.

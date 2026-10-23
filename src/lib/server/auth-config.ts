@@ -19,5 +19,30 @@ export function authConfigured() {
   );
 }
 
+/** Native credentials are always issued for one explicitly configured origin. */
+export function nativeAuthOrigin(): string | null {
+  try {
+    if (!process.env.APP_ORIGIN) return null;
+    const url = new URL(process.env.APP_ORIGIN);
+    const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+    if (
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      url.pathname !== '/' ||
+      (url.protocol !== 'https:' && !(loopback && url.protocol === 'http:'))
+    )
+      return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
+export function nativeAuthConfigured() {
+  return authEnabled() && authConfigured() && nativeAuthOrigin() !== null;
+}
+
 export const secureCookies = process.env.APP_ORIGIN?.startsWith('https://') === true;
 export const sessionCookieName = `${secureCookies ? '__Secure-' : ''}ai-read.session-token`;

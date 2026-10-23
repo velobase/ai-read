@@ -12,3 +12,5 @@ docs/testing
 *.log
 *.tsbuildinfo
 .DS_Store
+
+apps/mobile

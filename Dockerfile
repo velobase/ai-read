@@ -4,6 +4,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates openssl && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json prisma.config.ts ./
 COPY prisma ./prisma
+COPY scripts/prepare-pdf.mjs ./scripts/prepare-pdf.mjs
 RUN npm ci
 
 FROM dependencies AS build

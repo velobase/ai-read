@@ -2,53 +2,73 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useIdentity } from '@/components/auth/identity-provider';
 import { storageUserId } from '@/lib/storage-scope';
-import { localTransaction, notifySyncDirty } from '@/lib/local-database';
-import { ensureLocalBook } from '@/lib/sync-storage';
-import { translationKey } from '@/lib/ai';
+import { translationFingerprint } from '@/lib/translation-prompt';
+import { selectLegacyTranslations } from '@/lib/translation-selection';
+import { readSavedTranslationSnapshot } from '@/lib/saved-translation-storage';
 import { sameData } from '@/lib/sync-types';
-import {
-  changeLocalTranslation,
-  rememberTranslationCredentials,
-  type TranslationCommand,
-} from '@/lib/local-translation-runner';
+import { translateReadingParagraph } from '@/lib/reading-translation';
+import { AIRequestError } from '@/lib/ai';
 import {
   cacheChapterTranslation,
   cacheManifest,
   readChapterTranslation,
   cachedChapterIndices,
   readManifest,
-  translationChanged,
 } from '@/lib/translation-storage';
 import {
   editionNoteKey,
+  matchesTranslationSource,
   translationSource,
   type ChapterTranslation,
   type TranslationManifest,
 } from '@/lib/translation-edition';
 import type { Book, Settings } from '@/lib/types';
+import {
+  sameReadingLanguage,
+  effectiveBookLanguage,
+  translationBookFingerprint,
+  translationChapterFingerprint,
+} from '../../../packages/reading-core/src';
 
 const empty: TranslationManifest = { selectedId: null, editions: [] };
-async function api(
-  bookId: string,
-  language: string,
-  query: Record<string, string> = {},
-  command?: TranslationCommand,
-) {
+const readableText = (value: unknown): value is string =>
+  typeof value === 'string' && !!value.trim() && value.length <= 1024 * 1024;
+function usableArtifact(
+  value: ChapterTranslation | undefined,
+  book: Book,
+  editionId: string,
+  index: number,
+  hashes: { chapters: string[]; fingerprints: string[] },
+): value is ChapterTranslation {
+  const chapter = book.chapters[index];
+  return !!(
+    value &&
+    chapter &&
+    value.bookId === book.id &&
+    value.editionId === editionId &&
+    value.index === index &&
+    matchesTranslationSource(value, hashes.chapters[index], hashes.fingerprints[index]) &&
+    value.paragraphs &&
+    typeof value.paragraphs === 'object' &&
+    !Array.isArray(value.paragraphs) &&
+    Object.keys(value.paragraphs).length === chapter.paragraphs.length &&
+    chapter.paragraphs.every((p) => readableText(value.paragraphs[p.id]))
+  );
+}
+async function api(bookId: string, language: string, query: Record<string, string> = {}) {
   const response = await fetch(
     '/api/translations?' + new URLSearchParams({ bookId, language, ...query }),
     {
-      method: command ? 'POST' : 'GET',
+      method: 'GET',
       cache: 'no-store',
       headers: {
         'x-reader-user': storageUserId() || '',
-        ...(command ? { 'Content-Type': 'application/json' } : {}),
       },
-      body: command ? JSON.stringify({ bookId, language, ...command }) : undefined,
       signal: AbortSignal.timeout(30000),
     },
   );
   const value = await response.json();
-  if (!response.ok) throw new Error(value.error || '译文任务暂时不可用。');
+  if (!response.ok) throw new Error(value.error || '已保存的译文暂时无法读取。');
   return value;
 }
 
@@ -57,73 +77,154 @@ export function useBookTranslation(
   settings: Settings,
   options: {
     chapter: number;
+    paragraph: string;
     auto: boolean;
     enabled: boolean;
+    connectionReady: boolean;
     legacy?: Record<string, string>;
   },
 ) {
   const { enabled: accounts, user } = useIdentity();
   const scope = `${book.id}:${settings.language}`;
+  const sameLanguage = sameReadingLanguage(effectiveBookLanguage(book), settings.language);
   const [data, setData] = useState<{
     scope: string;
     manifest: TranslationManifest;
     chapters: ChapterTranslation[];
     cached: number;
+    cachedIndices: number[];
     loaded: boolean;
-  }>({ scope: '', manifest: empty, chapters: [], cached: 0, loaded: false });
+  }>({ scope: '', manifest: empty, chapters: [], cached: 0, cachedIndices: [], loaded: false });
+  const [remote, setRemote] = useState<{
+    book?: Book;
+    scope: string;
+    chapter: number;
+    userId?: string;
+  }>({ scope: '', chapter: -1 });
+  const remoteReady =
+    !accounts ||
+    !user ||
+    (remote.book === book &&
+      remote.scope === scope &&
+      remote.chapter === options.chapter &&
+      remote.userId === user.id);
   const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
   const [online, setOnline] = useState(true);
   const [refresh, setRefresh] = useState(0);
-  const [autoTick, setAutoTick] = useState(0);
-  const operation = useRef(false);
-  const activeScope = useRef(scope);
-  activeScope.current = scope;
+  const [tick, setTick] = useState(0);
+  const [visible, setVisible] = useState(true);
   useEffect(() => {
     setError('');
   }, [scope]);
   const manifest = data.scope === scope ? data.manifest : empty;
   const edition = manifest.editions.find((e) => e.id === manifest.selectedId);
-  const work = manifest.editions[0] || edition;
-  const source = useMemo(() => translationSource(book), [book]);
+  const source = useMemo(
+    async () => ({
+      ...(await translationSource(book)),
+      fingerprint: translationBookFingerprint(book),
+      fingerprints: book.chapters.map(translationChapterFingerprint),
+    }),
+    [book],
+  );
   const chapters = data.scope === scope ? data.chapters : [];
   const artifacts = useMemo(() => new Map(chapters.map((c) => [c.index, c])), [chapters]);
-  const legacy = useMemo(() => {
-    const values = options.legacy || {};
-    const firstIds = new Set(book.chapters.map((chapter) => chapter.paragraphs[0]?.id));
-    const firstKeys = new Map<string, string[]>();
-    for (const key of Object.keys(values)) {
-      const [language, paragraphId] = key.split(':');
-      if (language !== settings.language || !firstIds.has(paragraphId)) continue;
-      const keys = firstKeys.get(paragraphId) || [];
-      keys.push(key);
-      firstKeys.set(paragraphId, keys);
-    }
-    const result = new Map<
-      number,
-      { texts: Record<string, string>; keys: Record<string, string> }
-    >();
-    for (const [index, chapter] of book.chapters.entries()) {
-      const first = chapter.paragraphs[0];
-      if (!first) continue;
-      const preferred = translationKey(settings, first.id);
-      const candidates = [
-        preferred,
-        ...(firstKeys.get(first.id) || []).filter((key) => key !== preferred),
-      ];
-      for (const key of candidates) {
-        const suffix = key.split(':').slice(2).join(':');
-        const keys = Object.fromEntries(
-          chapter.paragraphs.map((p) => [p.id, `${settings.language}:${p.id}:${suffix}`]),
-        );
-        if (chapter.paragraphs.every((p) => !!values[keys[p.id]])) {
-          result.set(index, {
-            keys,
-            texts: Object.fromEntries(chapter.paragraphs.map((p) => [p.id, values[keys[p.id]]])),
+  const [exact, setExact] = useState<{
+    book?: Book;
+    scope: string;
+    snapshot?: Awaited<ReturnType<typeof readSavedTranslationSnapshot>>;
+    loaded: boolean;
+    failed?: boolean;
+  }>({ scope: '', loaded: false });
+  const exactCurrent = exact.book === book && exact.scope === scope;
+  const exactLoaded = exactCurrent && exact.loaded;
+  const exactReadable = exactLoaded && !exact.failed;
+  useEffect(() => {
+    if (!options.enabled) return;
+    let disposed = false;
+    let request = 0;
+    const update = async () => {
+      const token = ++request;
+      try {
+        const snapshot = await readSavedTranslationSnapshot(book);
+        if (!disposed && token === request)
+          setExact((previous) => {
+            const old = previous.snapshot;
+            if (
+              previous.book === book &&
+              previous.scope === scope &&
+              !previous.failed &&
+              old &&
+              old.versions.size === snapshot.versions.size &&
+              [...snapshot.versions].every(([key, value]) => {
+                const before = old.versions.get(key);
+                return (
+                  before?.textHash === value.textHash &&
+                  before.sourceFingerprint === value.sourceFingerprint
+                );
+              }) &&
+              sameData(old.selections, snapshot.selections)
+            )
+              return previous;
+            return { book, scope, snapshot, loaded: true };
           });
-          break;
+      } catch (error) {
+        console.error('Saved translation selection could not be loaded', error);
+        if (!disposed && token === request) {
+          setExact({ book, scope, loaded: true, failed: true });
+          setError(error instanceof Error ? error.message : '译本暂时无法读取。');
         }
       }
+    };
+    const changed = () => {
+      void update();
+    };
+    const stored = (event: StorageEvent) => {
+      if (event.key === 'ai-read-data-change') changed();
+    };
+    window.addEventListener('ai-read-library-change', changed);
+    window.addEventListener('storage', stored);
+    changed();
+    return () => {
+      disposed = true;
+      window.removeEventListener('ai-read-library-change', changed);
+      window.removeEventListener('storage', stored);
+    };
+  }, [book, scope, options.enabled, user?.id, refresh]);
+  const legacy = useMemo(() => {
+    const result = selectLegacyTranslations(
+      book,
+      settings.language,
+      options.legacy || {},
+      translationFingerprint(settings),
+    );
+    for (const [index, artifact] of artifacts) {
+      result.set(index, {
+        texts: { ...artifact.paragraphs },
+        keys: Object.fromEntries(
+          Object.keys(artifact.paragraphs).map((id) => [
+            id,
+            editionNoteKey(settings.language, id, artifact.editionId),
+          ]),
+        ),
+        complete: true,
+      });
+    }
+    if (exactCurrent && exact.snapshot) {
+      for (const selection of exact.snapshot.selections) {
+        if (selection.language !== settings.language) continue;
+        const version = exact.snapshot.versions.get(selection.key);
+        if (!version) continue;
+        const chapter = result.get(version.chapterIndex) || {
+          texts: Object.create(null),
+          keys: Object.create(null),
+          complete: false,
+        };
+        chapter.texts[version.paragraphId] = version.text;
+        chapter.keys[version.paragraphId] = version.key;
+        result.set(version.chapterIndex, chapter);
+      }
+      for (const [index, chapter] of result)
+        chapter.complete = book.chapters[index].paragraphs.every((p) => !!chapter.texts[p.id]);
     }
     return result;
   }, [
@@ -133,36 +234,61 @@ export function useBookTranslation(
     settings.baseUrl,
     settings.model,
     settings.translationPrompt,
+    exactCurrent,
+    exact.snapshot,
+    artifacts,
   ]);
+  const contentRevision = useMemo(
+    () => [chapters, legacy, exactCurrent ? exact.snapshot : undefined],
+    [chapters, legacy, exactCurrent, exact.snapshot],
+  );
   useEffect(() => {
-    rememberTranslationCredentials(settings);
-  }, [settings]);
-  useEffect(() => {
-    const failed = () => setError('译文无法保存到本机，已暂停。请检查浏览器存储空间后继续。');
-    window.addEventListener('bypage-translation-storage-error', failed);
-    return () => window.removeEventListener('bypage-translation-storage-error', failed);
+    const update = () => setVisible(!document.hidden);
+    document.addEventListener('visibilitychange', update);
+    update();
+    return () => document.removeEventListener('visibilitychange', update);
   }, []);
   useEffect(() => {
     if (!options.enabled) return;
     let disposed = false,
       syncing = false;
     let remoteAt = 0;
+    const invalidCached = new Set<string>();
     const local = async () => {
       const next = await readManifest(book.id, settings.language);
       const hashes = await source;
-      const selected = next.editions.find((e) => e.id === next.selectedId);
-      const indices = selected ? await cachedChapterIndices(selected.id) : [];
+      const selected = next.editions.find(
+        (e) =>
+          e.id === next.selectedId &&
+          e.bookId === book.id &&
+          e.language === settings.language &&
+          matchesTranslationSource(e, hashes.hash, hashes.fingerprint),
+      );
+      const indices = selected
+        ? (await cachedChapterIndices(selected.id)).filter(
+            (index) => Number.isSafeInteger(index) && index >= 0 && !!book.chapters[index],
+          )
+        : [];
       const window = indices.filter((index) => Math.abs(index - options.chapter) <= 2);
-      const cached = selected
-        ? (
-            await Promise.all(window.map((index) => readChapterTranslation(selected.id, index)))
-          ).filter((c): c is ChapterTranslation => !!c && c.sourceHash === hashes.chapters[c.index])
+      const cached: ChapterTranslation[] = [];
+      if (selected)
+        for (const index of window) {
+          const artifact = await readChapterTranslation(selected.id, index);
+          const key = JSON.stringify([selected.id, index]);
+          if (usableArtifact(artifact, book, selected.id, index, hashes)) {
+            invalidCached.delete(key);
+            cached.push(artifact);
+          } else invalidCached.add(key);
+        }
+      const validIndices = selected
+        ? indices.filter((index) => !invalidCached.has(JSON.stringify([selected.id, index])))
         : [];
       const value = {
         scope,
         manifest: next,
         chapters: cached,
-        cached: indices.length,
+        cached: validIndices.length,
+        cachedIndices: validIndices,
         loaded: true,
       };
       if (!disposed)
@@ -183,16 +309,19 @@ export function useBookTranslation(
         if (accounts && user && navigator.onLine && !document.hidden && Date.now() >= remoteAt) {
           remoteAt = Date.now() + 15000;
           const next: TranslationManifest = await api(book.id, settings.language);
-          remoteAt = Date.now() + (next.editions.some((e) => e.state === 'active') ? 5000 : 30000);
+          remoteAt = Date.now() + 30000;
           if (disposed) return;
           await cacheManifest(book.id, settings.language, next);
           await local();
           const hashes = await source;
-          // Download completed chapters once, including the rest of a prepared
-          // book, so reopening it offline does not contact a model or the server.
-          for (const e of [...next.editions].sort(
-            (a, b) => Number(b.id === next.selectedId) - Number(a.id === next.selectedId),
-          )) {
+          // Resolve existing saved text around this position before generating missing paragraphs.
+          for (const e of next.editions.filter((edition) => edition.id === next.selectedId)) {
+            if (
+              e.bookId !== book.id ||
+              e.language !== settings.language ||
+              !matchesTranslationSource(e, hashes.hash, hashes.fingerprint)
+            )
+              continue;
             const cached = new Set(await cachedChapterIndices(e.id));
             const ordered = [...e.chapters].sort(
               (a, b) => Math.abs(a.index - options.chapter) - Math.abs(b.index - options.chapter),
@@ -201,23 +330,41 @@ export function useBookTranslation(
               if (disposed) return;
               if (
                 chapter.state !== 'ready' ||
-                chapter.sourceHash !== hashes.chapters[chapter.index]
+                !Number.isSafeInteger(chapter.index) ||
+                chapter.index < 0 ||
+                Math.abs(chapter.index - options.chapter) > 2 ||
+                !book.chapters[chapter.index] ||
+                !matchesTranslationSource(
+                  chapter,
+                  hashes.chapters[chapter.index],
+                  hashes.fingerprints[chapter.index],
+                )
               )
                 continue;
-              if (cached.has(chapter.index)) continue;
+              if (
+                cached.has(chapter.index) &&
+                !invalidCached.has(JSON.stringify([e.id, chapter.index]))
+              )
+                continue;
               const artifact: ChapterTranslation = await api(book.id, settings.language, {
                 editionId: e.id,
                 chapter: String(chapter.index),
               });
               if (disposed) return;
-              if (artifact.sourceHash !== hashes.chapters[chapter.index]) continue;
-              await cacheChapterTranslation(artifact);
+              if (!usableArtifact(artifact, book, e.id, chapter.index, hashes))
+                throw new Error('已保存的译文未能完整读取，请重试。');
+              await cacheChapterTranslation(artifact, e.language);
+              invalidCached.delete(JSON.stringify([e.id, chapter.index]));
               if (e.id === next.selectedId) await local();
             }
           }
-          if (!disposed) setError('');
+          if (!disposed) {
+            setRemote({ book, scope, chapter: options.chapter, userId: user.id });
+            setError('');
+          }
         }
       } catch (error) {
+        console.error('Saved translation content could not be loaded', error);
         if (!disposed) setError(error instanceof Error ? error.message : '译本暂时无法读取。');
       } finally {
         syncing = false;
@@ -229,12 +376,16 @@ export function useBookTranslation(
       void sync();
     };
     const localUpdate = () => {
-      void local().catch(() => {});
+      void local().catch((cause) => {
+        console.error('Saved translations could not be loaded', cause);
+        if (!disposed) setError(cause instanceof Error ? cause.message : String(cause));
+      });
     };
     const channel =
       typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel('bypage-translations');
     if (channel) channel.onmessage = localUpdate;
     window.addEventListener('bypage-translations', localUpdate);
+    window.addEventListener('ai-read-library-change', localUpdate);
     window.addEventListener('online', update);
     window.addEventListener('offline', update);
     window.addEventListener('focus', update);
@@ -245,121 +396,159 @@ export function useBookTranslation(
       clearInterval(interval);
       channel?.close();
       window.removeEventListener('bypage-translations', localUpdate);
+      window.removeEventListener('ai-read-library-change', localUpdate);
       window.removeEventListener('online', update);
       window.removeEventListener('offline', update);
       window.removeEventListener('focus', update);
     };
   }, [scope, options.enabled, options.chapter, accounts, user?.id, source, refresh]);
 
-  const command = async (command: TranslationCommand) => {
-    if (operation.current) return;
-    operation.current = true;
-    setBusy(true);
-    setError('');
-    try {
-      if (!options.enabled || (accounts && !user)) throw new Error('请先登录，再准备译文。');
-      if (!accounts && !navigator.locks)
-        throw new Error('当前浏览器不支持持久翻译任务，请使用新版浏览器。');
-      // Built-in books may not yet have a physical local record.
-      const saved = await localTransaction('readwrite', (tx) => ensureLocalBook(tx, book.id));
-      if (!saved) throw new Error('这本书已被删除。');
-      notifySyncDirty();
-      if (accounts) {
-        window.dispatchEvent(new Event('ai-read-sync-now'));
-        const next = await api(book.id, settings.language, {}, command);
-        await cacheManifest(book.id, settings.language, next);
-      } else await changeLocalTranslation(book, settings, command);
-      translationChanged();
-      if (activeScope.current === scope) setRefresh((v) => v + 1);
-    } catch (error) {
-      if (activeScope.current === scope)
-        setError(error instanceof Error ? error.message : '译文任务暂时不可用。');
-    } finally {
-      operation.current = false;
-      setBusy(false);
+  const text = (index: number, paragraphId: string) =>
+    legacy.get(index)?.texts[paragraphId] || artifacts.get(index)?.paragraphs[paragraphId] || '';
+  const key = (index: number, paragraphId: string) =>
+    legacy.get(index)?.keys[paragraphId] ||
+    (artifacts.has(index) && edition
+      ? editionNoteKey(settings.language, paragraphId, edition.id)
+      : '');
+  const loaded = data.scope === scope && data.loaded && exactLoaded;
+  const entries = useMemo(
+    () =>
+      book.chapters.flatMap((chapter, index) =>
+        chapter.paragraphs.map((paragraph) => ({ index, paragraph })),
+      ),
+    [book],
+  );
+  const at = Math.max(
+    0,
+    entries.findIndex((entry) => entry.paragraph.id === options.paragraph),
+  );
+  const targets = entries.slice(at, at + 3);
+  const windowKey = targets.map((entry) => entry.paragraph.id).join('\0');
+  const bookFingerprint = useMemo(() => translationBookFingerprint(book), [book]);
+  const context = `${scope}:${bookFingerprint}:${effectiveBookLanguage(book)}:${translationFingerprint(settings)}`;
+  const running = useRef<{ context: string; id: string; controller: AbortController } | null>(null);
+  const failures = useRef(
+    new Map<string, { attempts: number; error: string; retryAt: number; network: boolean }>(),
+  );
+  const completed = useRef(new Set<string>());
+  const allowed =
+    options.auto &&
+    options.enabled &&
+    !sameLanguage &&
+    online &&
+    visible &&
+    loaded &&
+    exactReadable &&
+    remoteReady;
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      running.current?.controller.abort();
+    };
+  }, []);
+  useEffect(() => {
+    const active = running.current;
+    if (
+      active &&
+      (!allowed ||
+        active.context !== context ||
+        !targets.some((entry) => entry.paragraph.id === active.id))
+    ) {
+      active.controller.abort();
+      return;
     }
-  };
-  const ready = (index: number) =>
-    book.language.toLowerCase() === settings.language.toLowerCase() ||
-    artifacts.has(index) ||
-    legacy.has(index);
-  const lastAuto = useRef({ key: '', at: 0 });
-  useEffect(() => {
-    if (!options.auto || !options.enabled) return;
-    const timer = setInterval(() => setAutoTick((v) => v + 1), 5000);
-    return () => clearInterval(timer);
-  }, [options.auto, options.enabled]);
-  useEffect(() => {
-    if (
-      !options.auto ||
-      !options.enabled ||
-      !data.loaded ||
-      data.scope !== scope ||
-      !online ||
-      (accounts && !user) ||
-      !settings.baseUrl ||
-      !settings.model ||
-      (edition && ['paused', 'error'].includes(edition.state))
+    if (active || !allowed || !options.connectionReady || (accounts && !user)) return;
+    const target = targets.find(
+      ({ index, paragraph }) =>
+        paragraph.text.trim() &&
+        !text(index, paragraph.id) &&
+        !completed.current.has(`${context}:${paragraph.id}`),
+    );
+    if (!target) return;
+    const targetKey = `${context}:${target.paragraph.id}`;
+    const failed = failures.current.get(targetKey);
+    if (failed && !failed.retryAt) return;
+    if (failed && failed.retryAt > Date.now()) {
+      const timer = setTimeout(() => setTick((value) => value + 1), failed.retryAt - Date.now());
+      return () => clearTimeout(timer);
+    }
+    const controller = new AbortController();
+    const operation = { context, id: target.paragraph.id, controller };
+    running.current = operation;
+    void translateReadingParagraph(
+      book,
+      target.index,
+      target.paragraph.id,
+      settings,
+      controller.signal,
     )
-      return;
-    const needs = (index: number) =>
-      index < book.chapters.length && !ready(index) && edition?.chapters[index]?.state !== 'ready';
-    const currentNeeds = needs(options.chapter),
-      nextNeeds = needs(options.chapter + 1);
-    if (!currentNeeds && !nextNeeds) return;
-    const target = currentNeeds ? options.chapter : options.chapter + 1;
-    const key = `${scope}:${edition?.id || ''}:${target}`;
-    if (
-      lastAuto.current.key === key &&
-      (Date.now() - lastAuto.current.at < 4900 ||
-        ['queued', 'running'].includes(edition?.chapters[target]?.state || ''))
-    )
-      return;
-    lastAuto.current = { key, at: Date.now() };
-    void command({
-      action: 'prepare',
-      chapter: target,
-      auto: true,
-      prefetch: currentNeeds && nextNeeds,
-    });
-  }, [
-    scope,
-    options.auto,
-    options.enabled,
-    options.chapter,
-    data,
-    online,
-    settings.baseUrl,
-    settings.model,
-    autoTick,
-  ]);
+      .then(() => {
+        if (!controller.signal.aborted) {
+          completed.current.add(targetKey);
+          failures.current.delete(targetKey);
+        }
+      })
+      .catch((cause: unknown) => {
+        if (controller.signal.aborted) return;
+        console.error('Reading translation failed', {
+          bookId: book.id,
+          paragraphId: target.paragraph.id,
+          cause,
+        });
+        const attempts = (failures.current.get(targetKey)?.attempts || 0) + 1;
+        const retryable =
+          cause instanceof TypeError ||
+          (cause instanceof AIRequestError && cause.retryable) ||
+          (cause instanceof DOMException && cause.name === 'TimeoutError');
+        failures.current.set(targetKey, {
+          attempts,
+          error: '这段暂时没有翻译成功，请重试。',
+          network: cause instanceof TypeError,
+          retryAt: retryable && attempts < 3 ? Date.now() + (attempts === 1 ? 1000 : 3000) : 0,
+        });
+      })
+      .finally(() => {
+        if (running.current === operation) running.current = null;
+        if (mounted.current) setTick((value) => value + 1);
+      });
+  }, [allowed, context, windowKey, options.connectionReady, accounts, user, contentRevision, tick]);
+  // Reconnection resumes interrupted network work, while terminal service errors require Retry.
+  useEffect(() => {
+    const connected = () => {
+      for (const [key, failure] of failures.current)
+        if (failure.network) failures.current.delete(key);
+      setTick((value) => value + 1);
+    };
+    globalThis.window.addEventListener('online', connected);
+    return () => globalThis.window.removeEventListener('online', connected);
+  }, []);
+  const currentFailure = targets
+    .map(({ paragraph }) => failures.current.get(`${context}:${paragraph.id}`))
+    .find((failure) => failure && !failure.retryAt);
   return {
-    manifest,
-    edition,
-    work,
-    error,
-    busy,
+    sameLanguage,
+    loaded,
     online,
-    loaded: data.scope === scope && data.loaded,
-    command,
-    ready,
-    accounts,
-    canPrepare: (!accounts || !!user) && !!settings.baseUrl && !!settings.model,
-    sameLanguage: book.language.toLowerCase() === settings.language.toLowerCase(),
-    text(index: number, paragraphId: string) {
-      return (
-        artifacts.get(index)?.paragraphs[paragraphId] || legacy.get(index)?.texts[paragraphId] || ''
-      );
+    error:
+      error ||
+      currentFailure?.error ||
+      (options.auto && loaded && !options.connectionReady ? '翻译暂时不可用，请稍后重试。' : ''),
+    retry() {
+      window.dispatchEvent(new Event('ai-read-refresh-connection'));
+      for (const { paragraph } of targets) {
+        failures.current.delete(`${context}:${paragraph.id}`);
+        completed.current.delete(`${context}:${paragraph.id}`);
+      }
+      setError('');
+      setRefresh((value) => value + 1);
+      setTick((value) => value + 1);
     },
-    key(index: number, paragraphId: string) {
-      return artifacts.has(index) && edition
-        ? editionNoteKey(settings.language, paragraphId, edition.id)
-        : legacy.get(index)?.keys[paragraphId] || '';
-    },
-    cached: data.scope === scope ? data.cached : 0,
-    legacyCount: legacy.size,
-    revision: chapters,
-    version: edition?.id || 'legacy',
+    text,
+    key,
+    revision: contentRevision,
+    version: manifest.selectedId || 'legacy',
   };
 }
 export type BookTranslationController = ReturnType<typeof useBookTranslation>;

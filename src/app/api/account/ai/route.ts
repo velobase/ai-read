@@ -1,3 +1,4 @@
+import { observedRoute } from '@/lib/server/observability';
 import { auth } from '@/lib/server/auth';
 import { accountBody, unauthorized } from '@/lib/server/account-request';
 import { database } from '@/lib/server/database';
@@ -14,7 +15,7 @@ export const dynamic = 'force-dynamic';
 
 class InvalidConfiguration extends Error {}
 
-export async function GET() {
+async function handleGET() {
   const userId = (await auth())?.user?.id;
   if (!userId) return unauthorized();
   try {
@@ -24,7 +25,7 @@ export async function GET() {
   }
 }
 
-export async function PUT(request: Request) {
+async function handlePUT(request: Request) {
   const userId = (await auth())?.user?.id;
   if (!userId || request.headers.get('x-reader-user') !== userId) return unauthorized();
   let baseUrl: string,
@@ -122,3 +123,6 @@ export async function PUT(request: Request) {
     );
   }
 }
+
+export const GET = observedRoute('api.account.ai', handleGET);
+export const PUT = observedRoute('api.account.ai', handlePUT);

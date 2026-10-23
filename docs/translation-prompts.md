@@ -15,13 +15,13 @@ These references inform the interaction pattern. LeafRead's templates and implem
 
 Both **Me → AI connection** and the reader's AI settings provide a translation prompt editor, three editable starting points (Natural, Academic, Close to source), a Custom state and reset to default. Users can write instructions, term choices and examples in any language. The default asks for clear contemporary prose, faithful reasoning and terminology, natural sentence structure and modern Chinese instead of archaic or mechanical phrasing.
 
-`{{to}}` and `{{from}}` expand once to the target and source languages. Book titles, ordered source segments, chapter context, previous translated text, and accumulated glossary entries remain separate reference data. The chapter translator requires structured JSON with original segment IDs; this output contract takes precedence over formatting instructions in a custom prompt. Reading chat and retrieval prompts are unchanged.
+`{{to}}` and `{{from}}` expand once to the target and source languages. Book titles and nearby original passages remain separate reference data. Reading translation produces paragraph text through the streaming AI endpoint; only successfully completed paragraphs enter the saved reading content. Reading chat and retrieval prompts are unchanged.
 
-`AIConnection.translationPrompt` stores account instructions in PostgreSQL. An empty value resolves to the default. Older clients that omit the field preserve the current value. Local mode keeps the prompt in browser preferences and excludes API keys from persistence. The account endpoint accepts at most 6000 prompt characters.
+`AIConnection.translationPrompt` stores account instructions in PostgreSQL. An empty value resolves to the default. Local mode keeps the prompt in browser preferences and excludes API keys from persistence. The account endpoint accepts at most 6000 prompt characters.
 
-Each new book edition snapshots the effective prompt, normalized endpoint, and model. Saving settings affects future editions and does not cancel a running edition or hide completed translations. To apply new instructions to a book, choose **Retranslate book with latest settings** in Book translation. The old edition remains selected until the replacement is complete and the reader chooses to switch. Originals, legacy cache entries, and versioned note anchors are retained.
+Saving settings affects subsequent missing passages in the current reading demand. Already saved translations are reused, with their immutable keys and annotation anchors intact. There is no whole-book retranslation or edition-switching step in the reading flow. A source, language or configuration change invalidates incompatible partial work; compatible completed chunks remain resumable when that passage is needed again.
 
-Workers use the current account credential only with the frozen edition endpoint. A changed endpoint stops that job until the old connection is restored or a new edition is created. See [persistent book translations](chapter-translations.md) for checkpointing, glossary accumulation, publication, and local-mode behavior.
+Translation uses the existing account or local service connection. Reading preferences and saved draft identities do not contain API keys. See [translation while reading](chapter-translations.md) and [native reading translation](native-translation.md) for nearby demand, complete-paragraph publication and retained historical translations.
 
 ## Validation boundary
 

@@ -1,0 +1,217 @@
+import { useSyncExternalStore } from 'react';
+import { fetch as nativeFetch } from 'expo/fetch';
+import * as nativeAuth from '../../modules/bypage-auth';
+import { measured } from './diagnostics';
+import { apiOrigin, requireServiceOrigin } from './server-origin';
+import { readMobilePermissions, type MobilePermission } from '@bypage/api-client';
+import { validSyncId } from '@bypage/reading-core';
+
+export type AccountSession = {
+  user: { id: string; name: string | null; email: string; image?: string | null };
+  expiresAt: string;
+  sessionId: string;
+  permissions: MobilePermission[];
+};
+type AccountState = {
+  origin: string;
+  session: AccountSession | null;
+  loading: boolean;
+  busy: boolean;
+  verified: boolean;
+  revision: number;
+  issue: '' | 'expired' | 'offline' | 'storage' | 'origin';
+};
+let state: AccountState = {
+  origin: '',
+  session: null,
+  loading: false,
+  busy: false,
+  verified: false,
+  revision: 0,
+  issue: '',
+};
+const listeners = new Set<() => void>();
+const requests = new Set<AbortController>();
+function publish(patch: Partial<AccountState>) {
+  state = { ...state, ...patch };
+  for (const listener of listeners) listener();
+}
+function invalidate(patch: Partial<AccountState> = {}) {
+  for (const controller of requests) controller.abort();
+  requests.clear();
+  publish({ ...patch, revision: state.revision + 1 });
+}
+const cancelled = () => Object.assign(new Error('cancelled'), { name: 'AbortError' });
+export const accountAvailable = () => nativeAuth.available;
+export const libraryAccountAvailable = () => nativeAuth.libraryAvailable;
+export const accountSnapshot = () => state;
+export const accountRevision = () => state.revision;
+export function subscribeAccount(listener: () => void) {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+export const useAccount = () =>
+  useSyncExternalStore(subscribeAccount, accountSnapshot, accountSnapshot);
+
+/** Identity changes are synchronous; pending work cannot acquire a new account halfway through. */
+export function initializeAccount() {
+  const origin = apiOrigin;
+  if (origin === state.origin) return;
+  void nativeAuth.cancelSignIn();
+  invalidate({
+    origin,
+    session: null,
+    loading: !!origin && nativeAuth.available,
+    busy: false,
+    verified: false,
+    issue: '',
+  });
+  const revision = state.revision;
+  if (!origin || !nativeAuth.available) return;
+  void nativeAuth
+    .readSession(origin)
+    .then((session) => {
+      if (state.revision !== revision) return;
+      if (session) invalidate({ session, loading: false });
+      else publish({ loading: false });
+      if (session) void refreshAccount();
+    })
+    .catch(() => {
+      if (state.revision === revision) publish({ loading: false, issue: 'storage' });
+    });
+}
+
+export function requestScope(raw: string, signal?: AbortSignal, timeout?: number) {
+  const origin = requireServiceOrigin(raw);
+  if (!origin) throw new Error('not_configured');
+  const revision = state.revision;
+  const session = origin === state.origin && !state.busy ? state.session : null;
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (signal?.aborted) abort();
+  else signal?.addEventListener('abort', abort, { once: true });
+  requests.add(controller);
+  const timer = timeout ? setTimeout(abort, timeout) : undefined;
+  const assertCurrent = () => {
+    if (controller.signal.aborted || state.revision !== revision) throw cancelled();
+  };
+  return {
+    origin,
+    signal: controller.signal,
+    assertCurrent,
+    async headers(): Promise<Record<string, string>> {
+      assertCurrent();
+      // A credential exists only for this request's captured session and exact origin.
+      const authorization = session
+        ? await nativeAuth.authorization(origin, session.sessionId)
+        : null;
+      assertCurrent();
+      if (session && !authorization) {
+        await expireAccount(revision, origin, session.sessionId);
+        throw new Error('native_session_expired');
+      }
+      return authorization ? { Authorization: authorization } : {};
+    },
+    async checkStatus(status: number) {
+      assertCurrent();
+      if (status === 401 && session) {
+        await expireAccount(revision, origin, session.sessionId);
+        throw new Error('native_session_expired');
+      }
+    },
+    close() {
+      if (timer) clearTimeout(timer);
+      requests.delete(controller);
+      signal?.removeEventListener('abort', abort);
+    },
+  };
+}
+async function expireAccount(revision: number, origin: string, sessionId: string) {
+  if (state.revision !== revision || state.origin !== origin) return;
+  invalidate({ session: null, verified: false, issue: 'expired', loading: false, busy: true });
+  const clearingRevision = state.revision;
+  // No remote logout is needed for an already invalid server session.
+  await nativeAuth.clearSession(origin, sessionId).catch(() => {});
+  if (state.revision === clearingRevision) publish({ busy: false });
+}
+export const signInAccount = () => signIn(false);
+/** A separate explicit browser consent; an existing AI token never gains library rights. */
+export const signInLibraryAccount = () => signIn(true);
+async function signIn(library: boolean) {
+  const origin = state.origin;
+  if (!origin || !nativeAuth.available || state.busy || state.loading)
+    throw new Error('native_auth_unavailable');
+  if (library && !nativeAuth.libraryAvailable) throw new Error('native_library_auth_unavailable');
+  invalidate({ busy: true, issue: '' });
+  const revision = state.revision;
+  try {
+    const session = await measured('account.signin', () =>
+      library ? nativeAuth.signInLibrary(origin) : nativeAuth.signIn(origin),
+    );
+    if (revision !== state.revision || state.origin !== origin) throw cancelled();
+    invalidate({ session, busy: false, verified: true, issue: '' });
+  } finally {
+    if (revision === state.revision) publish({ busy: false });
+  }
+}
+export async function signOutAccount() {
+  const origin = state.origin;
+  if (state.busy) return undefined;
+  void nativeAuth.cancelSignIn();
+  invalidate({ session: null, busy: true, verified: false, issue: '' });
+  const revision = state.revision;
+  try {
+    const result = await measured('account.signout', () => nativeAuth.logout(origin));
+    return state.revision === revision ? result.revoked : undefined;
+  } finally {
+    if (state.revision === revision) publish({ busy: false });
+  }
+}
+let refreshingRevision: number | undefined;
+export async function refreshAccount() {
+  if (refreshingRevision === state.revision || !state.session || state.busy || state.loading)
+    return;
+  const revision = state.revision;
+  refreshingRevision = revision;
+  const scope = requestScope(state.origin, undefined, 8000);
+  try {
+    const headers = await scope.headers();
+    const response = await nativeFetch(`${scope.origin}/api/mobile/v1/auth/session`, {
+      credentials: 'omit',
+      redirect: 'error',
+      signal: scope.signal,
+      headers: { Accept: 'application/json', ...headers },
+    });
+    await scope.checkStatus(response.status);
+    if (!response.ok) throw new Error('account_unavailable');
+    const body = await response.json();
+    scope.assertCurrent();
+    const permissions = readMobilePermissions(
+      body.permissions === undefined ? ['account_ai'] : body.permissions,
+    );
+    const session = state.session;
+    if (
+      !session ||
+      !validSyncId(body.user?.id) ||
+      body.sessionId !== session.sessionId ||
+      body.user.id !== session.user.id ||
+      !permissions?.includes('account_ai') ||
+      permissions.length !== session.permissions.length ||
+      permissions.some((permission) => !session.permissions.includes(permission))
+    )
+      throw new Error('invalid_account_response');
+    publish({ verified: true, issue: '' });
+  } catch {
+    try {
+      scope.assertCurrent();
+      publish({ verified: false, issue: 'offline' });
+    } catch {
+      /* New identity owns the UI. */
+    }
+  } finally {
+    scope.close();
+    if (refreshingRevision === revision) refreshingRevision = undefined;
+  }
+}

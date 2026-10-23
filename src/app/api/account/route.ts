@@ -1,3 +1,4 @@
+import { observedRoute } from '@/lib/server/observability';
 import { auth, hashSession } from '@/lib/server/auth';
 import { database } from '@/lib/server/database';
 import { accountBody, unauthorized } from '@/lib/server/account-request';
@@ -8,7 +9,7 @@ import { cookies } from 'next/headers';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+async function handleGET() {
   const session = await auth();
   if (!session?.user?.id) return unauthorized();
   const token = (await cookies()).get(sessionCookieName)?.value;
@@ -31,7 +32,7 @@ export async function GET() {
   });
 }
 
-export async function PATCH(request: Request) {
+async function handlePATCH(request: Request) {
   const session = await auth();
   if (!session?.user?.id) return unauthorized();
   let body: Record<string, unknown>;
@@ -61,3 +62,6 @@ export async function PATCH(request: Request) {
   });
   return Response.json({ ok: true });
 }
+
+export const GET = observedRoute('api.account', handleGET);
+export const PATCH = observedRoute('api.account', handlePATCH);

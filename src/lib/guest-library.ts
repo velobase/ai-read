@@ -1,4 +1,4 @@
-import type { Book, Note, Position } from './types';
+import type { Book, Bookmark, Note, Position } from './types';
 import type { ReadingBackup } from './reading-backup';
 
 // Read the original guest namespace without changing it or switching the active account.
@@ -19,12 +19,18 @@ export async function readGuestLibrary(): Promise<ReadingBackup> {
     exportedAt: Date.now(),
     books: [],
     notes: [],
+    bookmarks: [],
     positions: {},
   };
   if (!database) return empty;
   try {
     return await new Promise<ReadingBackup>((resolve, reject) => {
-      const tx = database.transaction(['books', 'notes', 'positions'], 'readonly');
+      const hasBookmarks = database.objectStoreNames.contains('bookmarks');
+      const tx = database.transaction(
+        ['books', 'notes', 'positions', ...(hasBookmarks ? ['bookmarks'] : [])],
+        'readonly',
+      );
+      const bookmarks = hasBookmarks ? tx.objectStore('bookmarks').getAll() : undefined;
       const books = tx.objectStore('books').getAll();
       const notes = tx.objectStore('notes').getAll();
       const positions = tx.objectStore('positions').getAll();
@@ -34,6 +40,7 @@ export async function readGuestLibrary(): Promise<ReadingBackup> {
           ...empty,
           books: books.result as Book[],
           notes: (notes.result as Note[][]).flat(),
+          bookmarks: ((bookmarks?.result || []) as Bookmark[][]).flat(),
           positions: Object.fromEntries(
             positionKeys.result.map((key, index) => [
               String(key),

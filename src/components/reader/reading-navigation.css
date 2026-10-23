@@ -302,7 +302,7 @@
     padding: 20px;
   }
 }
-@media (max-height: 600px) and (min-width: 768px) {
+@media (max-height: 740px) and (min-width: 768px) {
   .desktop-reading-tools {
     top: 90px;
     gap: 5px;
@@ -356,6 +356,100 @@
   position: absolute;
   inset: 30px 70px;
   overflow: hidden;
+  container-type: size;
+}
+.reader-illustration {
+  margin: 12px 0;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+.book-reference-link {
+  color: var(--green);
+  font: inherit;
+  line-height: inherit;
+  white-space: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.16em;
+  cursor: pointer;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.book-reference-link:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+.book-original-references {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 5px 10px;
+  margin-top: 0.65em;
+  font-family: var(--font-translation);
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+.book-original-references button {
+  color: var(--green);
+  max-width: 100%;
+  text-align: start;
+  overflow-wrap: anywhere;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.book-reference-preview {
+  font-size: 17px;
+  line-height: 1.85;
+  overflow-wrap: anywhere;
+}
+.book-reference-preview p,
+.book-reference-preview h3,
+.book-reference-preview pre {
+  margin: 0 0 0.85em;
+  white-space: pre-wrap;
+}
+.book-reference-preview h3 {
+  font-weight: 600;
+}
+.book-reference-preview pre {
+  font-size: 0.85em;
+}
+.book-reference-preview > :last-child {
+  margin-bottom: 0;
+}
+.reader-illustration button {
+  display: block;
+  width: 100%;
+  margin-inline: auto;
+  cursor: zoom-in;
+}
+.reader-illustration img {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+}
+.reading-app[data-navigation='paged'] .reader-illustration img {
+  max-height: calc(100cqh - 24px);
+}
+.reading-app[data-navigation='paged'] .reader-illustrated-passage {
+  break-inside: avoid;
+}
+.reading-app[data-navigation='paged']
+  .reading-passage[data-kind='heading']:has(+ .reader-illustrated-passage) {
+  break-after: auto;
+}
+.reader-illustrated-passage > .reading-passage {
+  margin-bottom: 12px;
+}
+.reader-illustrated-passage > .reading-passage .passage-original,
+.reader-illustrated-passage > .reading-passage .passage-translation {
+  margin-top: 0;
+}
+.reading-app[data-navigation='paged'] .reader-illustrated-passage .reader-illustration img {
+  max-height: max(48px, calc(100cqh - 144px));
 }
 .reading-app[data-navigation='paged'] .book-page {
   width: 100%;
@@ -440,29 +534,6 @@
   background: color-mix(in srgb, var(--green) 9%, transparent);
   border-radius: 3px;
 }
-.reader-translation-ready {
-  position: fixed;
-  z-index: 19;
-  right: max(24px, calc((100vw - var(--page-width)) / 2));
-  bottom: 76px;
-  padding: 9px 14px;
-  border: 1px solid var(--line);
-  border-radius: 24px;
-  background: var(--page);
-  color: var(--green);
-  font-size: 12px;
-}
-.reader-translation-status {
-  position: fixed;
-  z-index: 19;
-  top: 64px;
-  left: 50%;
-  transform: translateX(-50%);
-  max-width: 85%;
-  white-space: nowrap;
-  font-size: 11px;
-  color: var(--muted);
-}
 .reading-nav-location > span:first-child {
   max-width: 160px;
   white-space: nowrap;
@@ -527,29 +598,47 @@
   .reader-page-grip {
     width: 12px;
   }
-  .reader-translation-status {
-    top: 60px;
-    font-size: 10px;
-  }
   .reading-app .mobile-reading-tools {
     padding-bottom: calc(8px + env(safe-area-inset-bottom));
-  }
-  .reader-translation-ready {
-    right: 16px;
-    bottom: calc(124px + env(safe-area-inset-bottom));
   }
   .reading-nav-location > span:first-child {
     max-width: 110px;
   }
 }
-.chapter-preparation {
+
+.inline-translation-status {
   display: flex;
-  min-height: min(28rem, 65dvh);
-  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 2rem 1rem;
-  text-align: center;
-  break-inside: avoid;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
   font-family: var(--font-translation);
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--muted);
+  break-inside: avoid;
+}
+.inline-translation-status button {
+  color: var(--green);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.translation-placeholder {
+  display: grid;
+  gap: 0.65em;
+  padding: 0.4em 0;
+  min-height: 4em;
+  break-inside: avoid;
+}
+.translation-placeholder span {
+  height: 0.65em;
+  width: 100%;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--muted) 12%, transparent);
+}
+.translation-placeholder span:nth-child(2) {
+  width: 92%;
+}
+.translation-placeholder span:last-child {
+  width: 65%;
 }

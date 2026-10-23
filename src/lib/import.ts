@@ -1,4 +1,25 @@
-import { strFromU8, unzip } from 'fflate';
+import {
+  paragraphsFromMarkup,
+  bookFromText,
+  epubNavigation,
+  createMarkupMediaCollection,
+  createMarkupReferenceCollection,
+  createEpubReferences,
+  resolveEpubReference,
+  type MarkupReferenceCollection,
+  type EpubReferenceSource,
+  type EpubReferenceDocument,
+  createEpubMedia,
+  resolveEpubImagePath,
+  MAX_BOOK_IMAGE_BYTES,
+  MAX_BOOK_MEDIA_BYTES,
+  MAX_BOOK_MEDIA_ASSETS,
+  type MarkupMediaCollection,
+  type EpubMediaSource,
+  type EpubChapterTarget,
+  type EpubNavigationDocument,
+} from '../../packages/reading-core/src';
+import { strFromU8, unzip, type UnzipFileFilter } from 'fflate';
 import type { Book, Chapter, Paragraph } from './types';
 import { validateBook } from './reading-backup';
 import { MAX_BOOK_TEXT } from './reading-validation';
@@ -28,92 +49,21 @@ function normalizePath(base: string, href: string) {
   return result.join('/');
 }
 
-function paragraphize(value: string, chapterIndex: number): Paragraph[] {
+function paragraphize(
+  value: string,
+  chapterIndex: number,
+  anchors: Map<string, string>,
+  media: MarkupMediaCollection,
+  references: MarkupReferenceCollection,
+): { paragraphs: Paragraph[]; document: Document } {
   const doc = new DOMParser().parseFromString(value, 'application/xhtml+xml');
   if (doc.querySelector('parsererror'))
     throw new Error('EPUB 章节不是有效的 XHTML，暂时无法导入。');
-  doc
-    .querySelectorAll('script, style, nav, svg, math, noscript, iframe, object')
-    .forEach((n) => n.remove());
   const body = descendants(doc, 'body')[0] || doc.documentElement;
-  const paragraphs: Paragraph[] = [];
-  const add = (raw: string, tag: string) => {
-    const normalized = tag === 'pre' ? raw.trim() : raw.replace(/\s+/g, ' ').trim();
-    if (!normalized) return;
-    // Keep individual sources bounded so translations and citations stay usable.
-    const pieces = normalized.match(/[\s\S]{1,2400}(?:\s|$)|[\s\S]{1,2400}/gu) || [];
-    for (const piece of pieces)
-      paragraphs.push({
-        id: `${chapterIndex + 1}.${paragraphs.length + 1}`,
-        text: piece.trim(),
-        kind: /^h[1-6]$/.test(tag)
-          ? 'heading'
-          : tag === 'blockquote'
-            ? 'quote'
-            : tag === 'pre'
-              ? 'code'
-              : 'text',
-      });
+  return {
+    paragraphs: paragraphsFromMarkup(body, chapterIndex, anchors, media, references),
+    document: doc,
   };
-  const blockTags = new Set([
-    'p',
-    'h1',
-    'h2',
-    'h3',
-    'h4',
-    'h5',
-    'h6',
-    'li',
-    'blockquote',
-    'pre',
-    'tr',
-  ]);
-  const walk = (node: Element) => {
-    let pending = '';
-    const flush = () => {
-      add(pending, 'p');
-      pending = '';
-    };
-    for (const child of Array.from(node.childNodes)) {
-      if (child.nodeType === Node.TEXT_NODE) {
-        pending += child.textContent;
-        continue;
-      }
-      if (!(child instanceof Element)) continue;
-      const tag = child.localName.toLowerCase();
-      if (blockTags.has(tag)) {
-        flush();
-        if (tag === 'tr')
-          add(
-            Array.from(child.children)
-              .map((c) => c.textContent)
-              .join(' | '),
-            tag,
-          );
-        else add(child.textContent || '', tag);
-      } else if (
-        [
-          'div',
-          'section',
-          'article',
-          'main',
-          'ol',
-          'ul',
-          'table',
-          'tbody',
-          'thead',
-          'header',
-          'footer',
-        ].includes(tag)
-      ) {
-        flush();
-        walk(child);
-      } else pending += tag === 'br' ? '\n' : child.textContent || '';
-    }
-    flush();
-  };
-  walk(body);
-  return paragraphs;
 }
 
 type ImportLabels = {
@@ -144,30 +94,11 @@ export async function importBook(
     } catch {
       throw new Error('TXT 编码不是 UTF-8，请先将文件转换为 UTF-8 后再导入。');
     }
-    const blocks = value
-      .split(/\n\s*\n/)
-      .map((p) => p.trim())
-      .filter(Boolean);
-    const paras = blocks.flatMap((p) => p.match(/[\s\S]{1,2400}(?:\s|$)|[\s\S]{1,2400}/gu) || []);
-    const chapters: Chapter[] = [];
-    for (let start = 0; start < paras.length; start += 60) {
-      const i = chapters.length;
-      chapters.push({
-        id: `chapter-${i}`,
-        title: labels.section(i + 1),
-        paragraphs: paras
-          .slice(start, start + 60)
-          .map((p, j) => ({ id: `${i + 1}.${j + 1}`, text: p.trim(), kind: 'text' })),
-      });
-    }
-    if (!chapters.length) throw new Error('文件没有可阅读的文字。');
-    return validateBook({
+    return bookFromText(value, {
       id,
       title: file.name.replace(/\.txt$/i, ''),
       author: labels.unknownAuthor,
-      language: 'auto',
-      importedAt: Date.now(),
-      chapters,
+      section: labels.section,
     });
   }
   let total = 0;
@@ -177,7 +108,7 @@ export async function importBook(
       new Uint8Array(buffer),
       {
         filter(entry) {
-          if (!/\.(xml|opf|xhtml|html|htm)$/i.test(entry.name)) return false;
+          if (!/\.(xml|opf|ncx|xhtml|html|htm)$/i.test(entry.name)) return false;
           total += entry.originalSize;
           if (entry.originalSize > MAX_ENTRY || total > MAX_TEXT) {
             tooLarge = true;
@@ -206,6 +137,10 @@ export async function importBook(
     descendants(packageDoc, 'item').map((el) => [el.getAttribute('id'), el]),
   );
   const chapters: Chapter[] = [];
+  const targets: EpubChapterTarget[] = [];
+  const mediaSources: EpubMediaSource[] = [];
+  const referenceSources: EpubReferenceSource[] = [];
+  const referenceDocuments: EpubReferenceDocument[] = [];
   for (const item of descendants(packageDoc, 'itemref')) {
     if (item.getAttribute('linear') === 'no') continue;
     const entry = manifest.get(item.getAttribute('idref'));
@@ -214,17 +149,156 @@ export async function importBook(
     const href = entry.getAttribute('href');
     if (!href) continue;
     const path = normalizePath(directory, href);
-    const paragraphs = paragraphize(read(path), chapters.length);
-    if (!paragraphs.length) continue;
+    const anchors = new Map<string, string>();
+    const collection = createMarkupMediaCollection();
+    const referenceCollection = createMarkupReferenceCollection();
+    const { paragraphs, document } = paragraphize(
+      read(path),
+      chapters.length,
+      anchors,
+      collection,
+      referenceCollection,
+    );
+    referenceDocuments.push({ path, document });
+    if (!paragraphs.length) {
+      mediaSources.push({ path, collection });
+      continue;
+    }
     const heading = paragraphs.find((p) => p.kind === 'heading');
-    chapters.push({
+    const chapter: Chapter = {
       id: `chapter-${chapters.length}`,
       title: heading?.text.slice(0, 160) || labels.chapter(chapters.length + 1),
       paragraphs,
-    });
+    };
+    chapters.push(chapter);
+    mediaSources.push({ path, chapterId: chapter.id, collection });
+    targets.push({ path, chapter, anchors });
+    referenceSources.push({ path, chapterId: chapter.id, collection: referenceCollection });
   }
   if (!chapters.length)
     throw new Error('没有找到可读取的文字章节；暂不支持 DRM、扫描版和纯图片书籍。');
+  const navigationDocuments: EpubNavigationDocument[] = [];
+  for (const entry of manifest.values()) {
+    const kind = entry.getAttribute('properties')?.split(/\s+/).includes('nav')
+      ? 'nav'
+      : entry.getAttribute('media-type') === 'application/x-dtbncx+xml'
+        ? 'ncx'
+        : null;
+    const href = entry.getAttribute('href');
+    if (!kind || !href) continue;
+    try {
+      const path = normalizePath(directory, href);
+      navigationDocuments.push({ path, document: xml(read(path)), kind });
+    } catch {
+      /* A broken optional table of contents must not discard readable text. */
+    }
+  }
+  const navigation = epubNavigation(navigationDocuments, targets);
+  for (const chapter of chapters) {
+    const title = navigation.chapterTitles.get(chapter.id);
+    if (title && !chapter.paragraphs.some((paragraph) => paragraph.kind === 'heading'))
+      chapter.title = title.slice(0, 160);
+  }
+  const referencePaths = new Set(
+    referenceSources.flatMap((source) =>
+      source.collection.links
+        .map((link) => resolveEpubReference(source.path, link.href)?.path)
+        .filter((path): path is string => !!path),
+    ),
+  );
+  for (const entry of manifest.values()) {
+    if (!['application/xhtml+xml', 'text/html'].includes(entry.getAttribute('media-type') || ''))
+      continue;
+    try {
+      const path = normalizePath(directory, entry.getAttribute('href') || '');
+      if (!referencePaths.has(path) || referenceDocuments.some((doc) => doc.path === path))
+        continue;
+      const document = new DOMParser().parseFromString(read(path), 'application/xhtml+xml');
+      if (!document.querySelector('parsererror')) referenceDocuments.push({ path, document });
+    } catch {
+      /* Optional targets are reported by the resolver; keep readable spine text. */
+    }
+  }
+  const references = createEpubReferences({
+    chapters,
+    sources: referenceSources,
+    documents: referenceDocuments,
+  });
+  // Inflate only referenced raster assets, with limits applied before decompression.
+  const imagePaths = new Set(
+    mediaSources.flatMap(({ path, collection }) =>
+      collection.images
+        .map((image) => resolveEpubImagePath(path, image.source))
+        .filter((value): value is string => !!value),
+    ),
+  );
+  const oversizedImages = new Set<string>();
+  const selectedImages = new Set<string>();
+  const seenImageEntries = new Set<string>();
+  let imageBytes = 0;
+  let imageCount = 0;
+  const unzipImages = (filter: UnzipFileFilter) =>
+    new Promise<Record<string, Uint8Array>>((resolve, reject) => {
+      let terminate: (() => void) | undefined;
+      terminate = unzip(new Uint8Array(buffer), { filter }, (error, result) => {
+        if (error) {
+          terminate?.();
+          reject(error);
+        } else resolve(result);
+      });
+    });
+  let imageFiles: Record<string, Uint8Array>;
+  try {
+    imageFiles = await unzipImages((entry) => {
+      if (!imagePaths.has(entry.name) || seenImageEntries.has(entry.name)) return false;
+      seenImageEntries.add(entry.name);
+      if (
+        entry.originalSize > MAX_BOOK_IMAGE_BYTES ||
+        imageBytes + entry.originalSize > MAX_BOOK_MEDIA_BYTES ||
+        imageCount >= MAX_BOOK_MEDIA_ASSETS
+      ) {
+        oversizedImages.add(entry.name);
+        return false;
+      }
+      imageBytes += entry.originalSize;
+      imageCount++;
+      selectedImages.add(entry.name);
+      return true;
+    });
+  } catch {
+    // A damaged optional image must not discard readable text or the other
+    // illustrations. Retry only the already budgeted entries, one at a time.
+    imageFiles = Object.create(null);
+    let recoveredBytes = 0;
+    for (const path of selectedImages) {
+      let found = false;
+      try {
+        const recovered = await unzipImages((entry) => {
+          if (entry.name !== path || found) return false;
+          found = true;
+          return entry.originalSize <= MAX_BOOK_IMAGE_BYTES;
+        });
+        const bytes = recovered[path];
+        if (!bytes) continue;
+        if (
+          bytes.length > MAX_BOOK_IMAGE_BYTES ||
+          recoveredBytes + bytes.length > MAX_BOOK_MEDIA_BYTES
+        ) {
+          oversizedImages.add(path);
+          continue;
+        }
+        imageFiles[path] = bytes;
+        recoveredBytes += bytes.length;
+      } catch {
+        // createEpubMedia counts the unavailable reference in its diagnostics.
+      }
+    }
+  }
+  const media = await createEpubMedia({
+    chapters,
+    sources: mediaSources,
+    readFile: (path) => (oversizedImages.has(path) ? 'too-large' : imageFiles[path] || null),
+  });
   // Decode only the declared cover, never remote image URLs or executable SVG.
   let cover: string | undefined;
   const coverId = descendants(packageDoc, 'meta')
@@ -274,6 +348,10 @@ export async function importBook(
         ? 'rtl'
         : 'ltr',
     chapters,
+    ...(navigation.toc.length ? { toc: navigation.toc } : {}),
+    sourceFormat: 'epub',
+    ...(media ? { media } : {}),
+    references,
     importedAt: Date.now(),
     cover,
     description,

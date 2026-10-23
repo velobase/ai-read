@@ -4,6 +4,7 @@ import { SUPPORT_EMAIL, SUPPORT_MAILTO } from '@/lib/contact';
 
 import { useI18n } from '@/lib/i18n/provider';
 import { TranslationPromptEditor } from '@/components/reader/translation-prompt-editor';
+import { ReadingNavigationSettings } from '@/components/reader/reading-controls';
 import { ContentLanguageLabel } from '@/components/library/language-menu';
 
 import Link from 'next/link';
@@ -24,6 +25,7 @@ import {
   ShieldCheck,
   ArrowUpRight,
   Download,
+  Activity,
 } from 'lucide-react';
 import { useLibrary } from './library-provider';
 import { Avatar, LibraryShell, PageHeading, SettingsRow } from './library-ui';
@@ -195,7 +197,12 @@ export function ProfilePage() {
         </p>
         <p className="mt-2 text-center text-[10px] text-muted-foreground/70">
           © 2026 LeafRead ·{' '}
-          <a href="https://leafread.ai" target="_blank" rel="noreferrer" className="hover:underline">
+          <a
+            href="https://leafread.ai"
+            target="_blank"
+            rel="noreferrer"
+            className="hover:underline"
+          >
             leafread.ai
           </a>{' '}
           ·{' '}
@@ -352,6 +359,11 @@ export function SettingsPage() {
           <SettingsRow icon={<Palette size={22} />} title={t('阅读偏好')} href="/me/appearance" />
           <SettingsRow icon={<Sparkles size={22} />} title={t('AI 连接')} href="/me/models" />
           <SettingsRow icon={<HardDrive size={22} />} title={t('数据与备份')} href="/me/data" />
+          <SettingsRow
+            icon={<Activity size={22} />}
+            title={t('诊断与隐私')}
+            href="/me/diagnostics"
+          />
         </div>
         <div className="settings-group">
           <SettingsRow
@@ -556,6 +568,7 @@ export function PreferencesPage({ models = false }: { models?: boolean }) {
                 {t('让一个新的想法，慢慢走进生活。')}
               </div>
               <div className="settings-form-card">
+                <ReadingNavigationSettings settings={settings} update={patch} />
                 <label className="settings-field">
                   <span>
                     {t('字号')}{' '}
@@ -641,10 +654,16 @@ export function PreferencesPage({ models = false }: { models?: boolean }) {
                     <SelectContent>
                       <SelectItem value="original">{t('原文')}</SelectItem>
                       <SelectItem value="bilingual">{t('双语')}</SelectItem>
-                      <SelectItem value="translation">{t('译文')}</SelectItem>
+                      <SelectItem value="translation">
+                        {locale.startsWith('zh') ? '仅译文' : 'Translation only'}
+                      </SelectItem>
                     </SelectContent>
                   </Select>
-                  <small>{t('双语与译文模式准备当前章和下一章，可在“译本”中管理任务。')}</small>
+                  <small>
+                    {locale.startsWith('zh')
+                      ? '用于尚未设置阅读语言的书籍。双语和仅译文会随阅读自动补齐，本书选择在阅读器中单独记住。'
+                      : 'Used until a book has its own reading-language choice. Bilingual and translation-only modes translate as you read; the reader remembers each book’s choice.'}
+                  </small>
                 </div>
               </div>
             </>
@@ -715,10 +734,7 @@ export function AboutPage() {
               {isZh ? '官方网站 · leafread.ai' : 'Official website · leafread.ai'}
               <ArrowUpRight size={16} />
             </a>
-            <a
-              href={SUPPORT_MAILTO}
-              className="flex items-center gap-2 text-primary"
-            >
+            <a href={SUPPORT_MAILTO} className="flex items-center gap-2 text-primary">
               {isZh ? '联系支持' : 'Support'} · {SUPPORT_EMAIL}
             </a>
             <div className="flex flex-wrap gap-5 pt-1">
@@ -731,9 +747,7 @@ export function AboutPage() {
             </div>
           </div>
         </div>
-        <p className="my-8 text-center text-xs text-muted-foreground">
-          © 2026 LeafRead · v0.1.0
-        </p>
+        <p className="my-8 text-center text-xs text-muted-foreground">© 2026 LeafRead · v0.1.0</p>
       </main>
     </LibraryShell>
   );

@@ -1,7 +1,9 @@
+import { effectiveBookLanguage, readingScopeParagraphs } from '../../packages/reading-core/src';
 import { storageUserId } from './storage-scope';
 import { translationFingerprint } from './translation-prompt';
 import type { Book, Message, Paragraph, Settings } from './types';
 import { languageName } from './types';
+import { measureClient } from './observability/client';
 
 export type Source = { id: string; chapter: string; text: string };
 type Request = {
@@ -59,6 +61,23 @@ async function request(settings: Settings, body: Request, signal: AbortSignal) {
 }
 
 export async function streamAI(
+  settings: Settings,
+  body: Request,
+  signal: AbortSignal,
+  onText: (text: string) => void,
+) {
+  const measured = measureClient('ai_request');
+  try {
+    const result = await readAIStream(settings, body, signal, onText);
+    measured();
+    return result;
+  } catch (error) {
+    measured(signal.aborted ? 'cancelled' : 'error', { errorKind: 'network' });
+    throw error;
+  }
+}
+
+async function readAIStream(
   settings: Settings,
   body: Request,
   signal: AbortSignal,
@@ -142,7 +161,7 @@ export async function expandQuestion(
     {
       action: 'terms',
       title: book.title,
-      bookLanguage: book.language,
+      bookLanguage: effectiveBookLanguage(book),
       question,
       selection,
       history: history.slice(-4),
@@ -188,18 +207,19 @@ export function buildContext(
   scope: Settings['scope'],
   query: string,
   selection?: Paragraph,
+  anchorId?: string,
 ) {
-  const candidates = book.chapters.flatMap((c, i) =>
-    (
-      scope === 'chapter'
-        ? i === chapter
-        : scope === 'read'
-          ? i <= Math.max(chapter, farthest)
-          : true
-    )
-      ? c.paragraphs.map((p) => ({ ...p, chapter: c.title, chapterIndex: i }))
-      : [],
+  const entries = readingScopeParagraphs(
+    book,
+    {
+      chapter,
+      farthest,
+      paragraph: anchorId ?? selection?.id ?? book.chapters[chapter]?.paragraphs[0]?.id ?? '',
+    },
+    scope,
   );
+  const candidates = entries.map(({ paragraph, ...location }) => ({ ...paragraph, ...location }));
+  const ordinalMap = new Map(entries.map((entry) => [entry.paragraph.id, entry.ordinal]));
   const queryTokens = tokens(query);
   const budget = 46_000;
   const allSize = candidates.reduce((sum, p) => sum + p.text.length + 80, 0);
@@ -224,11 +244,7 @@ export function buildContext(
     used += p.text.length + 80;
     chosen.push({ id: p.id, chapter: p.chapter, text: p.text });
   }
-  chosen.sort((a, b) => {
-    const [ac, ap] = a.id.split('.').map(Number),
-      [bc, bp] = b.id.split('.').map(Number);
-    return ac - bc || ap - bp;
-  });
+  chosen.sort((a, b) => ordinalMap.get(a.id)! - ordinalMap.get(b.id)!);
   return { sources: chosen, partial: chosen.length < candidates.length, total: candidates.length };
 }
 

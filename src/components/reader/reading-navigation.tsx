@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { Chapter, Settings } from '@/lib/types';
+import type { ReadingChapterTarget } from '../../../packages/reading-core/src';
 import './reading-navigation.css';
 
 export function ReadingModePicker({
@@ -86,6 +87,11 @@ export function ReadingNavigation({
   progress,
   chapterTitle,
   rtl,
+  pdf = false,
+  sourcePage,
+  chapterPrevious,
+  chapterNext,
+  onChapter,
 }: {
   mode: Settings['navigationMode'];
   page: number;
@@ -98,18 +104,38 @@ export function ReadingNavigation({
   progress: number;
   chapterTitle: string;
   rtl: boolean;
+  pdf?: boolean;
+  sourcePage?: number;
+  chapterPrevious?: ReadingChapterTarget;
+  chapterNext?: ReadingChapterTarget;
+  onChapter: (target: ReadingChapterTarget) => void;
   onTurn: (direction: -1 | 1) => void;
   onContents: () => void;
   onMode: () => void;
 }) {
   const { t } = useI18n();
-  const previous = mode === 'scroll' || atStart ? t('上一章末尾') : t('上一页');
+  const chapterLabel = (direction: -1 | 1, target?: ReadingChapterTarget) =>
+    direction < 0
+      ? t(target?.kind === 'page' ? '上一原页' : '上一章')
+      : t(target?.kind === 'page' ? '下一原页' : '下一章');
+  const previous =
+    mode === 'scroll'
+      ? chapterLabel(-1, chapterPrevious)
+      : atStart
+        ? t(pdf ? '上一原页' : '上一章末尾')
+        : t('上一页');
   const next =
-    mode === 'scroll' || atEnd
-      ? chapterIndex === chapterCount - 1
-        ? t('已到全书末尾')
-        : t('下一章')
-      : t('下一页');
+    mode === 'scroll'
+      ? chapterNext
+        ? chapterLabel(1, chapterNext)
+        : chapterIndex === chapterCount - 1 && atEnd
+          ? t('已到全书末尾')
+          : t('下一章')
+      : atEnd
+        ? chapterIndex === chapterCount - 1
+          ? t('已到全书末尾')
+          : t(pdf ? '下一原页' : '下一章')
+        : t('下一页');
   return (
     <nav
       dir={rtl ? 'rtl' : 'ltr'}
@@ -124,22 +150,29 @@ export function ReadingNavigation({
         className="reading-nav-arrow"
         aria-label={previous}
         title={`${previous} · ${rtl ? '→' : '←'}`}
-        disabled={(mode === 'scroll' || atStart) && chapterIndex === 0}
-        onClick={() => onTurn(-1)}
+        disabled={turning || (mode === 'scroll' ? !chapterPrevious : atStart && chapterIndex === 0)}
+        onClick={() =>
+          mode === 'scroll' ? chapterPrevious && onChapter(chapterPrevious) : onTurn(-1)
+        }
       >
         {rtl ? <ArrowRight size={17} /> : <ArrowLeft size={17} />}
-        <span>{mode === 'scroll' || atStart ? t('上一章') : t('上一页')}</span>
+        <span>{previous}</span>
       </Button>
       <button
         className="reading-nav-location"
         onClick={onContents}
-        aria-label={t('打开目录，第 {value0} 章，共 {value1} 章，阅读进度 {value2}%', {
-          value0: chapterIndex + 1,
-          value1: chapterCount,
-          value2: progress,
-        })}
+        aria-label={
+          pdf
+            ? `${t('打开目录')} · ${chapterTitle} · ${sourcePage ? t('PDF 第 {n} 页', { n: sourcePage }) : ''} · ${progress}%`
+            : t('打开目录，第 {value0} 章，共 {value1} 章，阅读进度 {value2}%', {
+                value0: chapterIndex + 1,
+                value1: chapterCount,
+                value2: progress,
+              })
+        }
       >
         <span>{chapterTitle}</span>
+        {pdf && sourcePage && <span>{t('PDF 第 {n} 页', { n: sourcePage })}</span>}
         <span className="reading-nav-page" aria-live="polite" aria-atomic="true">
           {mode === 'paged'
             ? t('{value0} / {value1} 页', { value0: page, value1: pages })
@@ -152,16 +185,12 @@ export function ReadingNavigation({
         className="reading-nav-arrow"
         aria-label={next}
         title={`${next} · ${rtl ? '←' : '→'}`}
-        disabled={(mode === 'scroll' || atEnd) && chapterIndex === chapterCount - 1}
-        onClick={() => onTurn(1)}
+        disabled={
+          turning || (mode === 'scroll' ? !chapterNext : atEnd && chapterIndex === chapterCount - 1)
+        }
+        onClick={() => (mode === 'scroll' ? chapterNext && onChapter(chapterNext) : onTurn(1))}
       >
-        <span>
-          {mode === 'scroll' || atEnd
-            ? chapterIndex === chapterCount - 1
-              ? t('已到全书末尾')
-              : t('下一章')
-            : t('下一页')}
-        </span>
+        <span>{next}</span>
         {rtl ? <ArrowLeft size={17} /> : <ArrowRight size={17} />}
       </Button>
       <button
@@ -185,6 +214,7 @@ export function ChapterEnding({
   onChapter,
   onContents,
   onFinish,
+  pdf = false,
 }: {
   chapter: Chapter;
   next?: Chapter;
@@ -194,14 +224,18 @@ export function ChapterEnding({
   onChapter: (index: number, edge?: 'start' | 'end') => void;
   onContents: () => void;
   onFinish: () => void;
+  pdf?: boolean;
 }) {
   const { t } = useI18n();
   return (
-    <section className="chapter-ending" aria-label={next ? t('本章结束') : t('全书结束')}>
+    <section
+      className="chapter-ending"
+      aria-label={next ? (pdf ? chapter.title : t('本章结束')) : t('全书结束')}
+    >
       {next ? (
         <button className="chapter-next" disabled={turning} onClick={() => onChapter(index + 1)}>
           <span>
-            <span className="chapter-next-label">{t('下一章')}</span>
+            <span className="chapter-next-label">{t(pdf ? '下一原页' : '下一章')}</span>
             <span className="chapter-next-title">{next.title}</span>
           </span>
           <span className="chapter-next-arrow">
@@ -220,7 +254,7 @@ export function ChapterEnding({
       <div className="chapter-ending-links">
         <button disabled={!previous || turning} onClick={() => onChapter(index - 1, 'end')}>
           <ArrowLeft size={14} />
-          {t('上一章')}
+          {t(pdf ? '上一原页' : '上一章')}
         </button>
         <button onClick={onContents}>
           <List size={15} />

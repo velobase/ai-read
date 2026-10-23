@@ -1,10 +1,11 @@
+import { observedRoute } from '@/lib/server/observability';
 import { authConfigured } from '@/lib/server/auth-config';
 import { database } from '@/lib/server/database';
 import { assertAIEncryptionConfigured } from '@/lib/server/ai-credentials';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+async function handleGET() {
   try {
     if (!authConfigured()) throw new Error('Authentication is not configured.');
     // Verify both the identity and account AI migrations before accepting traffic.
@@ -22,3 +23,5 @@ export async function GET() {
     );
   }
 }
+
+export const GET = observedRoute('api.ready', handleGET);

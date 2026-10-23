@@ -1,6 +1,30 @@
+import { bookmarks, addBookmark, modifyBookmark } from './bookmark-storage';
+import { MAX_BOOKMARKS_PER_BOOK } from '../../packages/reading-core/src/bookmarks';
+import { sameBookContent } from '../../packages/reading-core/src/import-markup';
+import { supplementBookMedia } from '../../packages/reading-core/src/book-media';
+import { supplementBookReferences } from '../../packages/reading-core/src/book-references';
+import { isBookSourceLanguage } from '../../packages/reading-core/src/reading-language';
+import { resolveTranslationKey } from '../../packages/reading-core/src/translation-key';
+import { preparePdfOriginal } from './pdf/original';
+import {
+  validatePortableLibrary,
+  type PortableTranslation,
+  type PortableCollection,
+  type PortableLibrary,
+} from './portable-library';
+import { mergeSavedTranslationVersions } from './saved-translation-storage';
+import {
+  assertLibraryScope,
+  captureLibraryScope,
+  loadLibraryState,
+  mergePortableCollections,
+  resumePortableCollections,
+  stagePortableCollections,
+} from './library-state';
 import { effectiveTranslationPrompt, MAX_TRANSLATION_PROMPT_LENGTH } from './translation-prompt';
+import { translationFingerprint } from './translation-prompt';
 import { catalog } from './catalog';
-import type { Book, Message, Note, Position, Settings } from './types';
+import type { Book, Bookmark, Message, Note, Position, Settings } from './types';
 import { defaults } from './types';
 import { validateBackup, validateBook, type ReadingBackup } from './reading-backup';
 import { storageKey, storageUserId } from './storage-scope';
@@ -28,6 +52,33 @@ const lastPosition = new Map<string, Position>();
 async function changed() {
   notifySyncDirty();
 }
+/** Update only the user's source-language choice, preserving imported text and anchors. */
+export async function setBookSourceLanguage(bookId: string, sourceLanguage: string): Promise<Book> {
+  if (!isBookSourceLanguage(sourceLanguage)) throw new Error('原文语言无效。');
+  let updated = false;
+  const book = await localTransaction(
+    'readwrite',
+    async (tx) => {
+      if (!(await ensureLocalBook(tx, bookId))) throw new Error('没有找到这本书');
+      const store = tx.objectStore('books');
+      const current = (await idb(store.get(bookId))) as Book;
+      if (current.sourceLanguage === sourceLanguage) return current;
+      const next = { ...current, sourceLanguage };
+      await idb(store.put(next, bookId));
+      await stage(tx, 'book', bookId, bookId, {
+        shelfState: cleanShelf(readJSON('ai-read-library').books?.[bookId]),
+      });
+      updated = true;
+      return next;
+    },
+    ['books', 'sync'],
+  );
+  if (updated) {
+    notifyLocalData();
+    notifySyncDirty();
+  }
+  return book;
+}
 async function putNotes(
   tx: IDBTransaction,
   bookId: string,
@@ -43,22 +94,60 @@ async function putNotes(
   return next;
 }
 export const storage = {
+  setBookSourceLanguage,
+  bookmarks,
+  addBookmark,
+  modifyBookmark,
+  async librarySnapshot() {
+    await resumePortableCollections();
+    // One consistent read transaction instead of 1 + 2N separate transactions.
+    return localTransaction(
+      'readonly',
+      async (tx) => {
+        const [books, noteGroups, bookmarkGroups, positionKeys, positionValues] = await Promise.all(
+          [
+            idb(tx.objectStore('books').getAll()) as Promise<Book[]>,
+            idb(tx.objectStore('notes').getAll()) as Promise<Note[][]>,
+            idb(tx.objectStore('bookmarks').getAll()) as Promise<Bookmark[][]>,
+            idb(tx.objectStore('positions').getAllKeys()),
+            idb(tx.objectStore('positions').getAll()) as Promise<Position[]>,
+          ],
+        );
+        return {
+          books,
+          notes: noteGroups.flat(),
+          bookmarks: bookmarkGroups.flat(),
+          positions: Object.fromEntries(
+            positionKeys.map((key, index) => [String(key), positionValues[index]]),
+          ) as Record<string, Position | undefined>,
+        };
+      },
+      ['books', 'notes', 'bookmarks', 'positions'],
+    );
+  },
   books: () =>
     localTransaction('readonly', (tx) => idb(tx.objectStore('books').getAll()) as Promise<Book[]>, [
       'books',
     ]),
-  async saveBook(book: Book) {
+  async saveBook(book: Book, originalPdf?: Blob) {
     book = validateBook(book);
+    const source = originalPdf ? await preparePdfOriginal(book, originalPdf) : undefined;
     await localTransaction('readwrite', async (tx) => {
-      const old = await idb(tx.objectStore('books').get(book.id));
+      const old: Book | undefined = await idb(tx.objectStore('books').get(book.id));
+      if (old && !sameBookContent(old, book)) throw new Error('同一书籍 ID 的正文不一致，未导入。');
+      if (old)
+        book = {
+          ...supplementBookReferences(supplementBookMedia(old, book), book),
+          cover: book.cover || old.cover,
+          toc: old.toc?.length ? old.toc : book.toc,
+          sourceFormat: old.sourceFormat || book.sourceFormat,
+          sourceLanguage: old.sourceLanguage ?? book.sourceLanguage,
+        };
       await idb(tx.objectStore('books').put(book, book.id));
-      const meta: SyncEntry | undefined = await idb(
-        tx.objectStore('sync').get(syncKey('book', book.id, book.id)),
-      );
-      if (!old || !meta)
-        await stage(tx, 'book', book.id, book.id, {
-          shelfState: cleanShelf(readJSON('ai-read-library').books?.[book.id]),
-        });
+      if (source) await idb(tx.objectStore('pdf-originals').put(source, book.id));
+      await stage(tx, 'book', book.id, book.id, {
+        shelfState: cleanShelf(readJSON('ai-read-library').books?.[book.id]),
+      });
     });
     await changed();
   },
@@ -137,16 +226,58 @@ export const storage = {
     notifyLocalData();
     await changed();
   },
-  async restoreReadingBackup(backup: ReadingBackup) {
-    backup = validateBackup(backup);
+  async restoreReadingBackup(
+    backup: ReadingBackup,
+    translations: PortableTranslation[] = [],
+    collections?: PortableCollection[],
+  ) {
+    return storage.restorePortableLibrary({
+      format: 'bypage-portable-library',
+      version: 1,
+      backup,
+      translations,
+      ...(collections !== undefined ? { collections } : {}),
+    });
+  },
+  async restorePortableLibrary(value: PortableLibrary) {
+    const scope = captureLibraryScope();
+    const pack = validatePortableLibrary(value);
+    const backup = pack.backup;
+    if (pack.collections?.length)
+      mergePortableCollections(loadLibraryState(true), pack.collections);
     await localTransaction('readwrite', async (tx) => {
+      assertLibraryScope(scope, tx);
+      const existingBooks = new Set<string>();
       for (const book of backup.books) {
-        if (!(await idb(tx.objectStore('books').get(book.id)))) {
+        const existing: Book | undefined = await idb(tx.objectStore('books').get(book.id));
+        if (existing) existingBooks.add(book.id);
+        if (existing && !sameBookContent(existing, book))
+          throw new Error('同一书籍 ID 的正文不一致，未导入。');
+        if (
+          existing &&
+          ((!existing.toc?.length && book.toc?.length) ||
+            (!existing.sourceFormat && book.sourceFormat) ||
+            (existing.sourceLanguage === undefined && book.sourceLanguage !== undefined) ||
+            (book.references && book.references.revision !== existing.references?.revision) ||
+            (book.media && book.media.revision !== existing.media?.revision))
+        )
+          await idb(
+            tx.objectStore('books').put(
+              {
+                ...supplementBookReferences(supplementBookMedia(existing, book), book),
+                toc: existing.toc?.length ? existing.toc : book.toc,
+                sourceFormat: existing.sourceFormat || book.sourceFormat,
+                sourceLanguage: existing.sourceLanguage ?? book.sourceLanguage,
+              },
+              book.id,
+            ),
+          );
+        if (!existing) {
           await idb(tx.objectStore('books').put(book, book.id));
-          await stage(tx, 'book', book.id, book.id, {
-            shelfState: cleanShelf(readJSON('ai-read-library').books?.[book.id]),
-          });
         }
+        await stage(tx, 'book', book.id, book.id, {
+          shelfState: cleanShelf(readJSON('ai-read-library').books?.[book.id]),
+        });
         const notes: Note[] = (await idb(tx.objectStore('notes').get(book.id))) || [];
         const ids = new Set(notes.map((n) => n.id));
         for (const note of backup.notes.filter((n) => n.bookId === book.id && !ids.has(n.id))) {
@@ -154,15 +285,53 @@ export const storage = {
           await stage(tx, 'note', book.id, note.id, note);
         }
         await idb(tx.objectStore('notes').put(notes, book.id));
+        const bookmarks: Bookmark[] = (await idb(tx.objectStore('bookmarks').get(book.id))) || [];
+        const bookmarkIds = new Set(bookmarks.map((item) => item.id));
+        const incoming = (backup.bookmarks || []).filter(
+          (item) => item.bookId === book.id && !bookmarkIds.has(item.id),
+        );
+        if (bookmarks.length + incoming.length > MAX_BOOKMARKS_PER_BOOK)
+          throw new Error('每本书最多保存 1000 条书签。');
+        for (const item of incoming) {
+          bookmarks.push(item);
+          await stage(tx, 'bookmark', book.id, item.id, item);
+        }
+        await idb(tx.objectStore('bookmarks').put(bookmarks, book.id));
         const position = backup.positions[book.id];
         if (position && !(await idb(tx.objectStore('positions').get(book.id)))) {
           await idb(tx.objectStore('positions').put(position, book.id));
           await stage(tx, 'position', book.id, book.id, position);
         }
       }
+      if (pack.version === 2)
+        await mergeSavedTranslationVersions(
+          tx,
+          pack.translationVersions,
+          pack.translationSelections,
+          existingBooks,
+          translationFingerprint(loadSettings()),
+        );
+      for (const entry of pack.translations) {
+        const values: Record<string, string> =
+          (await idb(tx.objectStore('translations').get(entry.bookId))) || {};
+        for (const [paragraph, text] of Object.entries(entry.paragraphs)) {
+          const key = `${entry.language}:${paragraph}:portable-v1`;
+          const exact = await idb(tx.objectStore('translation-versions').get([entry.bookId, key]));
+          if (exact && exact.text !== text) throw new Error('saved_translation_immutable_conflict');
+          if (!values[key]) {
+            values[key] = text;
+            await stage(tx, 'translation', entry.bookId, key, { key, text });
+          }
+        }
+        await idb(tx.objectStore('translations').put(values, entry.bookId));
+      }
+      assertLibraryScope(scope, tx);
+      if (pack.collections?.length) await stagePortableCollections(tx, scope, pack.collections);
     });
+    const result = await resumePortableCollections(scope);
     notifyLocalData();
     await changed();
+    return result;
   },
   chat: (id: string) => readLocal<Message[]>('chats', id).then((v) => v || []),
   async saveChat(id: string, messages: Message[]) {
@@ -203,6 +372,8 @@ export const storage = {
       const old: Record<string, string> = (await idb(tx.objectStore('translations').get(id))) || {};
       for (const [key, text] of Object.entries(value))
         if (text && !Object.hasOwn(old, key)) {
+          const exact = await idb(tx.objectStore('translation-versions').get([id, key]));
+          if (exact && exact.text !== text) throw new Error('saved_translation_immutable_conflict');
           old[key] = text;
           await stage(tx, 'translation', id, key, { key, text });
         }
@@ -228,7 +399,7 @@ export async function prepareLocalSync() {
   const known = new Set(books.map((b) => b.id));
   const assetKeys = await localTransaction('readonly', async (tx) => {
     const keys = new Set<string>();
-    for (const name of ['positions', 'notes', 'chats', 'translations'])
+    for (const name of ['positions', 'notes', 'bookmarks', 'chats', 'translations'])
       for (const key of await idb(tx.objectStore(name).getAllKeys())) keys.add(String(key));
     return keys;
   });
@@ -238,6 +409,9 @@ export async function prepareLocalSync() {
       books.push(sample);
     }
   for (const book of books) {
+    const paragraphIds = new Set(
+      book.chapters.flatMap((chapter) => chapter.paragraphs.map((paragraph) => paragraph.id)),
+    );
     const turns = await messagesToTurns(await storage.chat(book.id));
     await localTransaction('readwrite', async (tx) => {
       const seed = async (entity: SyncEntry['entity'], id: string, data: any) => {
@@ -252,6 +426,8 @@ export async function prepareLocalSync() {
       if (position) await seed('position', book.id, position);
       const notes: Note[] = (await idb(tx.objectStore('notes').get(book.id))) || [];
       for (const note of notes) await seed('note', note.id, note);
+      const bookmarks: Bookmark[] = (await idb(tx.objectStore('bookmarks').get(book.id))) || [];
+      for (const item of bookmarks) await seed('bookmark', item.id, item);
       for (const turn of turns) {
         const key = syncKey('chat', book.id, turn.id);
         const meta: SyncEntry | undefined = await idb(tx.objectStore('sync').get(key));
@@ -261,9 +437,11 @@ export async function prepareLocalSync() {
         await seed('chat', turn.id, turn);
       }
       const translations = (await idb(tx.objectStore('translations').get(book.id))) || {};
-      for (const [key, text] of Object.entries(translations))
-        if (typeof text === 'string' && key.split(':').length === 3 && !key.endsWith(':sample'))
+      for (const [key, text] of Object.entries(translations)) {
+        const resolved = resolveTranslationKey(key, paragraphIds);
+        if (typeof text === 'string' && resolved && resolved.version !== 'sample')
           await seed('translation', key, { key, text });
+      }
     });
   }
   if (

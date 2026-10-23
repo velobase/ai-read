@@ -41,6 +41,7 @@ const adapter: Adapter = {
         ...data,
         sessionToken: hashSession(data.sessionToken),
         device: `${browser} · ${platform}`,
+        kind: 'web',
       },
     });
     return { ...session, sessionToken: data.sessionToken };
@@ -50,13 +51,13 @@ const adapter: Adapter = {
       where: { sessionToken: hashSession(token) },
       include: { user: true },
     });
-    if (!record) return null;
+    if (!record || record.kind !== 'web') return null;
     const { user, ...session } = record;
     return { user, session: { ...session, sessionToken: token } };
   },
   async updateSession({ sessionToken, expires }) {
     const record = await database.session.updateMany({
-      where: { sessionToken: hashSession(sessionToken) },
+      where: { sessionToken: hashSession(sessionToken), kind: 'web' },
       data: { expires },
     });
     if (!record.count) return null;
@@ -66,7 +67,18 @@ const adapter: Adapter = {
     return session ? { ...session, sessionToken } : null;
   },
   async deleteSession(token) {
-    await database.session.deleteMany({ where: { sessionToken: hashSession(token) } });
+    const sessionToken = hashSession(token);
+    const record = await database.session.findFirst({
+      where: { sessionToken, kind: 'web' },
+      select: { userId: true },
+    });
+    if (!record) return;
+    await database.$transaction(async (tx) => {
+      // Use the same account lock as mobile authorization/exchange. Deleting the
+      // browser session also cascades every unexchanged grant issued by it.
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${record.userId} FOR UPDATE`;
+      await tx.session.deleteMany({ where: { sessionToken, userId: record.userId, kind: 'web' } });
+    });
   },
 };
 

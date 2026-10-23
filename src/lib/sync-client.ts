@@ -9,7 +9,14 @@ import {
 } from './sync-storage';
 import { readLocal } from './local-database';
 import type { Book } from './types';
-import type { SyncEntity, SyncEntry, SyncRecord } from './sync-types';
+import {
+  bookMetadata,
+  sameData,
+  type SyncData,
+  type SyncEntity,
+  type SyncEntry,
+  type SyncRecord,
+} from './sync-types';
 
 export type SyncStatus = {
   state: 'local' | 'syncing' | 'ready' | 'offline' | 'error' | 'auth';
@@ -23,6 +30,17 @@ export const initialSyncStatus: SyncStatus = { state: 'local', pending: 0, recov
 class InvalidSyncMutation extends Error {}
 const rejected = (entry: SyncEntry) =>
   !!entry.pending && entry.rejectedMutationId === entry.pending.mutationId;
+const needsMediaContent = (
+  book: Book | undefined,
+  revision: string | undefined,
+  entry?: SyncEntry,
+) =>
+  !!revision &&
+  book?.media?.revision !== revision &&
+  !(
+    entry?.mediaChecked?.remoteRevision === revision &&
+    entry?.mediaChecked?.localRevision === book?.media?.revision
+  );
 export function startSync(userId: string, onStatus: (state: SyncStatus) => void) {
   let disposed = false,
     running = false,
@@ -81,9 +99,18 @@ export function startSync(userId: string, onStatus: (state: SyncStatus) => void)
       if (entry.entity === 'book' && !entry.pending.deleted) {
         const book = await readLocal<Book>('books', entry.bookId);
         if (!book) continue;
+        const { metadata = bookMetadata(book), shelfState } = data as SyncData['book'];
+        const remoteMetadata = (entry.shadow as SyncData['book'] | undefined)?.metadata || {};
+        const uploadContent =
+          entry.version === 0 ||
+          entry.deleted ||
+          (!!book.media &&
+            metadata.mediaRevision === book.media.revision &&
+            book.media.revision !== remoteMetadata.mediaRevision);
         data = {
-          ...(data as any),
-          ...(entry.version === 0 || entry.deleted ? { content: book } : {}),
+          shelfState,
+          ...(!sameData(metadata, remoteMetadata) ? { metadata } : {}),
+          ...(uploadContent ? { content: book } : {}),
         };
       }
       let result;
@@ -107,38 +134,80 @@ export function startSync(userId: string, onStatus: (state: SyncStatus) => void)
   }
   async function pullCollection(entity: SyncEntity, bookId = '') {
     let after = '';
+    const activeBookmarks: SyncRecord[] = [];
+    const applyMeta = async (meta: SyncRecord) => {
+      if (disposed) return;
+      const local = await getSyncEntry(meta.entity, meta.bookId, meta.id);
+      const existing = entity === 'book' ? await readLocal<Book>('books', meta.id) : undefined;
+      // A shelf ACK may already advance the version while only announcing new
+      // images. Continue fetching the sidecar until it has actually been saved.
+      const missingMedia =
+        entity === 'book' &&
+        !!existing &&
+        needsMediaContent(
+          existing,
+          (local?.shadow as SyncData['book'] | undefined)?.metadata?.mediaRevision,
+          local,
+        );
+      if (
+        !local?.pending &&
+        (meta.version > (local?.version ?? -1) ||
+          (entity === 'book' && !existing && !meta.deleted) ||
+          (missingMedia && !meta.deleted))
+      ) {
+        let record = await remote(
+          entity,
+          meta.bookId,
+          meta.id,
+          entity === 'book' && (!existing || missingMedia),
+        );
+        if (
+          entity === 'book' &&
+          existing &&
+          record &&
+          !record.deleted &&
+          !(record.data as SyncData['book']).content &&
+          needsMediaContent(
+            existing,
+            (record.data as SyncData['book']).metadata?.mediaRevision,
+            local,
+          )
+        ) {
+          record = await remote(entity, meta.bookId, meta.id, true);
+        }
+        if (record) {
+          // A newly downloaded book must have its resume position before the
+          // reader sees the book-added event and saves an initial position.
+          if (entity === 'book' && !existing && !record.deleted) {
+            const position = await remote('position', meta.id, meta.id);
+            if (position) await applyRemote(position);
+          }
+          await applyRemote(record);
+        }
+      }
+      if (entity === 'book' && !meta.deleted) {
+        const current = await getSyncEntry('book', meta.id, meta.id);
+        if (!current?.pending?.deleted && !current?.deleted) {
+          for (const child of ['position', 'note', 'bookmark', 'chat', 'translation'] as const)
+            await pullCollection(child, meta.id);
+        }
+      }
+    };
     do {
       const page = await api({ entity, bookId, after });
       for (const meta of page.items as SyncRecord[]) {
         if (disposed) return;
-        const local = await getSyncEntry(meta.entity, meta.bookId, meta.id);
-        const existing = entity === 'book' ? await readLocal<Book>('books', meta.id) : undefined;
-        if (
-          !local?.pending &&
-          (meta.version > (local?.version ?? -1) ||
-            (entity === 'book' && !existing && !meta.deleted))
-        ) {
-          const record = await remote(entity, meta.bookId, meta.id, entity === 'book' && !existing);
-          if (record) {
-            // A newly downloaded book must have its resume position before the
-            // reader sees the book-added event and saves an initial position.
-            if (entity === 'book' && !existing && !record.deleted) {
-              const position = await remote('position', meta.id, meta.id);
-              if (position) await applyRemote(position);
-            }
-            await applyRemote(record);
-          }
-        }
-        if (entity === 'book' && !meta.deleted) {
-          const current = await getSyncEntry('book', meta.id, meta.id);
-          if (!current?.pending?.deleted && !current?.deleted) {
-            for (const child of ['position', 'note', 'chat', 'translation'] as const)
-              await pullCollection(child, meta.id);
-          }
-        }
+        // Apply all bookmark deletions, across every page, before additions.
+        // Otherwise a full local collection can never reach a later tombstone.
+        if (entity === 'bookmark' && !meta.deleted) activeBookmarks.push(meta);
+        else await applyMeta(meta);
       }
       after = page.next || '';
     } while (after && !disposed);
+    for (const meta of activeBookmarks) {
+      if (disposed) return;
+      await applyMeta(meta);
+    }
   }
   async function perform() {
     if (disposed || !navigator.onLine) {

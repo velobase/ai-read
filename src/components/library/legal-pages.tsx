@@ -56,7 +56,7 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' }) {
                 <div>
                   <h2 className="mb-2 text-base font-semibold text-foreground">1. 本地优先的数据存储</h2>
                   <p>
-                    {t('ByPage · 逐页')} 采用本地优先（Local-First）架构。你导入的无 DRM EPUB 与 UTF-8 TXT 书籍在浏览器本地完成解析，原始电子书文件不会上传至服务器。提取的正文、阅读位置、划线、想法笔记、自动译文与对话记录默认保存在当前浏览器的 IndexedDB 与 localStorage 中。
+                    {t('ByPage · 逐页')} 采用本地优先（Local-First）架构。你导入的无 DRM EPUB、UTF-8 TXT 与 PDF 书籍在浏览器本地完成解析，原始电子书文件不会上传至服务器。提取的正文、阅读位置、划线、想法笔记、自动译文与对话记录默认保存在当前浏览器的 IndexedDB 与 localStorage 中。
                   </p>
                 </div>
                 <div>
@@ -72,9 +72,9 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' }) {
                   </p>
                 </div>
                 <div>
-                  <h2 className="mb-2 text-base font-semibold text-foreground">4. 无追踪与数据自主权</h2>
+                  <h2 className="mb-2 text-base font-semibold text-foreground">4. 诊断、可选统计与数据自主权</h2>
                   <p>
-                    本应用不内置第三方广告或行为分析追踪器。你可以随时在“我 → 数据与备份”中导出完整阅读备份（JSON）或将笔记导出为 Markdown，也可随时清除浏览器本地存储或退出登录设备。
+                    本应用不含广告。本次会话的性能和操作诊断只保存在页面内存。部署者可配置 PostHog 匿名统计；只有你在“设置 → 诊断与隐私”主动开启后，操作类型、耗时和错误类别才会发送。统计不含账号、书名、正文、笔记、问题、密钥、完整网址或搜索词，不创建用户画像或录屏；你可随时关闭，浏览器的 DNT/GPC 隐私信号也会阻止发送。服务端运行日志、受保护的指标和可选 trace 仅包含操作分类与耗时。你可以随时在“我 → 数据与备份”中导出完整阅读备份（JSON）或将笔记导出为 Markdown，也可随时清除浏览器本地存储或退出登录设备。
                   </p>
                 </div>
               </>
@@ -85,7 +85,7 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' }) {
                     1. Local-First Data Storage
                   </h2>
                   <p>
-                    {t('ByPage · 逐页')} is built on a local-first architecture. DRM-free EPUB and UTF-8 TXT files you import are parsed directly in your browser; raw ebook files are not uploaded to our servers. Extracted text, reading positions, highlights, notes, translations, and conversations are stored locally in your browser’s IndexedDB and localStorage by default.
+                    {t('ByPage · 逐页')} is built on a local-first architecture. DRM-free EPUB, UTF-8 TXT and PDF files you import are parsed directly in your browser; raw ebook files are not uploaded to our servers. Extracted text, reading positions, highlights, notes, translations, and conversations are stored locally in your browser’s IndexedDB and localStorage by default.
                   </p>
                 </div>
                 <div>
@@ -106,10 +106,10 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' }) {
                 </div>
                 <div>
                   <h2 className="mb-2 text-base font-semibold text-foreground">
-                    4. No Tracking & Data Portability
+                    4. Diagnostics, Optional Analytics & Data Portability
                   </h2>
                   <p>
-                    LeafRead does not bundle third-party advertising or analytics trackers. You can export your books, notes, and reading progress at any time under Me → Data & backups, export notes as Markdown, or revoke active device sessions under Account & security.
+                    LeafRead has no advertising. Session performance and activity diagnostics stay in page memory. Deployments may configure anonymous PostHog analytics, sent only after you opt in under Settings → Diagnostics & privacy. Events contain action types, timings and error categories, excluding accounts, book titles, text, notes, questions, keys, full URLs and search terms. No person profiles or session recordings are created. You may turn analytics off at any time; browser DNT/GPC signals also prevent sending. Server operational logs, protected metrics and optional traces contain operation classifications and timings only. You can export your books, notes, and reading progress at any time under Me → Data & backups, export notes as Markdown, or revoke active device sessions under Account & security.
                   </p>
                 </div>
               </>
@@ -119,7 +119,7 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' }) {
               <div>
                 <h2 className="mb-2 text-base font-semibold text-foreground">1. 服务说明与合理使用</h2>
                 <p>
-                  欢迎使用 {t('ByPage · 逐页')}（官方网站：leafread.ai）。本服务为你提供多语言电子书阅读、双语对照及基于原文引用的 AI 伴读工具。请仅导入你拥有合法阅读权限且无数字版权管理（DRM）限制的 EPUB 或 UTF-8 TXT 文件，切勿利用本工具规避版权保护或进行非法传播。
+                  欢迎使用 {t('ByPage · 逐页')}（官方网站：leafread.ai）。本服务为你提供多语言电子书阅读、双语对照及基于原文引用的 AI 伴读工具。请仅导入你拥有合法阅读权限且无数字版权管理（DRM）限制的 EPUB、UTF-8 TXT 或 PDF 文件，切勿利用本工具规避版权保护或进行非法传播。
                 </p>
               </div>
               <div>
@@ -148,7 +148,7 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' }) {
                   1. Service Overview & Acceptable Use
                 </h2>
                 <p>
-                  Welcome to {t('ByPage · 逐页')} (official website: leafread.ai). LeafRead provides multilingual ebook reading, bilingual comparison, and source-grounded AI reading companionship. You agree to import only DRM-free EPUB or UTF-8 TXT files that you have the legal right to read, and not to use the service to bypass technological protection measures or infringe copyright.
+                  Welcome to {t('ByPage · 逐页')} (official website: leafread.ai). LeafRead provides multilingual ebook reading, bilingual comparison, and source-grounded AI reading companionship. You agree to import only DRM-free EPUB, UTF-8 TXT or PDF files that you have the legal right to read, and not to use the service to bypass technological protection measures or infringe copyright.
                 </p>
               </div>
               <div>
