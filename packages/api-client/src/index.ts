@@ -9,7 +9,6 @@ export type MobileCapabilities = {
   nativeTranslation: boolean;
   aiModel?: string;
   aiContextKey?: string;
-  translationContextKey?: string;
 };
 export const mobileCapabilities: MobileCapabilities = {
   version: 1,
@@ -49,10 +48,6 @@ export function createApiClient(transport: Transport) {
           : {}),
         ...(typeof body.aiContextKey === 'string' && /^[a-f0-9]{64}$/.test(body.aiContextKey)
           ? { aiContextKey: body.aiContextKey }
-          : {}),
-        ...(typeof body.translationContextKey === 'string' &&
-        /^[a-f0-9]{64}$/.test(body.translationContextKey)
-          ? { translationContextKey: body.translationContextKey }
           : {}),
       };
     },

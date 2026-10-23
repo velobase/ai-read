@@ -37,7 +37,11 @@ Run `NODE_OPTIONS=--conditions=react-server npx tsx scripts/publish-classics.ts`
 
 ## Mobile translation
 
-Downloaded books enter the existing local library. Book details offer translation preparation; the reader supports paragraph, chapter and book ranges and bilingual display. Translation batches save completed paragraphs locally. The current native queue runs in the foreground and pauses on backgrounding, account changes or cancellation; users can resume the unfinished range. Billing is not implemented.
+Downloaded books enter the existing local library. Web and native use the same authenticated `/api/translations` endpoint, edition records, chapter queue and server worker. Readers choose a chapter or the whole book once. A database lease and chunk checkpoints allow work to continue through screen changes, backgrounding and app closure. Pausing is an explicit server action; opening an app does not resume a paused or failed task.
+
+The source snapshot belongs to the translation edition and the signed-in user, independently of library synchronization. Starting translation submits only reading text and metadata, never images, PDF originals, notes or bookmarks. Existing editions and checkpoints are preserved by the migration. Deleting the account cascades through its source snapshots, editions and selections.
+
+Native caches manifests by account and library, downloads complete validated chapters, and atomically stores immutable published paragraph versions. Source hashes prevent mismatched editions; account and library guards prevent late writes after switching. Completed downloads remain readable offline and old saved notes keep their exact translation keys. New editions replace the displayed one only after explicit selection. There is no foreground paragraph runner, batch cap, old mobile translation endpoint or billing.
 
 The iOS storefront requires the updated app binary. Existing native translation endpoints use the platform configuration as soon as the server deploys. Keys stay server-side. Complete exceptions, upstream error responses and request correlation remain in protected logs; privacy disclosures describe this processing.
 

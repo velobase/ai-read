@@ -81,12 +81,10 @@ import { AccountScreen } from './src/screens/account-screen';
 import { SearchScreen, type SearchRoute } from './src/screens/search-screen';
 import { initializeAccount, refreshAccount } from './src/adapters/account';
 import { apiOrigin } from './src/adapters/server-origin';
-import { configureTranslationQueue, pauseTranslationQueue } from './src/adapters/translation-queue';
 import { PdfImportSheet } from './src/components/pdf-import-sheet';
 import { discardPdf } from './src/adapters/pdf';
 import { useSheetPresentation } from './src/components/use-sheet-presentation';
 import { ReaderScreen, type OpenBook } from './src/screens/reader-screen';
-import { TranslationQueueBanner } from './src/components/translation-preparation';
 import { useDocumentInbox } from './src/components/use-document-inbox';
 import type { PendingDocument } from './modules/bypage-documents';
 import { MoveBooksContent } from './src/components/collection-sheets';
@@ -333,18 +331,9 @@ function Main() {
   useEffect(() => {
     void bootstrap();
   }, [bootstrap]);
-  useEffect(() => {
-    configureTranslationQueue(library, {
-      origin: apiOrigin,
-      language: preferences.language,
-    });
-  }, [library, preferences.language]);
-  useEffect(() => () => pauseTranslationQueue(library.handle), [library]);
   const patch = useCallback(
     (value: Partial<Preferences>) => {
       if (!library.isCurrent()) return;
-      if ('language' in value && value.language !== preferences.language)
-        pauseTranslationQueue(library.handle);
       const next = cleanPreferences({ ...preferenceState.current, ...value });
       preferenceState.current = next;
       setPreferences(next);
@@ -744,9 +733,6 @@ function Main() {
             </Text>
           </Pressable>
         )}
-        {boot === 'ready' && !reader && !detail && (
-          <TranslationQueueBanner open={(id) => void showDetail(id)} />
-        )}
         {boot === 'ready' && !reader && !detail && !page && inbox.items.length > 0 && (
           <Pressable
             accessibilityRole="button"
@@ -795,7 +781,6 @@ function Main() {
             open={(paragraph) => void open(detail.id, paragraph)}
             updateSourceLanguage={async (language) => {
               library.assertCurrent();
-              pauseTranslationQueue(library.handle, detail.id);
               const updated = await setBookSourceLanguage(library.handle, detail.id, language);
               library.assertCurrent();
               setDetail((current) => (current?.id === updated.id ? updated : current));
@@ -1351,7 +1336,6 @@ function Main() {
                       onPress: () => {
                         if (!library.isCurrent()) return;
                         setBusy(true);
-                        pauseTranslationQueue(library.handle, target.id);
                         void removeBook(library.handle, target.id)
                           .then(async () => {
                             await refresh();

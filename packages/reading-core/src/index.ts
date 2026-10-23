@@ -31,3 +31,5 @@ export * from './contents-outline';
 export * from './reading-language';
 
 export * from './import-epub';
+
+export * from './translation-tasks';

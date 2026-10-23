@@ -68,7 +68,7 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' }) {
                 <div>
                   <h2 className="mb-2 text-base font-semibold text-foreground">3. AI 模型服务与密钥安全</h2>
                   <p>
-                    登录后，你可以直接使用 LeafRead 提供的翻译与伴读服务，无需填写 API Key。使用这些功能时，选中的段落、参考原文、书名、问题与近期对话会通过 LeafRead 服务器发送到 OpenRouter 及所选模型提供商处理，适用其隐私政策。平台 Key 仅保存在服务器 Secret 中，不发送到手机或浏览器。完整异常及上游错误响应保存在受访问控制保护的服务端日志中，用于排障；错误响应可能包含相关请求内容。
+                    发起翻译时，本书用于翻译的原文与必要元数据会保存在你的服务端翻译任务中，译文和断点同样保存在服务端，用于持续处理和跨端读取；不包含插图、PDF 原文件、笔记或书签，也不自动开启书库同步。任务在锁屏、退出 App 或退出登录后仍会继续，直到完成、手动暂停或注销账号。登录后，你可以直接使用 LeafRead 提供的翻译与伴读服务，无需填写 API Key。使用这些功能时，选中的段落、参考原文、书名、问题与近期对话会通过 LeafRead 服务器发送到 OpenRouter 及所选模型提供商处理，适用其隐私政策。平台 Key 仅保存在服务器 Secret 中，不发送到手机或浏览器。完整异常及上游错误响应保存在受访问控制保护的服务端日志中，用于排障；错误响应可能包含相关请求内容。
                   </p>
                 </div>
                 <div>
@@ -101,7 +101,7 @@ export function LegalPage({ kind }: { kind: 'privacy' | 'terms' }) {
                     3. AI Providers & API Key Security
                   </h2>
                   <p>
-                    Signed-in readers can use LeafRead translation and reading assistance without supplying an API key. When you use these features, selected passages, reference text, book titles, questions and recent conversations are sent through LeafRead servers to OpenRouter and the selected model provider. Their privacy policies apply. Platform credentials remain in server Secrets and are never sent to your device. Complete exceptions and upstream error responses are retained in access-controlled server logs for troubleshooting; error responses may include related request content.
+                    Starting translation stores the book’s reading text and necessary metadata in your server-side translation task, together with translation results and checkpoints for continued processing and access across devices. Images, original PDF files, notes and bookmarks are excluded, and library sync is not enabled. Tasks continue after closing the app or signing out, until completion, an explicit pause or account deletion. Signed-in readers can use LeafRead translation and reading assistance without supplying an API key. When you use these features, selected passages, reference text, book titles, questions and recent conversations are sent through LeafRead servers to OpenRouter and the selected model provider. Their privacy policies apply. Platform credentials remain in server Secrets and are never sent to your device. Complete exceptions and upstream error responses are retained in access-controlled server logs for troubleshooting; error responses may include related request content.
                   </p>
                 </div>
                 <div>

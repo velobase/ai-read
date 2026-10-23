@@ -326,37 +326,14 @@ const zh = {
   chapterScroll: '按章滚动',
   connectAiFirst: '登录后即可使用 LeafRead 翻译服务。',
   translationUnavailable: '翻译服务暂时无法连接，请稍后重试。',
-  translationPaused: '已暂停。已完成的段落保留，再次准备将继续未完成部分。',
-  translationTimedOut: '翻译等待超时，已完成的段落已保存。请重试未完成部分。',
   translationSameLanguage: '原文已经是目标语言，可以直接阅读，无需准备译文。',
   translationPreparation: '准备译文',
-  translationScopeParagraph: '当前段',
   translationReady: '所选范围的译文已准备好。',
-  translationTaskReady: '此任务的译文已准备好。',
-  translationPausing: '正在暂停…',
-  translationNextBatch: '继续下一批 · {count} 段',
-  translationBatchFinished: '本批已完成。可继续准备剩余段落。',
-  translationRunProgress: '{scope}任务 · 本批 {done}/{total} 段',
-  translationCurrentParagraph: '第 {n} 段 · {chapter}',
-  translationOtherBook: '另一个译文任务正在准备，暂停后可以开始此范围。',
-  translationOpenBook: '打开正在准备的书',
-  translationFailed: '此段未能完成，任务已暂停。已完成内容保留；可重试，或选择当前段准备其他内容。',
   translationLoadError: '暂时无法读取本机译文，请重试。',
-  translationConfigurationChanged:
-    '模型或翻译设置已更改，任务已暂停。再次准备使用当前设置，已完成的译文保留。',
-  translationAccountPaused: '账号连接已变化，任务已暂停。确认账号后可重新准备。',
-  translationSettingsPaused: '语言或服务已变化，任务已暂停。确认设置后可重新准备。',
-  translationBackgroundPaused: '应用进入后台，准备已暂停。回到前台后可手动继续。',
-  translationQueueHint:
-    '每次最多准备 60 段或 6 万原文字符。保持应用在前台可继续准备；进入后台会暂停。重新打开不会自动开始。',
   prepareChapter: '当前章节译文',
   translationCount: '已准备 {ready} / {total} 段',
   pauseTranslation: '暂停翻译',
   prepareTranslation: '准备译文 · {count} 段',
-  translationServiceHint:
-    '本次待翻译原文约 {count} 字符，另发送邻近原文作为上下文，由 LeafRead 提供翻译服务。已完成译文保存在本机。',
-  translationRunningServiceHint:
-    '当前任务原文约 {count} 字符，另发送邻近原文作为上下文，由 LeafRead 提供翻译服务。已完成译文保存在本机。',
 
   library: '书架',
   search: '搜索',
@@ -915,43 +892,14 @@ const en: Record<TextKey, string> = {
   chapterScroll: 'By chapter',
   connectAiFirst: 'Sign in to use LeafRead translation.',
   translationUnavailable: 'Translation is temporarily unavailable. Please retry shortly.',
-  translationPaused:
-    'Paused. Completed paragraphs are saved; preparing again continues the remaining ones.',
-  translationTimedOut:
-    'Translation timed out. Completed paragraphs are saved. Retry the remaining paragraphs.',
   translationSameLanguage: 'The original is already in your target language and ready to read.',
   translationPreparation: 'Prepare translation',
-  translationScopeParagraph: 'Passage',
   translationReady: 'The selected range is ready to read.',
-  translationTaskReady: 'This translation task is complete.',
-  translationPausing: 'Pausing…',
-  translationNextBatch: 'Continue next batch · {count} passages',
-  translationBatchFinished: 'This batch is complete. Continue to prepare the remaining passages.',
-  translationRunProgress: '{scope} task · {done}/{total} in this batch',
-  translationCurrentParagraph: 'Passage {n} · {chapter}',
-  translationOtherBook: 'Another translation is running. Pause it before preparing this range.',
-  translationOpenBook: 'Open the book being prepared',
-  translationFailed:
-    'This passage could not be completed, so preparation paused. Completed text is kept. Retry or choose Passage to prepare another passage.',
   translationLoadError: 'Could not load translations saved on this device. Please retry.',
-  translationConfigurationChanged:
-    'The model or translation settings changed. Preparation paused. Start again to use the current settings; completed translations are kept.',
-  translationAccountPaused:
-    'The account connection changed. Preparation paused. Confirm the account before starting again.',
-  translationSettingsPaused:
-    'The language or service changed. Preparation paused. Check the settings before starting again.',
-  translationBackgroundPaused:
-    'The app entered the background, so preparation paused. Resume manually when back in the app.',
-  translationQueueHint:
-    'Each run prepares up to 60 passages or 60,000 source characters. Work continues while the app is in the foreground and pauses in the background. Reopening never starts it automatically.',
   prepareChapter: 'Current chapter translation',
   translationCount: '{ready} / {total} paragraphs ready',
   pauseTranslation: 'Pause translation',
   prepareTranslation: 'Prepare translation · {count} paragraphs',
-  translationServiceHint:
-    'About {count} source characters await translation. Nearby source passages are also sent as context. Translation is provided by LeafRead. Completed translations stay on this device.',
-  translationRunningServiceHint:
-    'The current task covers about {count} source characters. Nearby source passages are also sent as context. Translation is provided by LeafRead. Completed translations stay on this device.',
 
   library: 'Library',
   search: 'Search',

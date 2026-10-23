@@ -25,15 +25,8 @@ export function rememberTranslationCredentials(settings: Settings) {
   const url = translationProfile(settings).baseUrl;
   if (url) credentials.set(url, settings.apiKey);
 }
-export type TranslationCommand = {
-  action: 'prepare' | 'new' | 'pause' | 'resume' | 'select';
-  chapter: number;
-  scope?: 'chapter' | 'book';
-  auto?: boolean;
-  prefetch?: boolean;
-  editionId?: string;
-  requestId?: string;
-};
+import type { TranslationCommand } from '../../packages/reading-core/src/translation-tasks';
+export type { TranslationCommand } from '../../packages/reading-core/src/translation-tasks';
 export async function changeLocalTranslation(
   book: Book,
   settings: Settings,
