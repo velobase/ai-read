@@ -1,6 +1,6 @@
 import 'server-only';
 import { database } from './database';
-import { revokeAppleToken } from './apple-auth';
+import { nativeAppleClientId, revokeAppleToken } from './apple-auth';
 
 export class AccountDeletionError extends Error {
   constructor(
@@ -37,12 +37,21 @@ export async function deleteAccount(identity: {
       });
       for (const account of accounts) {
         try {
-          if (!account.encryptedAppleRefreshToken) throw new Error('missing_token');
-          await revokeAppleToken(
-            account.encryptedAppleRefreshToken,
-            identity.userId,
-            account.providerAccountId,
-          );
+          if (!account.encryptedAppleRefreshToken && !account.encryptedNativeAppleRefreshToken)
+            throw new Error('missing_token');
+          if (account.encryptedAppleRefreshToken)
+            await revokeAppleToken(
+              account.encryptedAppleRefreshToken,
+              identity.userId,
+              account.providerAccountId,
+            );
+          if (account.encryptedNativeAppleRefreshToken)
+            await revokeAppleToken(
+              account.encryptedNativeAppleRefreshToken,
+              identity.userId,
+              account.providerAccountId,
+              nativeAppleClientId,
+            );
         } catch {
           throw new AccountDeletionError(503, 'account_deletion_retry');
         }

@@ -205,10 +205,19 @@ model Account {
   provider          String
   providerAccountId String
   encryptedAppleRefreshToken String?
+  encryptedNativeAppleRefreshToken String?
   user              User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
   @@index([userId])
+}
+
+// Consumed native sign-in challenges prevent replay across instances. No provider tokens are stored.
+model NativeAuthUse {
+  id      String   @id
+  expires DateTime
+
+  @@index([expires])
 }
 
 model Session {

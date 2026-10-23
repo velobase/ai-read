@@ -12,3 +12,6 @@ docs/testing
 *.log
 *.tsbuildinfo
 .DS_Store
+
+# The server image does not compile the separately signed native application.
+apps/mobile/

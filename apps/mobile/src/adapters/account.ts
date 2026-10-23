@@ -138,18 +138,27 @@ async function expireAccount(revision: number, origin: string, sessionId: string
   if (state.revision === clearingRevision) publish({ busy: false });
 }
 export const signInAccount = (provider: 'apple' | 'google' = 'google') => signIn(false, provider);
-/** A separate explicit browser consent; an existing AI token never gains library rights. */
-export const signInLibraryAccount = () => signIn(true);
-async function signIn(library: boolean, provider: 'apple' | 'google' = 'google') {
+/** A separate confirmation fences the account shown to the user before granting sync. */
+export const signInLibraryAccount = (expectedSessionId: string) =>
+  signIn(true, 'google', expectedSessionId);
+async function signIn(
+  library: boolean,
+  provider: 'apple' | 'google' = 'google',
+  expectedSessionId?: string,
+) {
   const origin = state.origin;
   if (!origin || !nativeAuth.available || state.busy || state.loading)
     throw new Error('native_auth_unavailable');
   if (library && !nativeAuth.libraryAvailable) throw new Error('native_library_auth_unavailable');
+  if (library && (!expectedSessionId || state.session?.sessionId !== expectedSessionId))
+    throw new Error('account_changed');
   invalidate({ busy: true, issue: '' });
   const revision = state.revision;
   try {
     const session = await measured('account.signin', () =>
-      library ? nativeAuth.signInLibrary(origin) : nativeAuth.signIn(origin, provider),
+      library
+        ? nativeAuth.signInLibrary(origin, expectedSessionId!)
+        : nativeAuth.signIn(origin, provider),
     );
     if (revision !== state.revision || state.origin !== origin) throw cancelled();
     invalidate({ session, busy: false, verified: true, issue: '' });
@@ -176,8 +185,22 @@ export async function refreshAccount() {
     return;
   const revision = state.revision;
   refreshingRevision = revision;
-  const scope = requestScope(state.origin, undefined, 8000);
+  const scope = requestScope(state.origin, undefined, nativeAuth.renewalAvailable ? 35000 : 8000);
   try {
+    if (nativeAuth.renewalAvailable) {
+      const current = state.session!;
+      const session = await nativeAuth.renewSession(state.origin, current.sessionId);
+      scope.assertCurrent();
+      if (
+        session.sessionId !== current.sessionId ||
+        session.user.id !== current.user.id ||
+        session.permissions.length !== current.permissions.length ||
+        session.permissions.some((permission) => !current.permissions.includes(permission))
+      )
+        throw new Error('invalid_account_response');
+      publish({ session, verified: true, issue: '' });
+      return;
+    }
     const headers = await scope.headers();
     const response = await nativeFetch(`${scope.origin}/api/mobile/v1/auth/session`, {
       credentials: 'omit',
@@ -204,7 +227,11 @@ export async function refreshAccount() {
     )
       throw new Error('invalid_account_response');
     publish({ verified: true, issue: '' });
-  } catch {
+  } catch (cause) {
+    if (cause instanceof Error && /native_session_expired/.test(cause.message)) {
+      const session = state.session;
+      if (session) await expireAccount(revision, scope.origin, session.sessionId);
+    }
     try {
       scope.assertCurrent();
       publish({ verified: false, issue: 'offline' });
@@ -228,7 +255,10 @@ export async function deleteAccount(expectedUserId: string) {
   const revision = state.revision;
   try {
     const response = await nativeFetch(`${origin}/api/mobile/v1/account`, {
-      method: 'DELETE', credentials: 'omit', redirect: 'error', signal: AbortSignal.timeout(35000),
+      method: 'DELETE',
+      credentials: 'omit',
+      redirect: 'error',
+      signal: AbortSignal.timeout(35000),
       headers: { 'Content-Type': 'application/json', Origin: origin, Authorization: authorization },
       body: JSON.stringify({ confirmation: expectedUserId }),
     });
@@ -237,9 +267,16 @@ export async function deleteAccount(expectedUserId: string) {
     try {
       const cleanup = await import('./account-cleanup');
       await cleanup.queueAccountCleanup(origin, expectedUserId);
-    } catch { cleanupPending = true; }
-    try { await nativeAuth.clearSession(origin, session.sessionId); } catch { cleanupPending = true; }
-    if (state.revision === revision) invalidate({ session: null, busy: false, verified: false, issue: '' });
+    } catch {
+      cleanupPending = true;
+    }
+    try {
+      await nativeAuth.clearSession(origin, session.sessionId);
+    } catch {
+      cleanupPending = true;
+    }
+    if (state.revision === revision)
+      invalidate({ session: null, busy: false, verified: false, issue: '' });
     return { cleanupPending };
   } finally {
     if (state.revision === revision) publish({ busy: false });

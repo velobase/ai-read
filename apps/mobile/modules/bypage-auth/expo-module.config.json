@@ -1,1 +1,7 @@
-{ "platforms": ["apple"], "apple": { "modules": ["ByPageAuthModule"] } }
+{
+  "platforms": ["apple"],
+  "apple": {
+    "modules": ["ByPageAuthModule"],
+    "appDelegateSubscribers": ["ByPageAuthAppDelegateSubscriber"]
+  }
+}

@@ -29,13 +29,17 @@ module.exports = {
   slug: 'bypage-reader',
   owner: 'attune-dating-team',
   icon: './assets/icon.png',
-  version: '1.0.0',
+  version: '1.0.1',
   locales: {
     en: { CFBundleDisplayName: 'LeafRead' },
     'zh-Hans': { CFBundleDisplayName: '叶子阅读' },
     'zh-Hant': { CFBundleDisplayName: '葉子閱讀' },
   },
-  scheme: ['bypage', 'com.velobase.bypage'],
+  scheme: [
+    'bypage',
+    'com.velobase.bypage',
+    'com.googleusercontent.apps.921480483661-3jcm4s70ugvgpbsntqjn3tu7f87e0ku2',
+  ],
   orientation: 'default',
   userInterfaceStyle: 'automatic',
   ios: {
@@ -64,6 +68,8 @@ module.exports = {
     },
     infoPlist: {
       CFBundleDisplayName: 'LeafRead',
+      GIDClientID: '921480483661-3jcm4s70ugvgpbsntqjn3tu7f87e0ku2.apps.googleusercontent.com',
+      GIDServerClientID: '921480483661-k7bj60rqb8be0t10pi4558p21tkl3101.apps.googleusercontent.com',
       ITSAppUsesNonExemptEncryption: false,
       ByPageAuthAllowLocalHTTP: environment === 'development',
       ByPageServiceOrigin: new URL(apiOrigin).origin,
@@ -105,6 +111,7 @@ module.exports = {
   },
   android: { package: 'com.velobase.bypage', allowBackup: false },
   plugins: [
+    './plugins/with-google-signin',
     'expo-document-picker',
     'expo-sqlite',
     'expo-localization',

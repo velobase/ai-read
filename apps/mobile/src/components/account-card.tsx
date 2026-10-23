@@ -57,7 +57,13 @@ export function GoogleSignInButton({ provider = 'google' }: { provider?: 'google
             .catch((cause: unknown) => {
               const message = cause instanceof Error ? cause.message : '';
               if (mounted.current && library.isCurrent() && !/cancel/i.test(message))
-                setError(t('accountLoginError'));
+                setError(
+                  t(
+                    message.includes('account_link_required')
+                      ? 'accountLinkRequired'
+                      : 'accountLoginError',
+                  ),
+                );
             });
         }}
         style={({ pressed }) => ({
@@ -75,14 +81,31 @@ export function GoogleSignInButton({ provider = 'google' }: { provider?: 'google
           opacity: unavailable || blocked ? 0.5 : pressed ? 0.65 : 1,
         })}
       >
-        {busy ? <ActivityIndicator color={provider === 'apple' ? '#ffffff' : colors.accent} /> : <Icon name={provider === 'apple' ? 'logo-apple' : 'logo-google'} size={20} color={provider === 'apple' ? '#ffffff' : colors.ink} />}
-        <Text style={{ color: provider === 'apple' ? '#ffffff' : colors.ink, fontSize: 15, fontWeight: '600', flexShrink: 1 }}>
+        {busy ? (
+          <ActivityIndicator color={provider === 'apple' ? '#ffffff' : colors.accent} />
+        ) : (
+          <Icon
+            name={provider === 'apple' ? 'logo-apple' : 'logo-google'}
+            size={20}
+            color={provider === 'apple' ? '#ffffff' : colors.ink}
+          />
+        )}
+        <Text
+          style={{
+            color: provider === 'apple' ? '#ffffff' : colors.ink,
+            fontSize: 15,
+            fontWeight: '600',
+            flexShrink: 1,
+          }}
+        >
           {t(
             account.loading
               ? 'accountRestoring'
               : account.busy
                 ? 'accountSigningIn'
-                : provider === 'apple' ? 'accountSignInApple' : 'accountSignIn',
+                : provider === 'apple'
+                  ? 'accountSignInApple'
+                  : 'accountSignIn',
           )}
         </Text>
       </Pressable>

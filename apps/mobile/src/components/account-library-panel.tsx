@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Text, View } from 'react-native';
+import { Alert, Text, View } from 'react-native';
 import { useApp } from '../context';
 import { useLibrary } from '../library-context';
 import { useLibraryController } from '../library-controller';
@@ -82,14 +82,35 @@ export function AccountLibraryPanel() {
         ) : (
           <Button
             secondary
-            disabled={disabled || !libraryAccountAvailable()}
+            disabled={disabled || !account.session || !libraryAccountAvailable()}
             busy={working}
             onPress={() =>
               void run(async () => {
+                const confirmed = accountSnapshot().session;
+                if (!confirmed) throw new Error('account_changed');
+                await new Promise<void>((resolve, reject) =>
+                  Alert.alert(
+                    zh ? '开启书库同步' : 'Enable library sync',
+                    zh
+                      ? `将为 ${confirmed.user.email} 开启同步。账号书库的书籍、进度、笔记和书签会存入 LeafRead 云端。本机书籍仍需你另行选择添加。`
+                      : `Enable sync for ${confirmed.user.email}. Books, progress, notes and bookmarks in this account library will be stored in LeafRead's cloud. Device books are added only when you choose them.`,
+                    [
+                      {
+                        text: zh ? '取消' : 'Cancel',
+                        style: 'cancel',
+                        onPress: () => reject(new Error('cancelled')),
+                      },
+                      { text: zh ? '开启同步' : 'Enable sync', onPress: () => resolve() },
+                    ],
+                    { cancelable: false },
+                  ),
+                );
+                if (accountSnapshot().session?.sessionId !== confirmed.sessionId)
+                  throw new Error('account_changed');
                 const capability = await checkLibraryConnection(account.origin, library.signal);
                 library.assertCurrent();
                 if (!capability.nativeAccountSync) throw new Error('sync_unavailable');
-                await signInLibraryAccount();
+                await signInLibraryAccount(confirmed.sessionId);
                 library.assertCurrent();
                 await openAccountLibrary();
               })
@@ -105,7 +126,7 @@ export function AccountLibraryPanel() {
       </Text>
       {!libraryAccountAvailable() && !granted && (
         <Text style={{ color: colors.muted, lineHeight: 22 }}>
-          {zh ? '请更新 ByPage 后开启同步。' : 'Update ByPage to enable library sync.'}
+          {zh ? '请更新叶子阅读后开启同步。' : 'Update LeafRead to enable library sync.'}
         </Text>
       )}
       {!!error && (

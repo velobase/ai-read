@@ -3,8 +3,8 @@ import AuthenticationServices
 import Security
 import CryptoKit
 import UIKit
+import GoogleSignIn
 
-private let authCallbackScheme = "com.velobase.bypage"
 private let authService = "com.velobase.bypage.native-auth.v1"
 
 private func authFailure(_ code: String) -> NSError {
@@ -122,6 +122,8 @@ private struct StoredAuthSession: Codable {
   let sessionId: String
   // Missing in a legacy v1 Keychain item; it can only mean AI permission.
   let permissions: [String]?
+  let provider: String?
+  let providerSubject: String?
   var grantedPermissions: [String] { permissions ?? aiPermissions }
 
   var valid: Bool {
@@ -263,10 +265,29 @@ private final class AuthHTTPTask: NSObject, URLSessionDataDelegate, @unchecked S
   }
 }
 
-private final class AuthPresentation: NSObject, ASWebAuthenticationPresentationContextProviding {
-  private let window: UIWindow
-  init(window: UIWindow) { self.window = window }
-  func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor { window }
+private struct NativeChallenge: Decodable {
+  let challenge: String
+  let nonce: String
+  let googleClientId: String?
+  let googleServerClientId: String?
+}
+
+private final class AppleAuthorization: NSObject, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
+  let window: UIWindow
+  let completion: (ASAuthorizationAppleIDCredential?, String?) -> Void
+  init(window: UIWindow, completion: @escaping (ASAuthorizationAppleIDCredential?, String?) -> Void) {
+    self.window = window
+    self.completion = completion
+  }
+  func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor { window }
+  func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
+    completion(authorization.credential as? ASAuthorizationAppleIDCredential, nil)
+  }
+  func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
+    let cancelled = (error as NSError).domain == ASAuthorizationError.errorDomain
+      && (error as NSError).code == ASAuthorizationError.canceled.rawValue
+    completion(nil, cancelled ? "auth_cancelled" : "auth_sign_in_failed")
+  }
 }
 
 private final class AuthFlow {
@@ -274,60 +295,66 @@ private final class AuthFlow {
   let origin: String
   let state: String
   let verifier: String
-  let library: Bool
+  let operation: String
   let promise: Promise
-  var browser: ASWebAuthenticationSession?
-  var presentation: AuthPresentation?
+  let original: StoredAuthSession?
+  var provider: String?
+  var providerSubject: String?
+  var appleDelegate: AppleAuthorization?
+  var appleController: ASAuthorizationController?
   var exchange: AuthHTTPTask?
   var timeout: DispatchWorkItem?
-
-  init(origin: String, state: String, verifier: String, library: Bool, promise: Promise) {
+  init(origin: String, operation: String, promise: Promise, original: StoredAuthSession? = nil) throws {
     self.origin = origin
-    self.state = state
-    self.verifier = verifier
-    self.library = library
+    self.operation = operation
     self.promise = promise
+    self.original = original
+    self.state = try randomSecret()
+    self.verifier = try randomSecret()
+    self.provider = original?.provider
+    self.providerSubject = original?.providerSubject
+  }
+}
+
+public final class ByPageAuthAppDelegateSubscriber: ExpoAppDelegateSubscriber {
+  public func application(_ app: UIApplication, open url: URL,
+    options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
+    GIDSignIn.sharedInstance.handle(url)
   }
 }
 
 public final class ByPageAuthModule: Module {
-  // Every lifecycle action and URLSession delegate callback is serialized on the main queue.
+  // Lifecycle actions and HTTP completions run on the main queue. No credential crosses the JS bridge.
   private var pending: AuthFlow?
   private var revocations: [UUID: AuthHTTPTask] = [:]
 
   public func definition() -> ModuleDefinition {
     Name("ByPageAuth")
-    Constant("version") { 2 }
-    Constant("libraryVersion") { 1 }
-    Constant("providerVersion") { 1 }
-
+    Constant("version") { 3 }
+    Constant("libraryVersion") { 2 }
+    Constant("providerVersion") { 2 }
     AsyncFunction("signIn") { (origin: String, promise: Promise) in
-      self.startSignIn(origin, library: false, provider: "google", promise: promise)
+      self.startSignIn(origin, provider: "google", promise: promise)
     }.runOnQueue(.main)
-
-    AsyncFunction("signInLibrary") { (origin: String, promise: Promise) in
-      self.startSignIn(origin, library: true, provider: nil, promise: promise)
-    }.runOnQueue(.main)
-
     AsyncFunction("signInWithProvider") { (origin: String, provider: String, promise: Promise) in
-      guard ["apple", "google"].contains(provider) else {
-        promise.reject("invalid_provider", "invalid_provider"); return
-      }
-      self.startSignIn(origin, library: false, provider: provider, promise: promise)
+      self.startSignIn(origin, provider: provider, promise: promise)
     }.runOnQueue(.main)
-
+    AsyncFunction("signInLibrary") { (origin: String, expectedSessionID: String, promise: Promise) in
+      self.sessionOperation(origin, expectedSessionID: expectedSessionID, operation: "library", promise: promise)
+    }.runOnQueue(.main)
+    AsyncFunction("renewSession") { (origin: String, expectedSessionID: String, promise: Promise) in
+      self.sessionOperation(origin, expectedSessionID: expectedSessionID, operation: "refresh", promise: promise)
+    }.runOnQueue(.main)
     AsyncFunction("readSession") { (origin: String) -> [String: Any]? in
+      // Restore the LeafRead session directly; provider cookies are never needed to reopen the app.
       try AuthKeychain.read(originForAuth(origin))?.publicData
     }.runOnQueue(.main)
-
     AsyncFunction("authorization") { (origin: String, expectedSessionID: String) -> String? in
       guard let session = try AuthKeychain.read(originForAuth(origin)),
             session.sessionId == expectedSessionID else { return nil }
       return "Bearer \(session.token)"
     }.runOnQueue(.main)
-
     AsyncFunction("cancelSignIn") { self.cancelPending() }.runOnQueue(.main)
-
     AsyncFunction("clearSession") { (input: String, expectedSessionID: String?) in
       let origin = try originForAuth(input)
       if let expectedSessionID {
@@ -335,12 +362,9 @@ public final class ByPageAuthModule: Module {
       }
       if self.pending?.origin == origin { self.cancelPending() }
       try AuthKeychain.remove(origin)
+      GIDSignIn.sharedInstance.signOut()
     }.runOnQueue(.main)
-
-    AsyncFunction("logout") { (origin: String, promise: Promise) in
-      self.signOut(origin, promise: promise)
-    }.runOnQueue(.main)
-
+    AsyncFunction("logout") { (origin: String, promise: Promise) in self.signOut(origin, promise: promise) }.runOnQueue(.main)
     OnDestroy {
       let cleanup = {
         self.cancelPending()
@@ -348,162 +372,201 @@ public final class ByPageAuthModule: Module {
         self.revocations.removeAll()
         for request in requests { request.cancel() }
       }
-      if Thread.isMainThread { cleanup() }
-      else { DispatchQueue.main.async(execute: cleanup) }
+      if Thread.isMainThread { cleanup() } else { DispatchQueue.main.async(execute: cleanup) }
     }
   }
 
   private func cancelPending() {
     guard let flow = pending else { return }
-    // Invalidate identity before cancelling: system/network completion can arrive synchronously.
     pending = nil
     flow.timeout?.cancel()
-    flow.browser?.cancel()
     flow.exchange?.cancel()
     flow.promise.reject("auth_cancelled", "auth_cancelled")
   }
-
   private func fail(_ id: UUID, _ code: String) {
     guard let flow = pending, flow.id == id else { return }
     pending = nil
     flow.timeout?.cancel()
-    flow.browser?.cancel()
     flow.exchange?.cancel()
     flow.promise.reject(code, code)
   }
-
-  private func startSignIn(_ input: String, library: Bool, provider: String?, promise: Promise) {
+  private func begin(_ flow: AuthFlow, seconds: Double) {
+    pending = flow
+    let id = flow.id
+    let timeout = DispatchWorkItem { [weak self] in self?.fail(id, "auth_timeout") }
+    flow.timeout = timeout
+    DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: timeout)
+  }
+  private func errorCode(_ response: AuthHTTPResponse, authenticated: Bool = false) -> String {
+    if authenticated && response.status == 401 { return "native_session_expired" }
+    let object = try? JSONSerialization.jsonObject(with: response.data) as? [String: Any]
+    if let code = object?["error"] as? String,
+       ["account_link_required", "signin_retry", "account_changed"].contains(code) { return code }
+    return (400...499).contains(response.status) ? "auth_sign_in_failed" : "auth_unavailable"
+  }
+  private func startSignIn(_ input: String, provider: String, promise: Promise) {
+    // A new user action fences any pending background renewal before credentials can change.
     cancelPending()
     do {
+      guard ["apple", "google"].contains(provider) else { throw authFailure("invalid_provider") }
       let origin = try originForAuth(input)
-      // Fail before opening the browser if protected storage is temporarily locked/unavailable.
       _ = try AuthKeychain.read(origin)
-      guard let window = appContext?.utilities?.currentViewController()?.view.window,
-            window.windowScene?.activationState == .foregroundActive else {
+      guard let controller = appContext?.utilities?.currentViewController(),
+            let window = controller.view.window, window.windowScene?.activationState == .foregroundActive else {
         throw authFailure("auth_presentation_unavailable")
       }
-      let flow = AuthFlow(origin: origin, state: try randomSecret(), verifier: try randomSecret(), library: library, promise: promise)
-      let path = library ? "/mobile/library/authorize" : "/mobile/authorize"
-      var authorize = URLComponents(string: origin + path)!
-      authorize.queryItems = [
-        URLQueryItem(name: "code_challenge", value: base64URL(Data(SHA256.hash(data: Data(flow.verifier.utf8))))),
-        URLQueryItem(name: "state", value: flow.state),
-      ]
-      if let provider { authorize.queryItems?.append(URLQueryItem(name: "provider", value: provider)) }
-      guard let url = authorize.url else { throw authFailure("invalid_server_origin") }
-      let id = flow.id
-      let callback: ASWebAuthenticationSession.CompletionHandler = { [weak self] url, error in
-        DispatchQueue.main.async { self?.receivedCallback(id, url: url, error: error) }
+      let flow = try AuthFlow(origin: origin, operation: "signin", promise: promise)
+      flow.provider = provider
+      begin(flow, seconds: 300)
+      var request = authRequest(origin, path: "/api/mobile/v1/auth/native/challenge", method: "POST")
+      request.httpBody = try JSONSerialization.data(withJSONObject: ["provider": provider,
+        "code_challenge": base64URL(Data(SHA256.hash(data: Data(flow.verifier.utf8))))])
+      let task = AuthHTTPTask(request: request) { [weak self] result in
+        guard let self, self.pending?.id == flow.id else { return }
+        guard case .success(let response) = result else { self.fail(flow.id, "auth_network_error"); return }
+        guard response.status == 200 else { self.fail(flow.id, self.errorCode(response)); return }
+        guard let challenge = try? JSONDecoder().decode(NativeChallenge.self, from: response.data),
+              validToken(challenge.nonce), challenge.challenge.utf8.count <= 2048 else {
+          self.fail(flow.id, "invalid_auth_response"); return
+        }
+        flow.exchange = nil
+        self.presentProvider(flow, challenge: challenge, controller: controller, window: window)
       }
-      let browser: ASWebAuthenticationSession
-      if #available(iOS 17.4, *) {
-        browser = ASWebAuthenticationSession(url: url, callback: .customScheme(authCallbackScheme), completionHandler: callback)
-      } else {
-        browser = ASWebAuthenticationSession(url: url, callbackURLScheme: authCallbackScheme, completionHandler: callback)
-      }
-      flow.presentation = AuthPresentation(window: window)
-      browser.presentationContextProvider = flow.presentation
-      // Explicit provider choices must not silently reuse or link a different browser identity.
-      browser.prefersEphemeralWebBrowserSession = provider != nil
-      flow.browser = browser
-      let timeout = DispatchWorkItem { [weak self] in self?.fail(id, "auth_timeout") }
-      flow.timeout = timeout
-      pending = flow
-      DispatchQueue.main.asyncAfter(deadline: .now() + 600, execute: timeout)
-      if !browser.start() { fail(id, "auth_presentation_unavailable") }
-    } catch {
-      let code = (error as NSError).localizedDescription
-      promise.reject(code, code)
-    }
+      flow.exchange = task
+      task.start()
+    } catch { let code = (error as NSError).localizedDescription; promise.reject(code, code) }
   }
 
-  private func receivedCallback(_ id: UUID, url: URL?, error: Error?) {
-    guard let flow = pending, flow.id == id else { return }
-    if let error {
-      let code = (error as NSError).domain == ASWebAuthenticationSessionErrorDomain
-        && (error as NSError).code == ASWebAuthenticationSessionError.canceledLogin.rawValue
-        ? "auth_cancelled" : "auth_sign_in_failed"
-      fail(id, code)
-      return
+  private func presentProvider(_ flow: AuthFlow, challenge: NativeChallenge, controller: UIViewController, window: UIWindow) {
+    guard pending?.id == flow.id, window.windowScene?.activationState == .foregroundActive else {
+      fail(flow.id, "auth_presentation_unavailable"); return
     }
-    guard let url, url.absoluteString.utf8.count <= 8192,
-          let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
-          parts.scheme == authCallbackScheme, parts.percentEncodedHost == "auth", parts.percentEncodedPath == "/callback",
-          parts.user == nil, parts.password == nil, parts.port == nil, parts.fragment == nil,
-          let items = parts.queryItems, items.count <= 5 else {
-      fail(id, "invalid_auth_callback")
-      return
-    }
-    var params: [String: String] = [:]
-    for item in items {
-      guard ["code", "state", "issuer", "error"].contains(item.name),
-            params[item.name] == nil, let value = item.value, value.utf8.count <= 2000 else {
-        fail(id, "invalid_auth_callback")
-        return
+    if flow.provider == "apple" {
+      let request = ASAuthorizationAppleIDProvider().createRequest()
+      request.requestedScopes = [.fullName, .email]
+      request.nonce = challenge.nonce
+      request.state = flow.state
+      let delegate = AppleAuthorization(window: window) { [weak self, weak flow] credential, error in
+        DispatchQueue.main.async {
+          guard let self, let flow, self.pending?.id == flow.id else { return }
+          if let error { self.fail(flow.id, error); return }
+          guard let credential, credential.state == flow.state,
+                let data = credential.identityToken, let identity = String(data: data, encoding: .utf8),
+                let codeData = credential.authorizationCode, let code = String(data: codeData, encoding: .utf8) else {
+            self.fail(flow.id, "invalid_auth_response"); return
+          }
+          flow.providerSubject = credential.user
+          var body = ["identityToken": identity, "authorizationCode": code]
+          if let name = credential.fullName { body["name"] = PersonNameComponentsFormatter().string(from: name) }
+          self.exchangeProvider(flow, challenge: challenge, body: body)
+        }
       }
-      params[item.name] = value
+      let authorization = ASAuthorizationController(authorizationRequests: [request])
+      authorization.delegate = delegate
+      authorization.presentationContextProvider = delegate
+      flow.appleDelegate = delegate
+      flow.appleController = authorization
+      authorization.performRequests()
+    } else {
+      guard let client = Bundle.main.object(forInfoDictionaryKey: "GIDClientID") as? String,
+            let server = Bundle.main.object(forInfoDictionaryKey: "GIDServerClientID") as? String,
+            client == challenge.googleClientId, server == challenge.googleServerClientId else {
+        fail(flow.id, "auth_configuration_mismatch"); return
+      }
+      GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID: client, serverClientID: server)
+      GIDSignIn.sharedInstance.signIn(withPresenting: controller, hint: nil, additionalScopes: nil, nonce: challenge.nonce) { [weak self] result, error in
+        guard let self, self.pending?.id == flow.id else { return }
+        if let error {
+          self.fail(flow.id, (error as NSError).code == -5 ? "auth_cancelled" : "auth_sign_in_failed"); return
+        }
+        guard let user = result?.user, let identity = user.idToken?.tokenString, let subject = user.userID else {
+          self.fail(flow.id, "invalid_auth_response"); return
+        }
+        flow.providerSubject = subject
+        self.exchangeProvider(flow, challenge: challenge, body: ["identityToken": identity])
+      }
     }
-    guard params["state"] == flow.state, params["issuer"] == flow.origin else {
-      fail(id, "invalid_auth_callback")
-      return
-    }
-    if params["error"] != nil {
-      fail(id, params["error"] == "access_denied" && params["code"] == nil ? "auth_cancelled" : "invalid_auth_callback")
-      return
-    }
-    guard let code = params["code"], validToken(code), flow.exchange == nil else {
-      fail(id, "invalid_auth_callback")
-      return
-    }
+  }
+  private func exchangeProvider(_ flow: AuthFlow, challenge: NativeChallenge, body: [String: String]) {
+    guard pending?.id == flow.id else { return }
     do {
-      var request = authRequest(flow.origin, path: "/api/mobile/v1/auth/token", method: "POST")
-      request.httpBody = try JSONSerialization.data(withJSONObject: ["code": code, "code_verifier": flow.verifier, "state": flow.state])
-      let operation = AuthHTTPTask(request: request) { [weak self] result in
-        self?.receivedToken(id, result: result)
-      }
-      flow.exchange = operation
-      operation.start()
-    } catch { fail(id, "auth_sign_in_failed") }
+      var payload = body
+      payload["provider"] = flow.provider
+      payload["challenge"] = challenge.challenge
+      payload["code_verifier"] = flow.verifier
+      var request = authRequest(flow.origin, path: "/api/mobile/v1/auth/native/token", method: "POST")
+      request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+      let task = AuthHTTPTask(request: request) { [weak self] result in self?.receivedToken(flow.id, result: result) }
+      flow.exchange = task
+      task.start()
+    } catch { fail(flow.id, "auth_sign_in_failed") }
   }
-
+  private func sessionOperation(_ input: String, expectedSessionID: String, operation: String, promise: Promise) {
+    do {
+      guard pending == nil else { throw authFailure("auth_busy") }
+      let origin = try originForAuth(input)
+      guard let stored = try AuthKeychain.read(origin), stored.sessionId == expectedSessionID else {
+        throw authFailure("native_session_expired")
+      }
+      let flow = try AuthFlow(origin: origin, operation: operation, promise: promise, original: stored)
+      begin(flow, seconds: 30)
+      if operation == "refresh", stored.provider == "apple", let subject = stored.providerSubject {
+        ASAuthorizationAppleIDProvider().getCredentialState(forUserID: subject) { [weak self] state, error in
+          DispatchQueue.main.async {
+            guard let self, self.pending?.id == flow.id else { return }
+            if error == nil && (state == .revoked || state == .notFound) {
+              self.fail(flow.id, "native_session_expired"); return
+            }
+            self.sendSessionOperation(flow)
+          }
+        }
+      } else { sendSessionOperation(flow) }
+    } catch { let code = (error as NSError).localizedDescription; promise.reject(code, code) }
+  }
+  private func sendSessionOperation(_ flow: AuthFlow) {
+    guard pending?.id == flow.id, let stored = flow.original else { return }
+    do {
+      var request = authRequest(flow.origin, path: "/api/mobile/v1/auth/native/" + flow.operation, method: "POST")
+      request.setValue("Bearer \(stored.token)", forHTTPHeaderField: "Authorization")
+      request.httpBody = try JSONSerialization.data(withJSONObject: flow.operation == "library"
+        ? ["confirmation": stored.user.id, "permission": "library_sync"] : [:])
+      let task = AuthHTTPTask(request: request) { [weak self] result in self?.receivedToken(flow.id, result: result) }
+      flow.exchange = task
+      task.start()
+    } catch { fail(flow.id, "auth_sign_in_failed") }
+  }
   private func receivedToken(_ id: UUID, result: Result<AuthHTTPResponse, Error>) {
     guard let flow = pending, flow.id == id else { return }
-    switch result {
-    case .failure:
-      fail(id, "auth_network_error")
-    case .success(let response):
-      guard response.status == 200 else {
-        fail(id, response.status == 401 || response.status == 400 ? "auth_sign_in_failed" : "auth_unavailable")
-        return
-      }
-      guard let exchange = try? JSONDecoder().decode(TokenExchange.self, from: response.data),
-            let expiry = authDate(exchange.expires), expiry > Date(),
-            expiry.timeIntervalSinceNow <= 31 * 24 * 60 * 60 else {
-        fail(id, "invalid_auth_response")
-        return
-      }
-      let permissions = exchange.permissions ?? aiPermissions
-      // A library flow cannot silently accept an AI-only exchange, and an AI
-      // flow cannot unexpectedly gain upload rights. Only the confirmed grant wins.
-      guard validPermissions(permissions),
-            Set(permissions) == Set(flow.library ? libraryPermissions : aiPermissions) else {
-        fail(id, "invalid_auth_permissions")
-        return
+    guard case .success(let response) = result else { fail(id, "auth_network_error"); return }
+    guard response.status == 200 else { fail(id, errorCode(response, authenticated: flow.original != nil)); return }
+    guard let exchange = try? JSONDecoder().decode(TokenExchange.self, from: response.data),
+          let expiry = authDate(exchange.expires), expiry > Date(), expiry.timeIntervalSinceNow <= 31 * 24 * 60 * 60 else {
+      fail(id, "invalid_auth_response"); return
+    }
+    let permissions = exchange.permissions ?? aiPermissions
+    let expected = flow.operation == "library" ? libraryPermissions : flow.original?.grantedPermissions ?? aiPermissions
+    guard validPermissions(permissions), Set(permissions) == Set(expected) else {
+      fail(id, "invalid_auth_permissions"); return
+    }
+    do {
+      if let original = flow.original {
+        // Late callbacks cannot restore a signed-out account or overwrite a newer credential.
+        guard let current = try AuthKeychain.read(flow.origin), current.token == original.token,
+              current.sessionId == original.sessionId, current.user.id == original.user.id,
+              exchange.sessionId == original.sessionId, exchange.user.id == original.user.id else {
+          fail(id, "account_changed"); return
+        }
       }
       let session = StoredAuthSession(version: 1, origin: flow.origin, token: exchange.token,
-                                      expiresAt: exchange.expires, user: exchange.user, sessionId: exchange.sessionId,
-                                      permissions: flow.library ? libraryPermissions : aiPermissions)
+        expiresAt: exchange.expires, user: exchange.user, sessionId: exchange.sessionId,
+        permissions: permissions, provider: flow.provider, providerSubject: flow.providerSubject)
       guard session.valid else { fail(id, "invalid_auth_response"); return }
-      do {
-        try AuthKeychain.save(session)
-        // No suspension between the pending-flow check, the Keychain write and resolving identity.
-        pending = nil
-        flow.timeout?.cancel()
-        flow.promise.resolve(session.publicData)
-      } catch { fail(id, "auth_storage_unavailable") }
-    }
+      try AuthKeychain.save(session)
+      pending = nil
+      flow.timeout?.cancel()
+      flow.promise.resolve(session.publicData)
+    } catch { fail(id, "auth_storage_unavailable") }
   }
-
   private func authRequest(_ origin: String, path: String, method: String) -> URLRequest {
     var request = URLRequest(url: URL(string: origin + path)!)
     request.httpMethod = method
@@ -514,28 +577,26 @@ public final class ByPageAuthModule: Module {
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     return request
   }
-
   private func signOut(_ input: String, promise: Promise) {
     do {
       let origin = try originForAuth(input)
       if pending?.origin == origin { cancelPending() }
       let stored = try AuthKeychain.read(origin)
-      // Removing local credentials does not depend on reaching the server.
       try AuthKeychain.remove(origin)
+      GIDSignIn.sharedInstance.signOut()
       guard let stored else { promise.resolve(["revoked": true]); return }
       var request = authRequest(origin, path: "/api/mobile/v1/auth/session", method: "DELETE")
       request.setValue("Bearer \(stored.token)", forHTTPHeaderField: "Authorization")
       let id = UUID()
-      let operation = AuthHTTPTask(request: request) { [weak self] result in
+      let task = AuthHTTPTask(request: request) { [weak self] result in
         self?.revocations.removeValue(forKey: id)
         let revoked: Bool
-        if case .success(let response) = result {
-          revoked = (200...299).contains(response.status) || response.status == 401
-        } else { revoked = false }
+        if case .success(let response) = result { revoked = (200...299).contains(response.status) || response.status == 401 }
+        else { revoked = false }
         promise.resolve(["revoked": revoked])
       }
-      revocations[id] = operation
-      operation.start()
+      revocations[id] = task
+      task.start()
     } catch { promise.reject("auth_storage_unavailable", "auth_storage_unavailable") }
   }
 }
