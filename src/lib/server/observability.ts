@@ -27,7 +27,7 @@ export function setTelemetryTracer(tracer: Tracer) {
 }
 
 export function errorKind(error: unknown) {
-  // Error messages, names, stacks and provider payloads may contain private text.
+  // Classifications supplement the complete exception retained in server logs.
   if (error instanceof DOMException && error.name === 'AbortError') return 'cancelled';
   if (error instanceof DOMException && error.name === 'TimeoutError') return 'timeout';
   if (error instanceof TypeError) return 'network_or_type';
@@ -35,7 +35,33 @@ export function errorKind(error: unknown) {
   return 'internal';
 }
 
-type LogFields = { outcome?: Outcome; durationMs?: number; status?: number; errorKind?: string };
+type LogFields = {
+  outcome?: Outcome;
+  durationMs?: number;
+  status?: number;
+  errorKind?: string;
+  error?: unknown;
+};
+
+function errorDetails(value: unknown, ancestors = new Set<object>()): unknown {
+  if (typeof value === 'bigint') return value.toString();
+  if (typeof value !== 'object' || value === null) return value;
+  if (ancestors.has(value)) return '[Circular reference]';
+  const parents = new Set(ancestors).add(value);
+  if (Array.isArray(value)) return value.map((item) => errorDetails(item, parents));
+  if (value instanceof Date) return value.toISOString();
+  const details: Record<string, unknown> = {};
+  if (value instanceof Error) {
+    details.name = value.name;
+    details.message = value.message;
+    details.stack = value.stack;
+  }
+  for (const key of Object.getOwnPropertyNames(value)) {
+    details[key] = errorDetails((value as Record<string, unknown>)[key], parents);
+  }
+  return details;
+}
+
 export function logEvent(
   operation: Operation,
   fields: LogFields = {},
@@ -43,19 +69,21 @@ export function logEvent(
 ) {
   if (process.env.OBSERVABILITY_LOGS === '0') return;
   const failed = fields.outcome === 'error' || (fields.status ?? 0) >= 500;
+  const { error, ...details } = fields;
   const record = {
     timestamp: new Date().toISOString(),
     service: 'bypage',
     level: failed ? 'error' : 'info',
     event: operation,
     ...(context ? { trace_id: context.traceId, span_id: context.spanId } : {}),
-    ...fields,
+    ...details,
+    ...(Object.hasOwn(fields, 'error') ? { error: errorDetails(error) } : {}),
   };
-  // Callers supply only classifications. Never pass Error, Request or arbitrary objects here.
+  // Preserve non-enumerable Error fields and every cause's full stack without truncation.
   try {
     (failed ? console.error : console.info)(JSON.stringify(record));
-  } catch {
-    /* best effort */
+  } catch (loggingError) {
+    console.error('Server log serialization failed', loggingError, record);
   }
 }
 
@@ -104,7 +132,7 @@ export function beginOperation(operation: Operation) {
           outcome,
           durationMs: Math.round(durationMs),
           ...(status !== undefined ? { status } : {}),
-          ...(error !== undefined ? { errorKind: errorKind(error) } : {}),
+          ...(error !== undefined ? { errorKind: errorKind(error), error } : {}),
         },
         context,
       );

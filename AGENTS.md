@@ -2,6 +2,7 @@
 
 - Keep work focused on multilingual reading and evidence-based AI assistance.
 - Preserve browser-local data and keep API keys out of persisted UI state and source control.
+- Unless the user explicitly requests otherwise, preserve complete server errors, including name, message, stack, causes, upstream error responses and request correlation. Do not encrypt, redact, truncate or omit diagnostic details by default. A generic client error must not replace the original server exception in logs. Keep logs within the existing protected logging system.
 - Do not add or run unit, integration, or end-to-end tests unless explicitly requested by the user. Type checking, building, and static source review are allowed. Report unverified behavior honestly.
 - Use original or properly licensed demo content. Do not commit users' books or notes.
 - Do not run live paid model requests unless explicitly requested.

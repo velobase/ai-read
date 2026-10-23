@@ -3,6 +3,7 @@ import { hashSession } from './auth';
 import { nativeAuthConfigured, nativeAuthOrigin } from './auth-config';
 import { database } from './database';
 import { accountBody } from './account-request';
+import { logEvent } from './observability';
 import {
   readMobilePermissions,
   type MobilePermission,
@@ -19,11 +20,18 @@ export class MobileAuthError extends Error {
   constructor(
     public code: string,
     public status = 401,
+    options?: ErrorOptions,
   ) {
-    super(code);
+    super(code, options);
+    this.name = 'MobileAuthError';
   }
 }
 export function mobileAuthFailure(error: unknown) {
+  logEvent('api.account', {
+    outcome: 'error',
+    status: error instanceof MobileAuthError ? error.status : 503,
+    error,
+  });
   return Response.json(
     { error: error instanceof MobileAuthError ? error.code : 'auth_unavailable' },
     {
@@ -35,8 +43,8 @@ export function mobileAuthFailure(error: unknown) {
 export async function mobileAuthBody(request: Request) {
   try {
     return await accountBody(request);
-  } catch {
-    throw new MobileAuthError('invalid_request', 400);
+  } catch (cause) {
+    throw new MobileAuthError('invalid_request', 400, { cause });
   }
 }
 function configured() {
