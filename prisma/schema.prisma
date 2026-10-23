@@ -26,6 +26,8 @@ model User {
   preferencesMutation String?
   books               Book[]
   aiConnection        AIConnection?
+  translationEditions TranslationEdition[]
+  translationSelections TranslationSelection[]
 }
 
 model AIConnection {
@@ -57,8 +59,6 @@ model Book {
   bookmarks    Bookmark[]
   chats        ChatTurn[]
   translations TranslationCache[]
-  translationEditions TranslationEdition[]
-  translationSelections TranslationSelection[]
 
   @@id([userId, id])
   @@unique([userId, sourceHash])
@@ -152,6 +152,7 @@ model TranslationEdition {
   bookId         String
   targetLanguage String
   sourceHash     String
+  source         Json
   profile        Json
   glossary       Json @default("[]")
   state          String @default("idle")
@@ -160,7 +161,7 @@ model TranslationEdition {
   leaseUntil     DateTime?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
-  book           Book @relation(fields: [userId, bookId], references: [userId, id], onDelete: Cascade)
+  user           User @relation(fields: [userId], references: [id], onDelete: Cascade)
   chapters       TranslationChapter[]
   selections     TranslationSelection[]
 
@@ -193,7 +194,7 @@ model TranslationSelection {
   bookId         String
   targetLanguage String
   editionId      String
-  book           Book @relation(fields: [userId, bookId], references: [userId, id], onDelete: Cascade)
+  user           User @relation(fields: [userId], references: [id], onDelete: Cascade)
   edition        TranslationEdition @relation(fields: [editionId], references: [id], onDelete: Cascade)
 
   @@id([userId, bookId, targetLanguage])

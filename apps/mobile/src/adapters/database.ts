@@ -20,7 +20,6 @@ import {
   notifyTranslationStore,
   readTranslationDisplay,
   readStoredTranslationVersion,
-  writeCompletedTranslation,
   type TranslationDisplay,
   type TranslationStoreGuard,
 } from './translation-store';
@@ -847,38 +846,6 @@ export async function selectParagraphTranslationVersion(
   notifyTranslationStore(lease.handle, bookId);
   check();
   return selected;
-}
-/** Commit only a completed paragraph; an existing selected translation always wins. */
-export async function saveTranslatedParagraph(
-  handle: LibraryHandle,
-  book: Book,
-  language: string,
-  paragraph: string,
-  text: string,
-  guard?: TranslationStoreGuard,
-): Promise<string> {
-  const check = () => {
-    if (guard && (guard.signal.aborted || !guard.isCurrent()))
-      throw Object.assign(new Error('cancelled'), { name: 'AbortError' });
-  };
-  check();
-  const db = await openLibraryDatabase(handle);
-  let saved = '';
-  await db.withExclusiveTransactionAsync(async (tx) => {
-    check();
-    const stored = await storedTranslationBook(tx, book.id);
-    if (
-      !stored ||
-      !sameBookContent(stored, book) ||
-      effectiveBookLanguage(stored) !== effectiveBookLanguage(book)
-    )
-      throw new Error('translation_source_changed');
-    saved = (await writeCompletedTranslation(tx, stored, language, paragraph, text)).text;
-    check();
-  });
-  notifyTranslationStore(handle, book.id);
-  check();
-  return saved;
 }
 export async function getPreference<T>(key: string, fallback: T): Promise<T> {
   const row = await (

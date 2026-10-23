@@ -30,7 +30,6 @@ async function runOne() {
     where: {
       state: 'active',
       ...available,
-      book: { deletedAt: null },
       chapters: {
         some: {
           state: { in: ['queued', 'running'] },
@@ -39,6 +38,7 @@ async function runOne() {
       },
     },
     orderBy: { updatedAt: 'asc' },
+    select: { id: true },
   });
   if (!candidate) return;
   const leaseToken = crypto.randomUUID();
@@ -52,9 +52,8 @@ async function runOne() {
   try {
     const edition = await database.translationEdition.findUniqueOrThrow({
       where: { id: candidate.id },
-      include: { book: true },
     });
-    if (edition.book.deletedAt || edition.state !== 'active') return;
+    if (edition.state !== 'active') return;
     const chapter = await database.translationChapter.findFirst({
       where: {
         editionId: edition.id,
@@ -65,13 +64,13 @@ async function runOne() {
     });
     if (!chapter) return;
     index = chapter.chapterIndex;
-    const book = edition.book.content as unknown as Book;
+    const book = edition.source as unknown as Book;
     const source = book.chapters[index];
     if (!source || (await contentHash(source)) !== chapter.sourceHash)
       throw new TranslationError('原文已变化，请创建新译本。');
     const profile = edition.profile as TranslationProfile;
     const config = await serverAIConfig(edition.userId);
-    // Credentials remain in the account store. A key never follows an old or
+    // Credentials remain in the platform secret. A key never follows an old or
     // caller-selected endpoint; the edition's model and style stay pinned.
     if (!config.baseUrl || normalizeAIUrl(config.baseUrl) !== normalizeAIUrl(profile.baseUrl))
       throw new TranslationError('模型服务地址已变化。请恢复原连接或创建新译本。');
@@ -121,10 +120,6 @@ async function runOne() {
         data: { glossary: json(terms) },
       });
       if (!owned.count) return;
-      const parent = await tx.book.findUnique({
-        where: { userId_id: { userId: edition.userId, id: edition.bookId } },
-      });
-      if (!parent || parent.deletedAt) return;
       await tx.translationChapter.update({
         where: {
           editionId_chapterIndex: { editionId: edition.id, chapterIndex: index! },
@@ -205,9 +200,8 @@ export function startTranslationWorker() {
     worker.running = true;
     try {
       await runOne();
-    } catch {
-      // A database outage leaves the durable job intact. Do not log credentials,
-      // book contents, or provider response bodies.
+    } catch (error) {
+      logException('translation.worker.tick', error);
     } finally {
       worker.running = false;
       worker.timer = setTimeout(() => void tick(), 2000);

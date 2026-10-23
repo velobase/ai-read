@@ -6,6 +6,7 @@ import type { Prisma } from '@/generated/prisma/client';
 import type { Book } from '../types';
 import {
   translationProfile,
+  translationBookSource,
   translationSource,
   planChapter,
   type TranslationEdition,
@@ -20,15 +21,10 @@ export class TranslationRequestError extends Error {
   constructor(
     message: string,
     public status = 400,
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
   }
-}
-export async function translationBook(userId: string, bookId: string) {
-  if (!validSyncId(bookId)) throw new TranslationRequestError('书籍编号无效。');
-  const row = await database.book.findUnique({ where: { userId_id: { userId, id: bookId } } });
-  if (!row || row.deletedAt) throw new TranslationRequestError('等待书籍同步后开始准备译文。', 409);
-  return row.content as unknown as Book;
 }
 export async function translationManifest(
   userId: string,
@@ -36,9 +32,15 @@ export async function translationManifest(
   language: string,
 ): Promise<TranslationManifest> {
   const rows = await database.translationEdition.findMany({
-    where: { userId, bookId, targetLanguage: language, book: { deletedAt: null } },
+    where: { userId, bookId, targetLanguage: language },
     orderBy: { createdAt: 'desc' },
-    include: {
+    select: {
+      id: true,
+      sourceHash: true,
+      profile: true,
+      state: true,
+      error: true,
+      createdAt: true,
       chapters: {
         orderBy: { chapterIndex: 'asc' },
         select: {
@@ -85,11 +87,18 @@ export async function changeTranslation(userId: string, body: Record<string, unk
   const action = body.action;
   if (!['prepare', 'new', 'pause', 'resume', 'select'].includes(String(action)))
     throw new TranslationRequestError('翻译操作无效。');
-  const book = await translationBook(userId, bookId);
+  if (!validSyncId(bookId)) throw new TranslationRequestError('书籍编号无效。');
+  let submitted: Book | undefined;
+  if (action === 'prepare' || action === 'new') {
+    try {
+      submitted = translationBookSource(body.book as Book);
+    } catch (cause) {
+      throw new TranslationRequestError('请提交完整的书籍原文。', 400, { cause });
+    }
+    if (submitted.id !== bookId) throw new TranslationRequestError('书籍编号不一致。');
+  }
+  const submittedHash = submitted ? await translationSource(submitted) : null;
   const index = Number(body.chapter ?? 0);
-  if (!Number.isInteger(index) || index < 0 || index >= book.chapters.length)
-    throw new TranslationRequestError('章节编号无效。');
-  const source = await translationSource(book);
   const config = await publicAIConfig(userId);
   const scope = body.scope === 'book' ? 'book' : 'chapter';
   const auto = body.auto === true;
@@ -98,10 +107,8 @@ export async function changeTranslation(userId: string, body: Record<string, unk
     throw new TranslationRequestError('翻译任务编号无效。');
   await database.$transaction(
     async (tx) => {
-      // Serialize selection + edition creation with sync writes for this account.
+      // Serialize edition creation and selection for the account, including retried requests.
       await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${userId} FOR UPDATE`;
-      const parent = await tx.book.findUnique({ where: { userId_id: { userId, id: bookId } } });
-      if (!parent || parent.deletedAt) throw new TranslationRequestError('书籍已移除。', 409);
       const key = { userId, bookId, targetLanguage: language };
       const selection = await tx.translationSelection.findUnique({
         where: { userId_bookId_targetLanguage: key },
@@ -117,15 +124,21 @@ export async function changeTranslation(userId: string, body: Record<string, unk
                 : selection?.editionId || '',
         },
       });
+      const book = submitted || (edition?.source as unknown as Book | undefined);
+      if (!book) throw new TranslationRequestError('没有找到这个译本。', 404);
+      if (!Number.isInteger(index) || index < 0 || index >= book.chapters.length)
+        throw new TranslationRequestError('章节编号无效。');
+      const source = submittedHash || (await translationSource(book));
       if (!edition && (action === 'prepare' || action === 'new')) {
-        if (!config.baseUrl || !config.model)
-          throw new TranslationRequestError('请先连接翻译模型。');
+        if (!config.baseUrl || !config.model || !config.hasKey)
+          throw new TranslationRequestError('平台翻译服务暂时不可用，请稍后重试。', 503);
         const profile = translationProfile({ ...config, baseUrl: normalizeAIUrl(config.baseUrl) });
         edition = await tx.translationEdition.create({
           data: {
             ...key,
             id: action === 'new' ? String(newId) : crypto.randomUUID(),
             sourceHash: source.hash,
+            source: json(book),
             profile: json(profile),
             chapters: {
               create: book.chapters.map((chapter, chapterIndex) => ({
@@ -148,6 +161,8 @@ export async function changeTranslation(userId: string, body: Record<string, unk
       // Match the worker's edition-before-chapter lock order. In particular,
       // reprioritizing a chapter must not deadlock its checkpoint transaction.
       await tx.$queryRaw`SELECT "id" FROM "TranslationEdition" WHERE "id" = ${edition.id} FOR UPDATE`;
+      if (action !== 'pause' && !submitted && body.sourceHash !== edition.sourceHash)
+        throw new TranslationRequestError('原文已变化，请创建新译本。', 409);
       if (action === 'select') {
         if (edition.sourceHash !== source.hash)
           throw new TranslationRequestError('这个译本的原文版本已变化。');

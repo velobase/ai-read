@@ -1,40 +1,15 @@
 import type { Book, Chapter, Settings } from './types';
 import { effectiveTranslationPrompt } from './translation-prompt';
 
-export const TRANSLATION_PIPELINE = 'chapter-v1';
-export type TranslationProfile = Pick<Settings, 'baseUrl' | 'model' | 'translationPrompt'>;
-export type Term = { source: string; target: string };
-export type TranslationSegment = { id: string; paragraphId: string; text: string; kind: string };
-export type TranslationChunk = { segments: TranslationSegment[]; context: string };
-export type ChunkResult = { segments: { id: string; text: string }[]; terms: Term[] };
-export type ChapterState = 'missing' | 'queued' | 'running' | 'ready' | 'error';
-export type ChapterProgress = {
-  index: number;
-  sourceHash: string;
-  state: ChapterState;
-  completedChunks: number;
-  totalChunks: number;
-  error?: string;
-};
-export type TranslationEdition = {
-  id: string;
-  bookId: string;
-  language: string;
-  sourceHash: string;
-  profile: TranslationProfile;
-  state: 'idle' | 'active' | 'paused' | 'error';
-  chapters: ChapterProgress[];
-  createdAt: number;
-  error?: string;
-};
-export type TranslationManifest = { selectedId: string | null; editions: TranslationEdition[] };
-export type ChapterTranslation = {
-  editionId: string;
-  bookId: string;
-  index: number;
-  sourceHash: string;
-  paragraphs: Record<string, string>;
-};
+export * from '../../packages/reading-core/src/translation-tasks';
+import type {
+  TranslationProfile,
+  TranslationChunk,
+  ChunkResult,
+  Term,
+  TranslationSegment,
+} from '../../packages/reading-core/src/translation-tasks';
+
 export type TranslationInput = {
   title: string;
   chapter: string;
@@ -53,18 +28,6 @@ export function translationProfile(settings: TranslationProfile): TranslationPro
     translationPrompt: effectiveTranslationPrompt(settings.translationPrompt),
   };
 }
-export async function contentHash(value: unknown) {
-  const hash = await crypto.subtle.digest(
-    'SHA-256',
-    new TextEncoder().encode(JSON.stringify(value)),
-  );
-  return Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, '0')).join('');
-}
-export async function translationSource(book: Book) {
-  const chapters = await Promise.all(book.chapters.map((c) => contentHash(c)));
-  return { chapters, hash: await contentHash([TRANSLATION_PIPELINE, book.language, chapters]) };
-}
-
 // Split only exceptionally long paragraphs. Every UTF-16 character belongs to
 // exactly one segment; only reference context is bounded/truncated.
 function splitText(text: string, limit = 5000) {
@@ -224,5 +187,3 @@ export function chunkInput(
         .slice(-4000) || '',
   };
 }
-export const editionNoteKey = (language: string, paragraph: string, edition: string) =>
-  `${language}:${paragraph}:edition-${edition}`;

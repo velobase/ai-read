@@ -78,10 +78,6 @@ export function createLibraryApiClient(transport: LibraryTransport) {
         ...(typeof body.aiContextKey === 'string' && /^[a-f0-9]{64}$/.test(body.aiContextKey)
           ? { aiContextKey: body.aiContextKey }
           : {}),
-        ...(typeof body.translationContextKey === 'string' &&
-        /^[a-f0-9]{64}$/.test(body.translationContextKey)
-          ? { translationContextKey: body.translationContextKey }
-          : {}),
       };
     },
   };

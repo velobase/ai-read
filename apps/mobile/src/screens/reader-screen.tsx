@@ -384,7 +384,7 @@ export function ReaderScreen({
   }, [book, library]);
   const scrollParagraphs = continuous ? allParagraphs : chapter.paragraphs;
   const translation = useChapterTranslation(book, value.translations, current, {
-    enabled: sheet === 'language' && sheetController.visible,
+    auto: prefs.mode !== 'original',
     initialKeys: value.translationKeys,
   });
   const baseTranslations = readingOverride

@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useIdentity } from '@/components/auth/identity-provider';
 import { storageUserId } from '@/lib/storage-scope';
-import { localTransaction, notifySyncDirty } from '@/lib/local-database';
+import { localTransaction } from '@/lib/local-database';
 import { ensureLocalBook } from '@/lib/sync-storage';
 import { translationKey } from '@/lib/ai';
 import { sameData } from '@/lib/sync-types';
@@ -22,6 +22,7 @@ import {
 import {
   editionNoteKey,
   translationSource,
+  translationBookSource,
   type ChapterTranslation,
   type TranslationManifest,
 } from '@/lib/translation-edition';
@@ -33,6 +34,7 @@ async function api(
   language: string,
   query: Record<string, string> = {},
   command?: TranslationCommand,
+  book?: Book,
 ) {
   const response = await fetch(
     '/api/translations?' + new URLSearchParams({ bookId, language, ...query }),
@@ -43,7 +45,17 @@ async function api(
         'x-reader-user': storageUserId() || '',
         ...(command ? { 'Content-Type': 'application/json' } : {}),
       },
-      body: command ? JSON.stringify({ bookId, language, ...command }) : undefined,
+      body: command
+        ? JSON.stringify({
+            bookId,
+            language,
+            ...command,
+            ...(book ? { sourceHash: (await translationSource(book)).hash } : {}),
+            ...((command.action === 'prepare' || command.action === 'new') && book
+              ? { book: translationBookSource(book) }
+              : {}),
+          })
+        : undefined,
       signal: AbortSignal.timeout(30000),
     },
   );
@@ -263,10 +275,8 @@ export function useBookTranslation(
       // Built-in books may not yet have a physical local record.
       const saved = await localTransaction('readwrite', (tx) => ensureLocalBook(tx, book.id));
       if (!saved) throw new Error('这本书已被删除。');
-      notifySyncDirty();
       if (accounts) {
-        window.dispatchEvent(new Event('ai-read-sync-now'));
-        const next = await api(book.id, settings.language, {}, command);
+        const next = await api(book.id, settings.language, {}, command, book);
         await cacheManifest(book.id, settings.language, next);
       } else await changeLocalTranslation(book, settings, command);
       translationChanged();
