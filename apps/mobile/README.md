@@ -6,14 +6,16 @@ From `apps/mobile`, run `npm ci`, then `npm run ios` for a local development bui
 
 Production builds use the EAS `production` profile. EAS manages the increasing iOS build number remotely. Keep `com.velobase.bypage` and the existing EAS project identity unchanged when updating the visible LeafRead / 叶子阅读 brand. Credentials are managed outside the repository; no server secrets are included in the native build.
 
-## Release 1.0.0 (7), 2026-10-23
+## Release 1.0.1 (9), 2026-10-23
 
-- EAS build: `624eccda-6de8-4a83-99b6-cad844ce7524`.
-- Backend release: `fa7240242504a119b0223704d0febc4b66e41cba`.
-- TestFlight external review and App Store review submitted; both showed **Waiting for Review** on 2026-10-23.
-- App Store submission: `55719494-8f5c-4fbd-b8fb-48b846980857`.
+- EAS build: `87049568-29de-4efc-b45a-ad6ea74d1026`; source commit: `41858909796bff613d891f6be0a8aef44ef8f13f`.
+- EAS upload: `db2cb69e-b23b-43b3-99d2-5e44472c7ee7`, completed successfully.
+- Backend release: `e6a6d5b7500909f7425e6e735ff8a070af0696ed`, deployed and healthy.
+- TestFlight internal testing is active. External review and App Store review both showed **Waiting for Review** on 2026-10-23.
+- App Store submission: `ad8e0c66-5349-43ad-9332-a1b2dfc15389`.
+- The earlier 1.0.0 (7) App Store and external beta submissions were withdrawn. Build 7 was removed from the external group; build 8 was canceled before upload.
 - Store availability: United States, free, automatic release after approval.
-- Static type checks, native Release simulator build and EAS distribution build passed. Manual simulator checks covered reading screens and opening Apple's official authorization page. Full sign-in, return-to-app and account deletion remain for the user to verify. No automated tests were run for this release.
+- Static type checks, Next.js production build, native Release simulator build and EAS distribution build passed. Manual simulator checks confirmed Apple's system account authorization prompt and the official Google SDK login page. Full sign-in, return-to-app, session renewal and account deletion remain for the user to verify. No automated tests were run for this release.
 
 Account sync requires separate authorization. Device books are copied to an account only by explicit user choice. Deletion revokes server sessions and Apple authorization, deletes account cloud data and queues local account-cache cleanup; device-library books remain.
 
